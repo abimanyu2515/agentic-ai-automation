@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Execution Report - 18ce5e1f-c136-454b-b58b-a5f0488a9d92</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            padding: 40px 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .header {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+        .header-main {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 20px;
+        }
+        .header-title h1 {
+            margin: 0 0 6px 0;
+            font-size: 24px;
+            color: #3b82f6;
+        }
+        .header-title p {
+            margin: 0;
+            color: #64748b;
+            font-size: 13px;
+            font-family: monospace;
+        }
+        .header-metadata {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .meta-row {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .meta-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 600px) {
+            .meta-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .meta-label {
+            font-size: 11px;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: bold;
+        }
+        .meta-value {
+            font-size: 15px;
+            color: #e2e8f0;
+            font-weight: 500;
+        }
+        .link-value {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+        .link-value:hover {
+            text-decoration: underline;
+        }
+        .badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .badge-completed { background-color: #10b981; color: #ffffff; }
+        .badge-failed { background-color: #ef4444; color: #ffffff; }
+        .badge-stopped { background-color: #f59e0b; color: #ffffff; }
+        
+        h2 {
+            font-size: 20px;
+            color: #f1f5f9;
+            margin-top: 32px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 8px;
+        }
+        
+        .step-card {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 24px;
+        }
+        @media (max-width: 768px) {
+            .step-card {
+                grid-template-columns: 1fr;
+            }
+        }
+        .step-left {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .step-right {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .step-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 12px;
+            margin-bottom: 12px;
+        }
+        .step-num {
+            background-color: #3b82f6;
+            color: #ffffff;
+            font-size: 12px;
+            font-weight: bold;
+            padding: 4px 10px;
+            border-radius: 6px;
+            text-transform: uppercase;
+        }
+        .step-title {
+            font-weight: bold;
+            font-size: 16px;
+            color: #e2e8f0;
+            flex-grow: 1;
+        }
+        .step-time {
+            font-family: monospace;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        .step-details {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            font-size: 14px;
+        }
+        .detail-row {
+            line-height: 1.6;
+            color: #cbd5e1;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #94a3b8;
+            display: block;
+            margin-bottom: 2px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .step-image img {
+            max-width: 100%;
+            max-height: 240px;
+            border-radius: 8px;
+            border: 1px solid #475569;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            object-fit: contain;
+        }
+        .no-image-box {
+            width: 100%;
+            height: 150px;
+            background-color: #0f172a;
+            border: 2px dashed #334155;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #475569;
+            font-size: 13px;
+        }
+        .summary-card {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 24px;
+            margin-top: 32px;
+        }
+        .summary-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #3b82f6;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-main">
+                <span class="badge badge-running">
+                    RUNNING
+                </span>
+                <div class="header-title">
+                    <h1>Enterprise Test Execution Report</h1>
+                    <p>Execution ID: 18ce5e1f-c136-454b-b58b-a5f0488a9d92</p>
+                </div>
+            </div>
+            <div class="header-metadata">
+                <div class="meta-row">
+                    <span class="meta-label">Website Under Test</span>
+                    <span class="meta-value">https://adactinhotelapp.com/</span>
+                </div>
+                <div class="meta-grid">
+                    <div class="meta-item">
+                        <span class="meta-label">Started At</span>
+                        <span class="meta-value">7/19/2026, 10:37:06 AM</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Execution Duration</span>
+                        <span class="meta-value">0.00 seconds</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Browser</span>
+                        <span class="meta-value">Chromium 149.0.7827.55</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Total Steps</span>
+                        <span class="meta-value">14</span>
+                    </div>
+                    <div class="meta-item" style="border-left: 2px solid #10b981; padding-left: 10px;">
+                        <span class="meta-label" style="color: #10b981;">Generated Order Number</span>
+                        <span class="meta-value" style="color: #10b981; font-weight: bold; font-family: monospace;">N/A</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <h2>Step-by-Step Walkthrough</h2>
+        <div class="steps-container">
+            
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 1</span>
+                <span class="step-title">Session restored from storage state</span>
+                <span class="step-time">+4.96s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Execute test step: 'Session restored from storage state'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Timeline logged event of type 'success'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Step executed successfully.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="no-image-box"><span>No Screenshot Captured</span></div>
+            </div>
+          </div>
+        
+
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 2</span>
+                <span class="step-title">Browser opened with clean context</span>
+                <span class="step-time">+6.47s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Execute test step: 'Browser opened with clean context'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Timeline logged event of type 'success'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Step executed successfully.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="no-image-box"><span>No Screenshot Captured</span></div>
+            </div>
+          </div>
+        
+
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 3</span>
+                <span class="step-title">Visual State Capture</span>
+                <span class="step-time">+29.06s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Capture screenshot to record browser visual state.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Visual state captured in file 'step-01-navigate_https_adactinhotelapp_com.png'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Screenshot image saved on disk.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="step-image"><img src="screenshots/step-01-navigate_https_adactinhotelapp_com.png" alt="Screenshot 3" /></div>
+            </div>
+          </div>
+        
+
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 4</span>
+                <span class="step-title">Navigate: https://adactinhotelapp.com/</span>
+                <span class="step-time">+29.17s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Execute test step: 'Navigate: https://adactinhotelapp.com/'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Browser successfully navigated / interacted. Verified visual state layout.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Step executed successfully.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="step-image"><img src="screenshots/step-01-navigate_https_adactinhotelapp_com.png" alt="Screenshot 4" /></div>
+            </div>
+          </div>
+        
+
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 5</span>
+                <span class="step-title">Visual State Capture</span>
+                <span class="step-time">+51.32s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Capture screenshot to record browser visual state.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Visual state captured in file 'step-02-type_text_locator_input_username.png'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Screenshot image saved on disk.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="step-image"><img src="screenshots/step-02-type_text_locator_input_username.png" alt="Screenshot 5" /></div>
+            </div>
+          </div>
+        
+
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 6</span>
+                <span class="step-title">Type text: locator('input#username')</span>
+                <span class="step-time">+51.33s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Execute test step: 'Type text: locator('input#username')'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Browser successfully navigated / interacted. Verified visual state layout.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Step executed successfully.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="step-image"><img src="screenshots/step-02-type_text_locator_input_username.png" alt="Screenshot 6" /></div>
+            </div>
+          </div>
+        
+
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 7</span>
+                <span class="step-title">Visual State Capture</span>
+                <span class="step-time">+69.34s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Capture screenshot to record browser visual state.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Visual state captured in file 'step-03-type_text_locator_input_password.png'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Screenshot image saved on disk.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="step-image"><img src="screenshots/step-03-type_text_locator_input_password.png" alt="Screenshot 7" /></div>
+            </div>
+          </div>
+        
+
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 8</span>
+                <span class="step-title">Type text: locator('input#password')</span>
+                <span class="step-time">+69.34s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Execute test step: 'Type text: locator('input#password')'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Browser successfully navigated / interacted. Verified visual state layout.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Step executed successfully.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="step-image"><img src="screenshots/step-03-type_text_locator_input_password.png" alt="Screenshot 8" /></div>
+            </div>
+          </div>
+        
+
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 9</span>
+                <span class="step-title">Visual State Capture</span>
+                <span class="step-time">+76.88s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Capture screenshot to record browser visual state.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Visual state captured in file 'step-04-click_locator_input_login.png'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Screenshot image saved on disk.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="step-image"><img src="screenshots/step-04-click_locator_input_login.png" alt="Screenshot 9" /></div>
+            </div>
+          </div>
+        
+
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 10</span>
+                <span class="step-title">Click: locator('input#login')</span>
+                <span class="step-time">+76.89s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Execute test step: 'Click: locator('input#login')'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Browser successfully navigated / interacted. Verified visual state layout.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Step executed successfully.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="step-image"><img src="screenshots/step-04-click_locator_input_login.png" alt="Screenshot 10" /></div>
+            </div>
+          </div>
+        
+
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 11</span>
+                <span class="step-title">Session storage state saved</span>
+                <span class="step-time">+77.03s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Execute test step: 'Session storage state saved'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Timeline logged event of type 'success'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Step executed successfully.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="no-image-box"><span>No Screenshot Captured</span></div>
+            </div>
+          </div>
+        
+
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 12</span>
+                <span class="step-title">trace Generated</span>
+                <span class="step-time">+80.07s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Execute test step: 'trace Generated'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Timeline logged event of type 'success'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Step executed successfully.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="no-image-box"><span>No Screenshot Captured</span></div>
+            </div>
+          </div>
+        
+
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 13</span>
+                <span class="step-title">video Generated</span>
+                <span class="step-time">+80.15s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Execute test step: 'video Generated'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Timeline logged event of type 'success'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Step executed successfully.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="no-image-box"><span>No Screenshot Captured</span></div>
+            </div>
+          </div>
+        
+
+          <div class="step-card">
+            <div class="step-left">
+              <div class="step-header">
+                <span class="step-num">Step 14</span>
+                <span class="step-title">Simulation video saved: page@fbc7f4680a5701646d68b7c75a62e6e5.webm</span>
+                <span class="step-time">+80.16s</span>
+              </div>
+              <div class="step-details">
+                <div class="detail-row">
+                  <span class="detail-label">Actions Taken</span>
+                  Execute test step: 'Simulation video saved: page@fbc7f4680a5701646d68b7c75a62e6e5.webm'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Observation</span>
+                  Timeline logged event of type 'success'.
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Result</span>
+                  Step executed successfully.
+                </div>
+              </div>
+            </div>
+            <div class="step-right">
+              <div class="no-image-box"><span>No Screenshot Captured</span></div>
+            </div>
+          </div>
+        
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-title">Execution Summary</div>
+            <div style="line-height: 1.6; color: #cbd5e1;">
+                The automated test execution encountered errors or assertions failed. Verification aborted. Sequential logs have been persisted for failure diagnostics.
+            </div>
+        </div>
+    </div>
+</body>
+</html>

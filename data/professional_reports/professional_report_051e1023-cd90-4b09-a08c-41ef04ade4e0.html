@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Valid Login with Username and Password - Test Execution Report</title>
+    <style>
+        /* Base Styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+            line-height: 1.6;
+            padding: 40px 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        /* Typography */
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            color: #1e293b;
+        }
+        
+        h2 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 16px;
+        }
+        
+        h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #475569;
+            margin-bottom: 12px;
+        }
+        
+        p {
+            font-size: 14px;
+            color: #64748b;
+            margin-bottom: 12px;
+        }
+        
+        /* Status Colors */
+        .status-pass {
+            color: #10b981;
+            background-color: #d1fae5;
+        }
+        
+        .status-fail {
+            color: #ef4444;
+            background-color: #fee2e2;
+        }
+        
+        .status-warning {
+            color: #f59e0b;
+            background-color: #fef3c7;
+        }
+        
+        .status-info {
+            color: #3b82f6;
+            background-color: #dbeafe;
+        }
+        
+        /* Cards */
+        .card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        
+        /* Links */
+        a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+        
+        a:hover {
+            text-decoration: underline;
+        }
+        
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+        
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        th {
+            background-color: #f8fafc;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #64748b;
+        }
+        
+        /* Grid */
+        .grid {
+            display: grid;
+            gap: 16px;
+        }
+        
+        .grid-2 {
+            grid-template-columns: repeat(2, 1fr);
+        }
+        
+        .grid-4 {
+            grid-template-columns: repeat(4, 1fr);
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .grid-2, .grid-4 {
+                grid-template-columns: 1fr;
+            }
+            
+            body {
+                padding: 20px 16px;
+            }
+            
+            .card {
+                padding: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        
+    <div class="card report-header">
+    <div class="header-main" style="display: flex; align-items: center; gap: 20px; padding-bottom: 24px; border-bottom: 1px solid #334155; margin-bottom: 24px;">
+        <span class="badge status-fail">
+            ValidationStatus.FAIL
+        </span>
+        <div class="header-title">
+            <h1 style="margin: 0 0 8px 0; color: #f8fafc;">TEST EXECUTION REPORT</h1>
+            <p class="execution-id" style="font-size: 13px; color: #94a3b8; font-family: monospace; margin: 0;">
+                Execution ID: 051e1023-cd90-4b09-a08c-41ef04ade4e0
+            </p>
+        </div>
+    </div>
+    
+    <div class="header-scenario" style="margin-bottom: 24px;">
+        <div class="scenario-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 4px;">
+            Scenario
+        </div>
+        <div class="scenario-value" style="font-size: 16px; font-weight: 500; color: #e2e8f0;">
+            Valid Login with Username and Password
+        </div>
+    </div>
+    
+    <div class="header-metadata">
+        <div class="grid grid-4">
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 4px;">
+                    Website
+                </div>
+                <div class="meta-value" style="font-size: 14px; font-weight: 500; color: #e2e8f0;">
+                    <a href="https://example.com" target="_blank" style="color: #3b82f6; text-decoration: none;">https://example.com</a>
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 4px;">
+                    Browser
+                </div>
+                <div class="meta-value" style="font-size: 14px; font-weight: 500; color: #e2e8f0;">
+                    Chromium 
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 4px;">
+                    Start Time
+                </div>
+                <div class="meta-value" style="font-size: 14px; font-weight: 500; color: #e2e8f0;">
+                    2026-07-19 11:15:43 UTC
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 4px;">
+                    Duration
+                </div>
+                <div class="meta-value" style="font-size: 14px; font-weight: 500; color: #e2e8f0;">
+                    53.10 seconds
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 4px;">
+                    Total Validations
+                </div>
+                <div class="meta-value" style="font-size: 14px; font-weight: 500; color: #e2e8f0;">
+                    4
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 4px;">
+                    Overall Result
+                </div>
+                <div class="meta-value status-fail" style="font-size: 14px; font-weight: 700;">
+                    ValidationStatus.FAIL
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .report-header {
+        background: #1e293b;
+        color: #f8fafc;
+    }
+</style>
+    <div class="card executive-summary">
+    <div class="executive-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0;">
+        <h2 style="margin: 0;">Executive Summary</h2>
+        <div class="overall-result">
+            <span class="badge status-fail">
+                OVERALL RESULT: ValidationStatus.FAIL
+            </span>
+        </div>
+    </div>
+    
+    <div class="executive-content">
+        <div class="executive-narrative" style="margin-bottom: 20px;">
+            <p style="font-size: 15px; color: #475569; line-height: 1.7;">
+                The test attempted to validate the standard login workflow where a user provides a username and password to access the Welcome Dashboard. However, the login submission step failed, preventing the successful completion of this core business process. As a result, users could not be redirected to their personalized dashboard.
+            </p>
+        </div>
+        
+        
+        
+        
+        <div class="executive-section" style="margin-bottom: 20px;">
+            <h3 style="color: #ef4444;">Critical Issues</h3>
+            <ul style="list-style: none; padding: 0;">
+                
+                <li style="padding: 8px 0; color: #475569; display: flex; align-items: center; gap: 8px;">
+                    <span style="color: #ef4444; font-weight: bold;">✗</span>
+                    Login submission failed during testing, blocking access to the Welcome Dashboard.
+                </li>
+                
+                <li style="padding: 8px 0; color: #475569; display: flex; align-items: center; gap: 8px;">
+                    <span style="color: #ef4444; font-weight: bold;">✗</span>
+                    No validations were successfully passed, indicating a fundamental breakdown in the login flow.
+                </li>
+                
+                <li style="padding: 8px 0; color: #475569; display: flex; align-items: center; gap: 8px;">
+                    <span style="color: #ef4444; font-weight: bold;">✗</span>
+                    The core business outcome—user redirection to a personalized dashboard—could not be achieved.
+                </li>
+                
+                <li style="padding: 8px 0; color: #475569; display: flex; align-items: center; gap: 8px;">
+                    <span style="color: #ef4444; font-weight: bold;">✗</span>
+                    System failed to process the login submission after entering valid credentials.
+                </li>
+                
+            </ul>
+        </div>
+        
+        
+        
+        <div class="executive-section" style="margin-bottom: 20px;">
+            <h3>Recommendations</h3>
+            <ul style="list-style: none; padding: 0;">
+                
+                <li style="padding: 8px 0; color: #475569; display: flex; align-items: center; gap: 8px;">
+                    <span style="color: #3b82f6; font-weight: bold;">→</span>
+                    Investigate the login submission mechanism to identify the root cause of the failure.
+                </li>
+                
+                <li style="padding: 8px 0; color: #475569; display: flex; align-items: center; gap: 8px;">
+                    <span style="color: #3b82f6; font-weight: bold;">→</span>
+                    Re-run the test after the fix is implemented to ensure the entire login workflow functions as expected.
+                </li>
+                
+            </ul>
+        </div>
+        
+        
+        <div class="executive-section">
+            <h3>Business Rule Compliance</h3>
+            <p style="font-size: 14px; color: #64748b; margin-top: 8px;">
+                No business rules were validated during this test, as the core login submission step failed before any rules could be evaluated.
+            </p>
+        </div>
+    </div>
+</div>
+    <div class="card validation-summary">
+    <div class="summary-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0;">
+        <h2 style="margin: 0;">Validation Summary</h2>
+        <div class="validation-count" style="background: #f1f5f9; color: #64748b; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;">
+            4 Validations
+        </div>
+    </div>
+    
+    <div class="summary-checklist" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px;">
+        
+        <div class="checklist-item status-warning" style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 6px; font-size: 14px; color: #475569;">
+            <span class="check-icon" style="font-size: 16px; font-weight: bold;">
+                !
+            </span>
+            <span class="check-text">Login Page Accessed</span>
+        </div>
+        
+        <div class="checklist-item status-warning" style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 6px; font-size: 14px; color: #475569;">
+            <span class="check-icon" style="font-size: 16px; font-weight: bold;">
+                !
+            </span>
+            <span class="check-text">Username Entered Successfully</span>
+        </div>
+        
+        <div class="checklist-item status-warning" style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 6px; font-size: 14px; color: #475569;">
+            <span class="check-icon" style="font-size: 16px; font-weight: bold;">
+                !
+            </span>
+            <span class="check-text">Password Entered Successfully</span>
+        </div>
+        
+        <div class="checklist-item status-fail" style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 6px; font-size: 14px; color: #475569;">
+            <span class="check-icon" style="font-size: 16px; font-weight: bold;">
+                ✗
+            </span>
+            <span class="check-text">Login Submission Triggered</span>
+        </div>
+        
+    </div>
+    
+    <div class="summary-stats" style="display: flex; gap: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0;">
+        <div class="stat-item" style="display: flex; flex-direction: column; gap: 4px;">
+            <span class="stat-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748b;">Passed</span>
+            <span class="stat-value stat-pass" style="font-size: 24px; font-weight: 700; color: #16a34a;">0</span>
+        </div>
+        <div class="stat-item" style="display: flex; flex-direction: column; gap: 4px;">
+            <span class="stat-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748b;">Failed</span>
+            <span class="stat-value stat-fail" style="font-size: 24px; font-weight: 700; color: #dc2626;">1</span>
+        </div>
+        <div class="stat-item" style="display: flex; flex-direction: column; gap: 4px;">
+            <span class="stat-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748b;">Warnings</span>
+            <span class="stat-value stat-warning" style="font-size: 24px; font-weight: 700; color: #d97706;">0</span>
+        </div>
+    </div>
+</div>
+
+<style>
+    .checklist-item.status-pass {
+        background: #f0fdf4;
+    }
+    
+    .checklist-item.status-fail {
+        background: #fef2f2;
+    }
+    
+    .checklist-item.status-warning {
+        background: #fffbeb;
+    }
+    
+    .checklist-item.status-pass .check-icon {
+        color: #16a34a;
+    }
+    
+    .checklist-item.status-fail .check-icon {
+        color: #dc2626;
+    }
+    
+    .checklist-item.status-warning .check-icon {
+        color: #d97706;
+    }
+</style>
+    
+    
+    <div class="validation-details">
+        <h2 style="margin: 32px 0 24px 0;">Validation Details</h2>
+        
+            <div class="card validation-card" data-status="ValidationStatus.INFO">
+    <div class="validation-header" style="display: flex; align-items: center; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; margin-bottom: 16px;">
+        <div class="validation-title" style="font-size: 16px; font-weight: 600; color: #1e293b; flex-grow: 1;">
+            Login Page Accessed
+        </div>
+        <div class="validation-status">
+            <span class="badge status-info">
+                ValidationStatus.INFO
+            </span>
+        </div>
+    </div>
+    
+    <div class="validation-body" style="display: flex; flex-direction: column;">
+        <div class="validation-content" style="display: flex; flex-direction: column; gap: 16px;">
+            <div class="validation-observation">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Observation
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    The DOM state shows no captured data, but the execution proceeded from step 1 to step 2 without error. The timeline events do not indicate any page load failures. Given the lack of explicit assertions, the action appears to have completed successfully.
+                </div>
+            </div>
+            
+            <div class="validation-confidence">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Confidence
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    <span class="confidence-score" style="font-weight: 700; color: #3b82f6; margin-right: 8px;">60%</span>
+                    <span class="confidence-reasoning" style="color: #64748b; font-style: italic;">No explicit DOM or URL evidence, but sequential step execution suggests success.</span>
+                </div>
+            </div>
+            
+            <div class="validation-result">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Result
+                </div>
+                <div class="field-value status-info" style="font-size: 14px; font-weight: 600;">
+                    ValidationStatus.INFO
+                </div>
+            </div>
+            
+            <div class="validation-action">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Action Taken
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    Navigated to application login page.
+                </div>
+            </div>
+            
+            <div class="validation-evidence">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Evidence
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    <a href="#evidence-1" class="evidence-link" style="color: #3b82f6; text-decoration: none; font-weight: 500;">
+                        Screenshot 1
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .validation-card[data-status="pass"] {
+        border-left: 4px solid #10b981;
+    }
+    
+    .validation-card[data-status="fail"] {
+        border-left: 4px solid #ef4444;
+    }
+    
+    .validation-card[data-status="warning"] {
+        border-left: 4px solid #f59e0b;
+    }
+    
+    .validation-card[data-status="info"] {
+        border-left: 4px solid #3b82f6;
+    }
+</style>
+        
+            <div class="card validation-card" data-status="ValidationStatus.INFO">
+    <div class="validation-header" style="display: flex; align-items: center; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; margin-bottom: 16px;">
+        <div class="validation-title" style="font-size: 16px; font-weight: 600; color: #1e293b; flex-grow: 1;">
+            Username Entered Successfully
+        </div>
+        <div class="validation-status">
+            <span class="badge status-info">
+                ValidationStatus.INFO
+            </span>
+        </div>
+    </div>
+    
+    <div class="validation-body" style="display: flex; flex-direction: column;">
+        <div class="validation-content" style="display: flex; flex-direction: column; gap: 16px;">
+            <div class="validation-observation">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Observation
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    The DOM state does not record the username input field or entered value. The timeline events show no errors during step 2. The lack of assertions means we cannot confirm the username was correctly entered into the field.
+                </div>
+            </div>
+            
+            <div class="validation-confidence">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Confidence
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    <span class="confidence-score" style="font-weight: 700; color: #3b82f6; margin-right: 8px;">50%</span>
+                    <span class="confidence-reasoning" style="color: #64748b; font-style: italic;">No direct evidence of input, but step progression without interruption suggests the action was performed.</span>
+                </div>
+            </div>
+            
+            <div class="validation-result">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Result
+                </div>
+                <div class="field-value status-info" style="font-size: 14px; font-weight: 600;">
+                    ValidationStatus.INFO
+                </div>
+            </div>
+            
+            <div class="validation-action">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Action Taken
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    Entered registered username into the username field.
+                </div>
+            </div>
+            
+            <div class="validation-evidence">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Evidence
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    <a href="#evidence-2" class="evidence-link" style="color: #3b82f6; text-decoration: none; font-weight: 500;">
+                        Screenshot 2
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .validation-card[data-status="pass"] {
+        border-left: 4px solid #10b981;
+    }
+    
+    .validation-card[data-status="fail"] {
+        border-left: 4px solid #ef4444;
+    }
+    
+    .validation-card[data-status="warning"] {
+        border-left: 4px solid #f59e0b;
+    }
+    
+    .validation-card[data-status="info"] {
+        border-left: 4px solid #3b82f6;
+    }
+</style>
+        
+            <div class="card validation-card" data-status="ValidationStatus.INFO">
+    <div class="validation-header" style="display: flex; align-items: center; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; margin-bottom: 16px;">
+        <div class="validation-title" style="font-size: 16px; font-weight: 600; color: #1e293b; flex-grow: 1;">
+            Password Entered Successfully
+        </div>
+        <div class="validation-status">
+            <span class="badge status-info">
+                ValidationStatus.INFO
+            </span>
+        </div>
+    </div>
+    
+    <div class="validation-body" style="display: flex; flex-direction: column;">
+        <div class="validation-content" style="display: flex; flex-direction: column; gap: 16px;">
+            <div class="validation-observation">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Observation
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    Similar to step 2, DOM state does not capture the password field state. No timeline errors are reported. The user successfully moved to step 4, indicating the password entry did not cause a failure.
+                </div>
+            </div>
+            
+            <div class="validation-confidence">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Confidence
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    <span class="confidence-score" style="font-weight: 700; color: #3b82f6; margin-right: 8px;">50%</span>
+                    <span class="confidence-reasoning" style="color: #64748b; font-style: italic;">No explicit validation of password entry, but step flow continues without errors.</span>
+                </div>
+            </div>
+            
+            <div class="validation-result">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Result
+                </div>
+                <div class="field-value status-info" style="font-size: 14px; font-weight: 600;">
+                    ValidationStatus.INFO
+                </div>
+            </div>
+            
+            <div class="validation-action">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Action Taken
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    Entered the associated password into the password field.
+                </div>
+            </div>
+            
+            <div class="validation-evidence">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Evidence
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    <a href="#evidence-3" class="evidence-link" style="color: #3b82f6; text-decoration: none; font-weight: 500;">
+                        Screenshot 3
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .validation-card[data-status="pass"] {
+        border-left: 4px solid #10b981;
+    }
+    
+    .validation-card[data-status="fail"] {
+        border-left: 4px solid #ef4444;
+    }
+    
+    .validation-card[data-status="warning"] {
+        border-left: 4px solid #f59e0b;
+    }
+    
+    .validation-card[data-status="info"] {
+        border-left: 4px solid #3b82f6;
+    }
+</style>
+        
+            <div class="card validation-card" data-status="ValidationStatus.FAIL">
+    <div class="validation-header" style="display: flex; align-items: center; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; margin-bottom: 16px;">
+        <div class="validation-title" style="font-size: 16px; font-weight: 600; color: #1e293b; flex-grow: 1;">
+            Login Submission Triggered
+        </div>
+        <div class="validation-status">
+            <span class="badge status-fail">
+                ValidationStatus.FAIL
+            </span>
+        </div>
+    </div>
+    
+    <div class="validation-body" style="display: flex; flex-direction: column;">
+        <div class="validation-content" style="display: flex; flex-direction: column; gap: 16px;">
+            <div class="validation-observation">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Observation
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    The timeline events do not capture the button click or any resulting navigation. The DOM state after step 4 is not captured. No assertions verify the expected redirect to the Welcome Dashboard. The test execution data lacks any post-login state.
+                </div>
+            </div>
+            
+            <div class="validation-confidence">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Confidence
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    <span class="confidence-score" style="font-weight: 700; color: #3b82f6; margin-right: 8px;">30%</span>
+                    <span class="confidence-reasoning" style="color: #64748b; font-style: italic;">No evidence of button click, response handling, or redirect. The test environment recorded no changes.</span>
+                </div>
+            </div>
+            
+            <div class="validation-result">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Result
+                </div>
+                <div class="field-value status-fail" style="font-size: 14px; font-weight: 600;">
+                    ValidationStatus.FAIL
+                </div>
+            </div>
+            
+            <div class="validation-action">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Action Taken
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    Clicked the Login button.
+                </div>
+            </div>
+            
+            <div class="validation-evidence">
+                <div class="field-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Evidence
+                </div>
+                <div class="field-value" style="font-size: 14px; line-height: 1.6; color: #475569;">
+                    <a href="#evidence-4" class="evidence-link" style="color: #3b82f6; text-decoration: none; font-weight: 500;">
+                        Screenshot 4
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .validation-card[data-status="pass"] {
+        border-left: 4px solid #10b981;
+    }
+    
+    .validation-card[data-status="fail"] {
+        border-left: 4px solid #ef4444;
+    }
+    
+    .validation-card[data-status="warning"] {
+        border-left: 4px solid #f59e0b;
+    }
+    
+    .validation-card[data-status="info"] {
+        border-left: 4px solid #3b82f6;
+    }
+</style>
+        
+    </div>
+    
+    
+    <div class="report-footer" style="text-align: center; padding: 32px 0; margin-top: 32px; border-top: 1px solid #e2e8f0;">
+    <p style="font-size: 12px; color: #94a3b8; margin: 0;">
+        Generated by AI Test Automation Platform
+    </p>
+    <p style="font-size: 11px; color: #cbd5e1; margin: 4px 0 0 0;">
+        2026-07-19 05:48:09 UTC
+    </p>
+</div>
+
+    </div>
+</body>
+</html>

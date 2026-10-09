@@ -1,0 +1,149 @@
+<div class="card validation-card" data-status="{{ validation.result.value }}" id="validation-{{ validation_index }}">
+    <div class="validation-header" style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 24px; border-bottom: 1px solid #e2e8f0; margin-bottom: 24px;">
+        <div class="validation-title-group" style="display: flex; align-items: center; gap: 12px;">
+            <div class="validation-number" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: #f1f5f9; border-radius: 8px; font-size: 14px; font-weight: 600; color: #64748b;">
+                {{ validation_index }}
+            </div>
+            <div class="validation-title" style="font-size: 18px; font-weight: 600; color: #1e293b; line-height: 1.3;">
+                {{ validation.validation_title }}
+            </div>
+        </div>
+        <div class="validation-status">
+            <span class="badge {{ 'status-pass' if validation.result.value == 'PASS' else 'status-fail' if validation.result.value == 'FAIL' else 'status-warning' if validation.result.value == 'WARNING' else 'status-info' }}">
+                {{ validation.result.value }}
+            </span>
+        </div>
+    </div>
+    
+    <div class="validation-body" style="display: flex; flex-direction: column; gap: 24px;">
+        <div class="validation-goal">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                Objective
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                {{ validation.business_goal }}
+            </div>
+        </div>
+        
+        <div class="validation-observation">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                Observation
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                {{ validation.observations }}
+            </div>
+        </div>
+        
+        <div class="validation-expected-actual" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+            <div class="validation-expected">
+                <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Expected Result
+                </div>
+                <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                    {{ validation.expected_result }}
+                </div>
+            </div>
+            <div class="validation-actual">
+                <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    Actual Result
+                </div>
+                <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                    {{ validation.actual_result }}
+                </div>
+            </div>
+        </div>
+        
+        <div class="validation-action">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Action Performed
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                {{ validation.action_taken }}
+            </div>
+        </div>
+        
+        {% if validation.evidence_url %}
+        <div class="validation-screenshot">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                Evidence
+            </div>
+            <div class="screenshot-container" style="margin-top: 12px; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #f8fafc; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <a href="{{ validation.evidence_url }}" target="_blank" style="display: block; text-decoration: none;">
+                    <img src="{{ validation.evidence_url }}" alt="Evidence screenshot" style="width: 100%; max-width: 800px; height: auto; display: block; cursor: pointer;" />
+                </a>
+            </div>
+        </div>
+        {% endif %}
+        
+        <div class="validation-source">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Source
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569; display: flex; align-items: center; gap: 16px;">
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Playwright execution
+                </span>
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Timeline event
+                </span>
+                {% if validation.evidence != 'No screenshot' %}
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Screenshot
+                </span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .validation-card[data-status="pass"] {
+        border-left: 4px solid #10b981;
+    }
+    
+    .validation-card[data-status="fail"] {
+        border-left: 4px solid #ef4444;
+    }
+    
+    .validation-card[data-status="warning"] {
+        border-left: 4px solid #f59e0b;
+    }
+    
+    .validation-card[data-status="info"] {
+        border-left: 4px solid #3b82f6;
+    }
+    
+    @media (max-width: 768px) {
+        .validation-expected-actual {
+            grid-template-columns: 1fr;
+        }
+        
+        .validation-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        
+        .validation-title-group {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        
+        .validation-source .field-value {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+    }
+</style>

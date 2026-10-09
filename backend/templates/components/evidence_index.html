@@ -1,0 +1,28 @@
+{% if context.evidence %}
+<div class="card evidence-index" id="evidence-index">
+    <div class="section-header" style="margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0;">
+        <h2 style="margin: 0;">Evidence Index</h2>
+    </div>
+    
+    <div class="evidence-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px;">
+        {% for evidence in context.evidence %}
+        <div class="evidence-item" id="evidence-{{ evidence.number }}" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px;">
+            <div class="evidence-number" style="font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 8px;">
+                Screenshot {{ evidence.number }}
+            </div>
+            <div class="evidence-description" style="font-size: 14px; color: #475569; margin-bottom: 8px;">
+                {{ evidence.description }}
+            </div>
+            <div class="evidence-related" style="font-size: 12px; color: #94a3b8; margin-bottom: 12px;">
+                Related: {{ evidence.related_validations | join(', ') if evidence.related_validations else 'None' }}
+            </div>
+            {% if evidence.thumbnail %}
+            <div class="evidence-thumbnail" style="text-align: center;">
+                <img src="{{ evidence.thumbnail }}" alt="Screenshot {{ evidence.number }}" style="max-width: 100%; height: auto; border-radius: 4px; border: 1px solid #e2e8f0;" />
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}

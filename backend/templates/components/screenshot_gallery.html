@@ -1,0 +1,40 @@
+<div class="card screenshot-gallery" id="screenshot-gallery">
+    <div class="gallery-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid #e2e8f0;">
+        <h2 style="margin: 0; display: flex; align-items: center; gap: 12px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            Screenshot Gallery
+        </h2>
+        <div class="gallery-count" style="background: #f1f5f9; color: #64748b; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;">
+            {{ context.validations|selectattr('evidence_url')|list|length }} Screenshots
+        </div>
+    </div>
+    
+    <div class="gallery-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px;">
+        {% for validation in context.validations %}
+            {% set validation_index = loop.index %}
+            {% if validation.evidence_url %}
+            <div class="gallery-item" style="display: flex; flex-direction: column; gap: 12px;">
+                <a href="{{ validation.evidence_url }}" target="_blank" style="display: block; text-decoration: none; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #f8fafc; transition: box-shadow 0.2s, transform 0.2s; cursor: pointer;" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'; this.style.transform='translateY(0)'">
+                    <img src="{{ validation.evidence_url }}" alt="Screenshot {{ validation_index }}" style="width: 100%; height: 200px; object-fit: cover; display: block;" />
+                </a>
+                <div class="gallery-item-info" style="padding: 8px 0;">
+                    <div class="gallery-item-title" style="font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">
+                        Step {{ validation_index }}
+                    </div>
+                    <div class="gallery-item-description" style="font-size: 13px; color: #64748b; line-height: 1.4;">
+                        {{ validation.validation_title[:40] }}{% if validation.validation_title|length > 40 %}...{% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<style>
+    @media (max-width: 768px) {
+        .gallery-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>

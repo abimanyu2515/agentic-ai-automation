@@ -1,0 +1,53 @@
+workflow:
+  mode: sequential          # sequential | supervisor
+  human_review_enabled: true
+  evaluation_threshold: 0.75
+
+agents:
+  requirement: true
+  scenario: true
+  testcase: true
+  evaluation: true
+  human_approval: true
+  playwright: false
+  execution: false
+  report: false
+
+llm:
+  provider: openai          # openai | anthropic | ollama | groq
+  model: gpt-4o-mini
+  temperature: 0.2
+
+browser:
+  type: chromium            # chromium | firefox | webkit
+  headless: true
+
+rag:
+  enabled: false
+  vector_db_provider: chroma
+  vector_db_path: ./data/vector_store
+  ragflow_api_base: http://localhost:9380
+  ragflow_api_key: ~
+  ragflow_dataset_id: ~
+
+generation:
+  scenario_count: 3
+
+evaluation:
+  duplicate_similarity_threshold: 0.75
+  relevance_rejection_threshold: 0.3
+
+playwright:
+  base_url: https://adactinhotelapp.com/
+  browser: chromium
+  headless: true
+  timeout: 60
+  retries: 0
+  workspace_url: http://localhost:3000
+
+repository:
+  provider: json           # json | postgres
+  database_url: postgresql+psycopg2://postgres:postgres@localhost:5432/agentic_ai
+  pool_size: 10
+  max_overflow: 20
+  pool_timeout: 30

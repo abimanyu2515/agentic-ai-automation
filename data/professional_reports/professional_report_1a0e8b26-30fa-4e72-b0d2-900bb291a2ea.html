@@ -1,0 +1,1454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Successful login with valid credentials - Test Execution Report</title>
+    <style>
+        /* Base Styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #ffffff;
+            color: #1e293b;
+            line-height: 1.6;
+            padding: 0;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+        
+        /* Typography */
+        h1 {
+            font-size: 32px;
+            font-weight: 700;
+            color: #0f172a;
+            letter-spacing: -0.5px;
+        }
+        
+        h2 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 24px;
+            letter-spacing: -0.25px;
+        }
+        
+        h3 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 16px;
+            letter-spacing: -0.25px;
+        }
+        
+        p {
+            font-size: 15px;
+            color: #64748b;
+            margin-bottom: 16px;
+            line-height: 1.7;
+        }
+        
+        /* Status Colors */
+        .status-pass {
+            color: #059669;
+            background-color: #d1fae5;
+            border: 1px solid #10b981;
+        }
+        
+        .status-fail {
+            color: #dc2626;
+            background-color: #fee2e2;
+            border: 1px solid #ef4444;
+        }
+        
+        .status-warning {
+            color: #d97706;
+            background-color: #fef3c7;
+            border: 1px solid #f59e0b;
+        }
+        
+        .status-info {
+            color: #2563eb;
+            background-color: #dbeafe;
+            border: 1px solid #3b82f6;
+        }
+        
+        /* Cards */
+        .card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 32px;
+            margin-bottom: 32px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.1);
+        }
+        
+        /* Badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 8px 20px;
+            border-radius: 9999px;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        /* Links */
+        a {
+            color: #2563eb;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        a:hover {
+            text-decoration: underline;
+        }
+        
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+        
+        th, td {
+            padding: 16px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        th {
+            background-color: #f8fafc;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #64748b;
+        }
+        
+        /* Grid */
+        .grid {
+            display: grid;
+            gap: 24px;
+        }
+        
+        .grid-2 {
+            grid-template-columns: repeat(2, 1fr);
+        }
+        
+        .grid-3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+        
+        .grid-4 {
+            grid-template-columns: repeat(4, 1fr);
+        }
+        
+        /* Icons */
+        .icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            margin-right: 8px;
+            color: #64748b;
+        }
+        
+        /* Print Optimization */
+        @media print {
+            body {
+                background-color: #ffffff;
+                color: #000000;
+            }
+            
+            .card {
+                page-break-inside: avoid;
+                box-shadow: none;
+                border: 1px solid #e2e8f0;
+            }
+            
+            .no-print {
+                display: none;
+            }
+        }
+        
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .container {
+                padding: 0 20px;
+            }
+            
+            .grid-3, .grid-4 {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .grid-2, .grid-3, .grid-4 {
+                grid-template-columns: 1fr;
+            }
+            
+            body {
+                padding: 0;
+            }
+            
+            .container {
+                padding: 0 16px;
+            }
+            
+            .card {
+                padding: 24px;
+                margin-bottom: 24px;
+            }
+            
+            h1 {
+                font-size: 28px;
+            }
+            
+            h2 {
+                font-size: 22px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        
+    <div style="display: grid; grid-template-columns: 1fr 280px; gap: 32px; margin-bottom: 32px;">
+        <div style="min-width: 0;">
+            <div class="card report-header">
+    <div class="header-hero" style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 32px; border-bottom: 1px solid #e2e8f0; margin-bottom: 32px;">
+        <div class="header-title">
+            <h1 style="margin: 0 0 8px 0; color: #0f172a;">TEST EXECUTION REPORT</h1>
+            <p class="execution-id" style="font-size: 13px; color: #64748b; font-family: 'Courier New', monospace; margin: 0;">
+                1a0e8b26-30fa-4e72-b0d2-900bb291a2ea
+            </p>
+        </div>
+        <div class="header-status">
+            <span class="badge status-pass">
+                PASS
+            </span>
+        </div>
+    </div>
+    
+    <div class="header-scenario" style="margin-bottom: 32px;">
+        <div class="scenario-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px;">
+            Scenario
+        </div>
+        <div class="scenario-value" style="font-size: 20px; font-weight: 600; color: #1e293b; line-height: 1.4;">
+            Successful login with valid credentials
+        </div>
+    </div>
+    
+    <div class="header-metadata">
+        <div class="grid grid-3">
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Website
+                </div>
+                <div class="meta-value" style="font-size: 15px; font-weight: 500; color: #334155;">
+                    <a href="https://adactinhotelapp.com/" target="_blank" style="color: #2563eb; text-decoration: none;">https://adactinhotelapp.com/</a>
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Browser
+                </div>
+                <div class="meta-value" style="font-size: 15px; font-weight: 500; color: #334155;">
+                    Chromium 149.0.7827.55
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div class="meta-value" style="font-size: 15px; font-weight: 500; color: #334155;">
+                    16.07s
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Execution Time
+                </div>
+                <div class="meta-value" style="font-size: 15px; font-weight: 500; color: #334155;">
+                    2026-07-19 16:13:00 UTC
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Total Validations
+                </div>
+                <div class="meta-value" style="font-size: 15px; font-weight: 500; color: #334155;">
+                    5
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Execution ID
+                </div>
+                <div class="meta-value" style="font-size: 15px; font-weight: 500; color: #334155; font-family: 'Courier New', monospace;">
+                    1a0e8b26...
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .report-header {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+    }
+    
+    @media (max-width: 768px) {
+        .header-hero {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        
+        .header-status {
+            align-self: flex-start;
+        }
+    }
+</style>
+            <div class="card executive-summary">
+    <div class="executive-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid #e2e8f0;">
+        <h2 style="margin: 0; display: flex; align-items: center; gap: 12px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            Executive Summary
+        </h2>
+        <div class="overall-result">
+            <span class="badge status-pass">
+                PASS
+            </span>
+        </div>
+    </div>
+    
+    <div class="executive-content" style="display: flex; flex-direction: column; gap: 24px;">
+        <div class="executive-narrative">
+            <div class="section-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                Overall Assessment
+            </div>
+            <p style="font-size: 15px; color: #475569; line-height: 1.7; margin: 0;">
+                The Successful login with valid credentials workflow was executed successfully. All 5 validations passed without errors or warnings.
+            </p>
+        </div>
+        
+        
+        <div class="executive-section">
+            <div class="section-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                Key Highlights
+            </div>
+            <ul style="list-style: none; padding: 0; margin: 0;">
+                
+                <li style="padding: 10px 0; color: #475569; display: flex; align-items: flex-start; gap: 10px; line-height: 1.6;">
+                    <span style="color: #10b981; font-weight: 600; flex-shrink: 0; margin-top: 2px;">✓</span>
+                    Successfully completed Successful login with valid credentials
+                </li>
+                
+                <li style="padding: 10px 0; color: #475569; display: flex; align-items: flex-start; gap: 10px; line-height: 1.6;">
+                    <span style="color: #10b981; font-weight: 600; flex-shrink: 0; margin-top: 2px;">✓</span>
+                    All 5 validations passed
+                </li>
+                
+                <li style="padding: 10px 0; color: #475569; display: flex; align-items: flex-start; gap: 10px; line-height: 1.6;">
+                    <span style="color: #10b981; font-weight: 600; flex-shrink: 0; margin-top: 2px;">✓</span>
+                    No errors or warnings detected
+                </li>
+                
+            </ul>
+        </div>
+        
+        
+        
+        
+        
+        
+        <div class="executive-section">
+            <div class="section-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                Business Rule Compliance
+            </div>
+            <p style="font-size: 15px; color: #475569; line-height: 1.7; margin: 0;">
+                All business rules validated successfully
+            </p>
+        </div>
+    </div>
+</div>
+            <div class="card validation-summary">
+    <div class="summary-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid #e2e8f0;">
+        <h2 style="margin: 0; display: flex; align-items: center; gap: 12px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            Validation Summary
+        </h2>
+        <div class="validation-count" style="background: #f1f5f9; color: #64748b; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;">
+            5 Validations
+        </div>
+    </div>
+    
+    <div class="summary-stats" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-bottom: 32px;">
+        <div class="stat-card stat-pass" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 24px; text-align: center;">
+            <div class="stat-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #166534; margin-bottom: 8px;">PASS</div>
+            <div class="stat-value" style="font-size: 48px; font-weight: 700; color: #16a34a; line-height: 1;">5</div>
+        </div>
+        <div class="stat-card stat-fail" style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 24px; text-align: center;">
+            <div class="stat-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #991b1b; margin-bottom: 8px;">FAIL</div>
+            <div class="stat-value" style="font-size: 48px; font-weight: 700; color: #dc2626; line-height: 1;">0</div>
+        </div>
+        <div class="stat-card stat-warning" style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 24px; text-align: center;">
+            <div class="stat-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #92400e; margin-bottom: 8px;">WARNING</div>
+            <div class="stat-value" style="font-size: 48px; font-weight: 700; color: #d97706; line-height: 1;">0</div>
+        </div>
+    </div>
+    
+    <div class="summary-checklist" style="display: flex; flex-direction: column; gap: 8px;">
+        <div class="checklist-header" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 12px;">
+            Validation Checklist
+        </div>
+        
+        
+        <a href="#validation-1" class="checklist-item status-pass" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px; font-size: 14px; color: #475569; text-decoration: none; transition: background-color 0.2s;">
+            <span class="check-icon" style="font-size: 16px; font-weight: 600;">
+                ✓
+            </span>
+            <span class="check-text">Navigate to the application base URL</span>
+        </a>
+        
+        
+        <a href="#validation-2" class="checklist-item status-pass" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px; font-size: 14px; color: #475569; text-decoration: none; transition: background-color 0.2s;">
+            <span class="check-icon" style="font-size: 16px; font-weight: 600;">
+                ✓
+            </span>
+            <span class="check-text">Enter username &#39;ADACTINFORQA&#39; into the Username field</span>
+        </a>
+        
+        
+        <a href="#validation-3" class="checklist-item status-pass" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px; font-size: 14px; color: #475569; text-decoration: none; transition: background-color 0.2s;">
+            <span class="check-icon" style="font-size: 16px; font-weight: 600;">
+                ✓
+            </span>
+            <span class="check-text">Enter password &#39;3U0515&#39; into the Password field</span>
+        </a>
+        
+        
+        <a href="#validation-4" class="checklist-item status-pass" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px; font-size: 14px; color: #475569; text-decoration: none; transition: background-color 0.2s;">
+            <span class="check-icon" style="font-size: 16px; font-weight: 600;">
+                ✓
+            </span>
+            <span class="check-text">Click the Login button</span>
+        </a>
+        
+        
+        <a href="#validation-5" class="checklist-item status-pass" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px; font-size: 14px; color: #475569; text-decoration: none; transition: background-color 0.2s;">
+            <span class="check-icon" style="font-size: 16px; font-weight: 600;">
+                ✓
+            </span>
+            <span class="check-text">Business Outcome Validation</span>
+        </a>
+        
+    </div>
+</div>
+
+<style>
+    .checklist-item.status-pass {
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+    }
+    
+    .checklist-item.status-fail {
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+    }
+    
+    .checklist-item.status-warning {
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+    }
+    
+    .checklist-item.status-pass .check-icon {
+        color: #16a34a;
+    }
+    
+    .checklist-item.status-fail .check-icon {
+        color: #dc2626;
+    }
+    
+    .checklist-item.status-warning .check-icon {
+        color: #d97706;
+    }
+    
+    .checklist-item:hover {
+        background-color: #f8fafc;
+    }
+    
+    @media (max-width: 768px) {
+        .summary-stats {
+            grid-template-columns: 1fr;
+        }
+        
+        .stat-value {
+            font-size: 36px;
+        }
+    }
+</style>
+            
+            
+            <div class="validation-details">
+                <h2 style="margin: 32px 0 24px 0; display: flex; align-items: center; gap: 12px;">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    Validation Details
+                </h2>
+                
+                    
+                    <div class="card validation-card" data-status="PASS" id="validation-1">
+    <div class="validation-header" style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 24px; border-bottom: 1px solid #e2e8f0; margin-bottom: 24px;">
+        <div class="validation-title-group" style="display: flex; align-items: center; gap: 12px;">
+            <div class="validation-number" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: #f1f5f9; border-radius: 8px; font-size: 14px; font-weight: 600; color: #64748b;">
+                1
+            </div>
+            <div class="validation-title" style="font-size: 18px; font-weight: 600; color: #1e293b; line-height: 1.3;">
+                Navigate to the application base URL
+            </div>
+        </div>
+        <div class="validation-status">
+            <span class="badge status-pass">
+                PASS
+            </span>
+        </div>
+    </div>
+    
+    <div class="validation-body" style="display: flex; flex-direction: column; gap: 24px;">
+        <div class="validation-goal">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                Objective
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Verify: Navigate to the application base URL
+            </div>
+        </div>
+        
+        <div class="validation-observation">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                Observation
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Step executed successfully: Execution Queued. No errors or exceptions detected during execution.
+            </div>
+        </div>
+        
+        <div class="validation-expected-actual" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+            <div class="validation-expected">
+                <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Expected Result
+                </div>
+                <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                    Step should complete successfully: Navigate to the application base URL
+                </div>
+            </div>
+            <div class="validation-actual">
+                <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    Actual Result
+                </div>
+                <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                    Action completed successfully: Execution Queued
+                </div>
+            </div>
+        </div>
+        
+        <div class="validation-action">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Action Performed
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Action executed: Execution Queued. Operation completed.
+            </div>
+        </div>
+        
+        
+        <div class="validation-screenshot">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                Evidence
+            </div>
+            <div class="screenshot-container" style="margin-top: 12px; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #f8fafc; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <a href="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-01-navigate_https_adactinhotelapp_com.png" target="_blank" style="display: block; text-decoration: none;">
+                    <img src="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-01-navigate_https_adactinhotelapp_com.png" alt="Evidence screenshot" style="width: 100%; max-width: 800px; height: auto; display: block; cursor: pointer;" />
+                </a>
+            </div>
+        </div>
+        
+        
+        <div class="validation-source">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Source
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569; display: flex; align-items: center; gap: 16px;">
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Playwright execution
+                </span>
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Timeline event
+                </span>
+                
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Screenshot
+                </span>
+                
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .validation-card[data-status="pass"] {
+        border-left: 4px solid #10b981;
+    }
+    
+    .validation-card[data-status="fail"] {
+        border-left: 4px solid #ef4444;
+    }
+    
+    .validation-card[data-status="warning"] {
+        border-left: 4px solid #f59e0b;
+    }
+    
+    .validation-card[data-status="info"] {
+        border-left: 4px solid #3b82f6;
+    }
+    
+    @media (max-width: 768px) {
+        .validation-expected-actual {
+            grid-template-columns: 1fr;
+        }
+        
+        .validation-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        
+        .validation-title-group {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        
+        .validation-source .field-value {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+    }
+</style>
+                
+                    
+                    <div class="card validation-card" data-status="PASS" id="validation-2">
+    <div class="validation-header" style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 24px; border-bottom: 1px solid #e2e8f0; margin-bottom: 24px;">
+        <div class="validation-title-group" style="display: flex; align-items: center; gap: 12px;">
+            <div class="validation-number" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: #f1f5f9; border-radius: 8px; font-size: 14px; font-weight: 600; color: #64748b;">
+                2
+            </div>
+            <div class="validation-title" style="font-size: 18px; font-weight: 600; color: #1e293b; line-height: 1.3;">
+                Enter username &#39;ADACTINFORQA&#39; into the Username field
+            </div>
+        </div>
+        <div class="validation-status">
+            <span class="badge status-pass">
+                PASS
+            </span>
+        </div>
+    </div>
+    
+    <div class="validation-body" style="display: flex; flex-direction: column; gap: 24px;">
+        <div class="validation-goal">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                Objective
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Verify: Enter username &#39;ADACTINFORQA&#39; into the Username field
+            </div>
+        </div>
+        
+        <div class="validation-observation">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                Observation
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Step executed successfully: Status: running. No errors or exceptions detected during execution.
+            </div>
+        </div>
+        
+        <div class="validation-expected-actual" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+            <div class="validation-expected">
+                <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Expected Result
+                </div>
+                <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                    Step should complete successfully: Enter username &#39;ADACTINFORQA&#39; into the Username field
+                </div>
+            </div>
+            <div class="validation-actual">
+                <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    Actual Result
+                </div>
+                <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                    Action completed successfully: Status: running
+                </div>
+            </div>
+        </div>
+        
+        <div class="validation-action">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Action Performed
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Action executed: Status: running. Operation completed.
+            </div>
+        </div>
+        
+        
+        <div class="validation-screenshot">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                Evidence
+            </div>
+            <div class="screenshot-container" style="margin-top: 12px; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #f8fafc; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <a href="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-02-type_text_locator_input_username.png" target="_blank" style="display: block; text-decoration: none;">
+                    <img src="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-02-type_text_locator_input_username.png" alt="Evidence screenshot" style="width: 100%; max-width: 800px; height: auto; display: block; cursor: pointer;" />
+                </a>
+            </div>
+        </div>
+        
+        
+        <div class="validation-source">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Source
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569; display: flex; align-items: center; gap: 16px;">
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Playwright execution
+                </span>
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Timeline event
+                </span>
+                
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Screenshot
+                </span>
+                
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .validation-card[data-status="pass"] {
+        border-left: 4px solid #10b981;
+    }
+    
+    .validation-card[data-status="fail"] {
+        border-left: 4px solid #ef4444;
+    }
+    
+    .validation-card[data-status="warning"] {
+        border-left: 4px solid #f59e0b;
+    }
+    
+    .validation-card[data-status="info"] {
+        border-left: 4px solid #3b82f6;
+    }
+    
+    @media (max-width: 768px) {
+        .validation-expected-actual {
+            grid-template-columns: 1fr;
+        }
+        
+        .validation-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        
+        .validation-title-group {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        
+        .validation-source .field-value {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+    }
+</style>
+                
+                    
+                    <div class="card validation-card" data-status="PASS" id="validation-3">
+    <div class="validation-header" style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 24px; border-bottom: 1px solid #e2e8f0; margin-bottom: 24px;">
+        <div class="validation-title-group" style="display: flex; align-items: center; gap: 12px;">
+            <div class="validation-number" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: #f1f5f9; border-radius: 8px; font-size: 14px; font-weight: 600; color: #64748b;">
+                3
+            </div>
+            <div class="validation-title" style="font-size: 18px; font-weight: 600; color: #1e293b; line-height: 1.3;">
+                Enter password &#39;3U0515&#39; into the Password field
+            </div>
+        </div>
+        <div class="validation-status">
+            <span class="badge status-pass">
+                PASS
+            </span>
+        </div>
+    </div>
+    
+    <div class="validation-body" style="display: flex; flex-direction: column; gap: 24px;">
+        <div class="validation-goal">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                Objective
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Verify: Enter password &#39;3U0515&#39; into the Password field
+            </div>
+        </div>
+        
+        <div class="validation-observation">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                Observation
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Step executed successfully: Launching browser. No errors or exceptions detected during execution.
+            </div>
+        </div>
+        
+        <div class="validation-expected-actual" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+            <div class="validation-expected">
+                <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Expected Result
+                </div>
+                <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                    Step should complete successfully: Enter password &#39;3U0515&#39; into the Password field
+                </div>
+            </div>
+            <div class="validation-actual">
+                <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    Actual Result
+                </div>
+                <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                    Action completed successfully: Launching browser
+                </div>
+            </div>
+        </div>
+        
+        <div class="validation-action">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Action Performed
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Action executed: Launching browser. Operation completed.
+            </div>
+        </div>
+        
+        
+        <div class="validation-screenshot">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                Evidence
+            </div>
+            <div class="screenshot-container" style="margin-top: 12px; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #f8fafc; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <a href="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-03-type_text_locator_input_password.png" target="_blank" style="display: block; text-decoration: none;">
+                    <img src="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-03-type_text_locator_input_password.png" alt="Evidence screenshot" style="width: 100%; max-width: 800px; height: auto; display: block; cursor: pointer;" />
+                </a>
+            </div>
+        </div>
+        
+        
+        <div class="validation-source">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Source
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569; display: flex; align-items: center; gap: 16px;">
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Playwright execution
+                </span>
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Timeline event
+                </span>
+                
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Screenshot
+                </span>
+                
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .validation-card[data-status="pass"] {
+        border-left: 4px solid #10b981;
+    }
+    
+    .validation-card[data-status="fail"] {
+        border-left: 4px solid #ef4444;
+    }
+    
+    .validation-card[data-status="warning"] {
+        border-left: 4px solid #f59e0b;
+    }
+    
+    .validation-card[data-status="info"] {
+        border-left: 4px solid #3b82f6;
+    }
+    
+    @media (max-width: 768px) {
+        .validation-expected-actual {
+            grid-template-columns: 1fr;
+        }
+        
+        .validation-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        
+        .validation-title-group {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        
+        .validation-source .field-value {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+    }
+</style>
+                
+                    
+                    <div class="card validation-card" data-status="PASS" id="validation-4">
+    <div class="validation-header" style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 24px; border-bottom: 1px solid #e2e8f0; margin-bottom: 24px;">
+        <div class="validation-title-group" style="display: flex; align-items: center; gap: 12px;">
+            <div class="validation-number" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: #f1f5f9; border-radius: 8px; font-size: 14px; font-weight: 600; color: #64748b;">
+                4
+            </div>
+            <div class="validation-title" style="font-size: 18px; font-weight: 600; color: #1e293b; line-height: 1.3;">
+                Click the Login button
+            </div>
+        </div>
+        <div class="validation-status">
+            <span class="badge status-pass">
+                PASS
+            </span>
+        </div>
+    </div>
+    
+    <div class="validation-body" style="display: flex; flex-direction: column; gap: 24px;">
+        <div class="validation-goal">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                Objective
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Verify: Click the Login button
+            </div>
+        </div>
+        
+        <div class="validation-observation">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                Observation
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Step executed successfully: Browser opened with clean context. No errors or exceptions detected during execution.
+            </div>
+        </div>
+        
+        <div class="validation-expected-actual" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+            <div class="validation-expected">
+                <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Expected Result
+                </div>
+                <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                    Step should complete successfully: Click the Login button
+                </div>
+            </div>
+            <div class="validation-actual">
+                <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    Actual Result
+                </div>
+                <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                    Action completed successfully: Browser opened with clean context
+                </div>
+            </div>
+        </div>
+        
+        <div class="validation-action">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Action Performed
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Action executed: Browser opened with clean context. Operation completed.
+            </div>
+        </div>
+        
+        
+        <div class="validation-screenshot">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                Evidence
+            </div>
+            <div class="screenshot-container" style="margin-top: 12px; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #f8fafc; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <a href="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-04-click_locator_input_login.png" target="_blank" style="display: block; text-decoration: none;">
+                    <img src="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-04-click_locator_input_login.png" alt="Evidence screenshot" style="width: 100%; max-width: 800px; height: auto; display: block; cursor: pointer;" />
+                </a>
+            </div>
+        </div>
+        
+        
+        <div class="validation-source">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Source
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569; display: flex; align-items: center; gap: 16px;">
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Playwright execution
+                </span>
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Timeline event
+                </span>
+                
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Screenshot
+                </span>
+                
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .validation-card[data-status="pass"] {
+        border-left: 4px solid #10b981;
+    }
+    
+    .validation-card[data-status="fail"] {
+        border-left: 4px solid #ef4444;
+    }
+    
+    .validation-card[data-status="warning"] {
+        border-left: 4px solid #f59e0b;
+    }
+    
+    .validation-card[data-status="info"] {
+        border-left: 4px solid #3b82f6;
+    }
+    
+    @media (max-width: 768px) {
+        .validation-expected-actual {
+            grid-template-columns: 1fr;
+        }
+        
+        .validation-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        
+        .validation-title-group {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        
+        .validation-source .field-value {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+    }
+</style>
+                
+                    
+                    <div class="card validation-card" data-status="PASS" id="validation-5">
+    <div class="validation-header" style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 24px; border-bottom: 1px solid #e2e8f0; margin-bottom: 24px;">
+        <div class="validation-title-group" style="display: flex; align-items: center; gap: 12px;">
+            <div class="validation-number" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: #f1f5f9; border-radius: 8px; font-size: 14px; font-weight: 600; color: #64748b;">
+                5
+            </div>
+            <div class="validation-title" style="font-size: 18px; font-weight: 600; color: #1e293b; line-height: 1.3;">
+                Business Outcome Validation
+            </div>
+        </div>
+        <div class="validation-status">
+            <span class="badge status-pass">
+                PASS
+            </span>
+        </div>
+    </div>
+    
+    <div class="validation-body" style="display: flex; flex-direction: column; gap: 24px;">
+        <div class="validation-goal">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                Objective
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Verify business outcome: Step should complete successfully: Click the Login button
+            </div>
+        </div>
+        
+        <div class="validation-observation">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                Observation
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                The test execution completed successfully. The expected business outcome &#39;Step should complete successfully: Click the Login button&#39; was achieved. All validation steps passed without errors or exceptions.
+            </div>
+        </div>
+        
+        <div class="validation-expected-actual" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+            <div class="validation-expected">
+                <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Expected Result
+                </div>
+                <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                    Step should complete successfully: Click the Login button
+                </div>
+            </div>
+            <div class="validation-actual">
+                <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    Actual Result
+                </div>
+                <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                    Business outcome achieved successfully
+                </div>
+            </div>
+        </div>
+        
+        <div class="validation-action">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Action Performed
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569;">
+                Validated overall test execution result against expected business outcome
+            </div>
+        </div>
+        
+        
+        <div class="validation-screenshot">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                Evidence
+            </div>
+            <div class="screenshot-container" style="margin-top: 12px; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #f8fafc; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <a href="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-04-click_locator_input_login.png" target="_blank" style="display: block; text-decoration: none;">
+                    <img src="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-04-click_locator_input_login.png" alt="Evidence screenshot" style="width: 100%; max-width: 800px; height: auto; display: block; cursor: pointer;" />
+                </a>
+            </div>
+        </div>
+        
+        
+        <div class="validation-source">
+            <div class="field-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Source
+            </div>
+            <div class="field-value" style="font-size: 15px; line-height: 1.7; color: #475569; display: flex; align-items: center; gap: 16px;">
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Playwright execution
+                </span>
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Timeline event
+                </span>
+                
+                <span style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    Screenshot
+                </span>
+                
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .validation-card[data-status="pass"] {
+        border-left: 4px solid #10b981;
+    }
+    
+    .validation-card[data-status="fail"] {
+        border-left: 4px solid #ef4444;
+    }
+    
+    .validation-card[data-status="warning"] {
+        border-left: 4px solid #f59e0b;
+    }
+    
+    .validation-card[data-status="info"] {
+        border-left: 4px solid #3b82f6;
+    }
+    
+    @media (max-width: 768px) {
+        .validation-expected-actual {
+            grid-template-columns: 1fr;
+        }
+        
+        .validation-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        
+        .validation-title-group {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        
+        .validation-source .field-value {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+    }
+</style>
+                
+            </div>
+            
+            <div class="card screenshot-gallery" id="screenshot-gallery">
+    <div class="gallery-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid #e2e8f0;">
+        <h2 style="margin: 0; display: flex; align-items: center; gap: 12px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            Screenshot Gallery
+        </h2>
+        <div class="gallery-count" style="background: #f1f5f9; color: #64748b; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;">
+            5 Screenshots
+        </div>
+    </div>
+    
+    <div class="gallery-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px;">
+        
+            
+            
+            <div class="gallery-item" style="display: flex; flex-direction: column; gap: 12px;">
+                <a href="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-01-navigate_https_adactinhotelapp_com.png" target="_blank" style="display: block; text-decoration: none; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #f8fafc; transition: box-shadow 0.2s, transform 0.2s; cursor: pointer;" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'; this.style.transform='translateY(0)'">
+                    <img src="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-01-navigate_https_adactinhotelapp_com.png" alt="Screenshot 1" style="width: 100%; height: 200px; object-fit: cover; display: block;" />
+                </a>
+                <div class="gallery-item-info" style="padding: 8px 0;">
+                    <div class="gallery-item-title" style="font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">
+                        Step 1
+                    </div>
+                    <div class="gallery-item-description" style="font-size: 13px; color: #64748b; line-height: 1.4;">
+                        Navigate to the application base URL
+                    </div>
+                </div>
+            </div>
+            
+        
+            
+            
+            <div class="gallery-item" style="display: flex; flex-direction: column; gap: 12px;">
+                <a href="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-02-type_text_locator_input_username.png" target="_blank" style="display: block; text-decoration: none; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #f8fafc; transition: box-shadow 0.2s, transform 0.2s; cursor: pointer;" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'; this.style.transform='translateY(0)'">
+                    <img src="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-02-type_text_locator_input_username.png" alt="Screenshot 2" style="width: 100%; height: 200px; object-fit: cover; display: block;" />
+                </a>
+                <div class="gallery-item-info" style="padding: 8px 0;">
+                    <div class="gallery-item-title" style="font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">
+                        Step 2
+                    </div>
+                    <div class="gallery-item-description" style="font-size: 13px; color: #64748b; line-height: 1.4;">
+                        Enter username &#39;ADACTINFORQA&#39; into the U...
+                    </div>
+                </div>
+            </div>
+            
+        
+            
+            
+            <div class="gallery-item" style="display: flex; flex-direction: column; gap: 12px;">
+                <a href="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-03-type_text_locator_input_password.png" target="_blank" style="display: block; text-decoration: none; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #f8fafc; transition: box-shadow 0.2s, transform 0.2s; cursor: pointer;" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'; this.style.transform='translateY(0)'">
+                    <img src="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-03-type_text_locator_input_password.png" alt="Screenshot 3" style="width: 100%; height: 200px; object-fit: cover; display: block;" />
+                </a>
+                <div class="gallery-item-info" style="padding: 8px 0;">
+                    <div class="gallery-item-title" style="font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">
+                        Step 3
+                    </div>
+                    <div class="gallery-item-description" style="font-size: 13px; color: #64748b; line-height: 1.4;">
+                        Enter password &#39;3U0515&#39; into the Passwor...
+                    </div>
+                </div>
+            </div>
+            
+        
+            
+            
+            <div class="gallery-item" style="display: flex; flex-direction: column; gap: 12px;">
+                <a href="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-04-click_locator_input_login.png" target="_blank" style="display: block; text-decoration: none; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #f8fafc; transition: box-shadow 0.2s, transform 0.2s; cursor: pointer;" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'; this.style.transform='translateY(0)'">
+                    <img src="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-04-click_locator_input_login.png" alt="Screenshot 4" style="width: 100%; height: 200px; object-fit: cover; display: block;" />
+                </a>
+                <div class="gallery-item-info" style="padding: 8px 0;">
+                    <div class="gallery-item-title" style="font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">
+                        Step 4
+                    </div>
+                    <div class="gallery-item-description" style="font-size: 13px; color: #64748b; line-height: 1.4;">
+                        Click the Login button
+                    </div>
+                </div>
+            </div>
+            
+        
+            
+            
+            <div class="gallery-item" style="display: flex; flex-direction: column; gap: 12px;">
+                <a href="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-04-click_locator_input_login.png" target="_blank" style="display: block; text-decoration: none; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #f8fafc; transition: box-shadow 0.2s, transform 0.2s; cursor: pointer;" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'; this.style.transform='translateY(0)'">
+                    <img src="/api/v1/projects/7f65154f-9e54-4bad-8e8f-4904f4772612/executions/1a0e8b26-30fa-4e72-b0d2-900bb291a2ea/screenshots/step-04-click_locator_input_login.png" alt="Screenshot 5" style="width: 100%; height: 200px; object-fit: cover; display: block;" />
+                </a>
+                <div class="gallery-item-info" style="padding: 8px 0;">
+                    <div class="gallery-item-title" style="font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">
+                        Step 5
+                    </div>
+                    <div class="gallery-item-description" style="font-size: 13px; color: #64748b; line-height: 1.4;">
+                        Business Outcome Validation
+                    </div>
+                </div>
+            </div>
+            
+        
+    </div>
+</div>
+
+<style>
+    @media (max-width: 768px) {
+        .gallery-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+            <div class="report-footer" style="text-align: center; padding: 32px 0; margin-top: 32px; border-top: 1px solid #e2e8f0;">
+    <p style="font-size: 12px; color: #94a3b8; margin: 0;">
+        Generated by AI Test Automation Platform
+    </p>
+    <p style="font-size: 11px; color: #cbd5e1; margin: 4px 0 0 0;">
+        2026-07-19 16:13:00 UTC
+    </p>
+</div>
+        </div>
+        
+        <div class="sticky-sidebar no-print" style="position: sticky; top: 24px; height: fit-content;">
+            <div class="card toc-card" style="padding: 20px;">
+                <h3 style="margin: 0 0 16px 0; font-size: 14px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">
+                    Table of Contents
+                </h3>
+                <nav style="display: flex; flex-direction: column; gap: 8px;">
+                    <a href="#validation-summary" style="color: #475569; text-decoration: none; font-size: 14px; padding: 8px 12px; border-radius: 6px; transition: background-color 0.2s;">Validation Summary</a>
+                    <a href="#executive-summary" style="color: #475569; text-decoration: none; font-size: 14px; padding: 8px 12px; border-radius: 6px; transition: background-color 0.2s;">Executive Summary</a>
+                    <div style="padding: 8px 0;">
+                        <div style="font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 8px; padding: 0 12px;">Validations</div>
+                        
+                        
+                        <a href="#validation-1" style="color: #475569; text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 6px; display: block; transition: background-color 0.2s;">
+                            <span style="color: #64748b; margin-right: 6px;">1.</span>
+                            Navigate to the application ba...
+                        </a>
+                        
+                        
+                        <a href="#validation-2" style="color: #475569; text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 6px; display: block; transition: background-color 0.2s;">
+                            <span style="color: #64748b; margin-right: 6px;">2.</span>
+                            Enter username &#39;ADACTINFORQA&#39; ...
+                        </a>
+                        
+                        
+                        <a href="#validation-3" style="color: #475569; text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 6px; display: block; transition: background-color 0.2s;">
+                            <span style="color: #64748b; margin-right: 6px;">3.</span>
+                            Enter password &#39;3U0515&#39; into t...
+                        </a>
+                        
+                        
+                        <a href="#validation-4" style="color: #475569; text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 6px; display: block; transition: background-color 0.2s;">
+                            <span style="color: #64748b; margin-right: 6px;">4.</span>
+                            Click the Login button
+                        </a>
+                        
+                        
+                        <a href="#validation-5" style="color: #475569; text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 6px; display: block; transition: background-color 0.2s;">
+                            <span style="color: #64748b; margin-right: 6px;">5.</span>
+                            Business Outcome Validation
+                        </a>
+                        
+                    </div>
+                    <a href="#screenshot-gallery" style="color: #475569; text-decoration: none; font-size: 14px; padding: 8px 12px; border-radius: 6px; transition: background-color 0.2s;">Screenshot Gallery</a>
+                </nav>
+            </div>
+        </div>
+    </div>
+    
+    <style>
+        .toc-card a:hover {
+            background-color: #f1f5f9;
+        }
+        
+        @media (max-width: 1024px) {
+            .sticky-sidebar {
+                display: none;
+            }
+        }
+    </style>
+
+    </div>
+</body>
+</html>

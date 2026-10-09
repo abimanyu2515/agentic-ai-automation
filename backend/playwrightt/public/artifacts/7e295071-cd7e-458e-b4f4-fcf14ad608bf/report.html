@@ -1,0 +1,1591 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Execution Report - 7e295071-cd7e-458e-b4f4-fcf14ad608bf</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            padding: 40px 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .header {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+        .header-main {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 20px;
+        }
+        .header-title h1 {
+            margin: 0 0 6px 0;
+            font-size: 24px;
+            color: #3b82f6;
+        }
+        .header-title p {
+            margin: 0;
+            color: #64748b;
+            font-size: 13px;
+            font-family: monospace;
+        }
+        .header-metadata {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .meta-row {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .meta-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 600px) {
+            .meta-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .meta-label {
+            font-size: 11px;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: bold;
+        }
+        .meta-value {
+            font-size: 15px;
+            color: #e2e8f0;
+            font-weight: 500;
+        }
+        .link-value {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+        .link-value:hover {
+            text-decoration: underline;
+        }
+        .badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .badge-passed { background-color: #10b981; color: #ffffff; }
+        .badge-failed { background-color: #ef4444; color: #ffffff; }
+        .badge-error { background-color: #f59e0b; color: #ffffff; }
+        
+        .error-banner {
+            background-color: #7f1d1d;
+            border: 1px solid #ef4444;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 32px;
+        }
+        .error-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #fca5a5;
+            margin-bottom: 8px;
+        }
+        .error-msg {
+            font-family: monospace;
+            font-size: 13px;
+            color: #fecaca;
+            white-space: pre-wrap;
+            background-color: #450a0a;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #991b1b;
+            overflow-x: auto;
+        }
+        .success-banner {
+            background-color: #064e3b;
+            border: 1px solid #10b981;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 32px;
+        }
+        .success-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #a7f3d0;
+        }
+        .btn-rerun {
+            background-color: #3b82f6;
+            color: #ffffff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .btn-rerun:hover {
+            background-color: #2563eb;
+        }
+        .btn-rerun:disabled {
+            background-color: #4b5563;
+            cursor: not-allowed;
+        }
+        .btn-workspace {
+            background-color: #1e293b;
+            color: #e2e8f0;
+            border: 1px solid #475569;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-block;
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+        .btn-workspace:hover {
+            background-color: #334155;
+            border-color: #64748b;
+        }
+
+        h2 {
+            font-size: 20px;
+            color: #f1f5f9;
+            margin-top: 32px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 8px;
+        }
+        
+        .step-card {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 24px;
+        }
+        @media (max-width: 768px) {
+            .step-card {
+                grid-template-columns: 1fr;
+            }
+        }
+        .step-left {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .step-right {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .step-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 12px;
+            margin-bottom: 12px;
+        }
+        .step-num {
+            background-color: #3b82f6;
+            color: #ffffff;
+            font-size: 12px;
+            font-weight: bold;
+            padding: 4px 10px;
+            border-radius: 6px;
+            text-transform: uppercase;
+        }
+        .step-title {
+            font-weight: bold;
+            font-size: 16px;
+            color: #e2e8f0;
+            flex-grow: 1;
+        }
+        .step-time {
+            font-family: monospace;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        .step-details {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            font-size: 14px;
+        }
+        .detail-row {
+            line-height: 1.6;
+            color: #cbd5e1;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #94a3b8;
+            display: block;
+            margin-bottom: 2px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .step-image img {
+            max-width: 100%;
+            max-height: 240px;
+            border-radius: 8px;
+            border: 1px solid #475569;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            object-fit: contain;
+        }
+        .no-image-box {
+            width: 100%;
+            height: 150px;
+            background-color: #0f172a;
+            border: 2px dashed #334155;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #475569;
+            font-size: 13px;
+        }
+        .summary-card {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 24px;
+            margin-top: 32px;
+        }
+        .summary-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #3b82f6;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-main">
+                <span class="badge badge-passed">
+                    PASSED
+                </span>
+                <div class="header-title">
+                    <h1>Enterprise Test Execution Report</h1>
+                    <p>Execution ID: 7e295071-cd7e-458e-b4f4-fcf14ad608bf</p>
+                </div>
+            </div>
+            <div class="header-metadata">
+                <div class="meta-row">
+                    <span class="meta-label">Website Under Test</span>
+                    <a href="https://adactinhotelapp.com/" target="_blank" class="meta-value link-value">https://adactinhotelapp.com/</a>
+                </div>
+                <div class="meta-grid">
+                    <div class="meta-item">
+                        <span class="meta-label">Started At</span>
+                        <span class="meta-value">2026-07-18 15:57:47 UTC</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Execution Duration</span>
+                        <span class="meta-value">49.27 seconds</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Browser</span>
+                        <span class="meta-value">Chromium </span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Total Steps</span>
+                        <span class="meta-value">38</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        
+        <div class="success-banner">
+            <div class="success-title">Test Execution Passed</div>
+            <div style="margin-top: 16px; display: flex; gap: 12px; align-items: center;">
+                <button class="btn-rerun" onclick="rerunTestCase('2bd9e82e-a8be-4008-a3ba-ab7be5e88073')">Rerun Execution</button>
+                <a href="http://localhost:3000/execution/7e295071-cd7e-458e-b4f4-fcf14ad608bf" target="_blank" class="btn-workspace">Open in Playwright Workspace</a>
+            </div>
+        </div>
+        
+        
+        <h2>Step-by-Step Walkthrough</h2>
+        <div class="steps-container">
+            
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Execution Queued</span>
+                        <span class="step-time">Time: 0.00s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Test execution is queued and waiting to start</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Test case enters queue for execution</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Test execution queued successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="no-image-box">
+                    <span>No Screenshot Captured</span>
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Status: Running</span>
+                        <span class="step-time">Time: 0.01s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Test execution begins running</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Test case transitions from queue to running state</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Test execution started</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="no-image-box">
+                    <span>No Screenshot Captured</span>
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Session Restored from Storage</span>
+                        <span class="step-time">Time: 0.10s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Restore previous browser session from stored state</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">User session data (cookies, local storage) is loaded for consistent testing</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Session restored successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="no-image-box">
+                    <span>No Screenshot Captured</span>
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Order Number Format Validation</span>
+                        <span class="step-time">Time: 1.61s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Proceed with Order Number Format Validation test scenario</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Validation scenario executes without errors</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Order Number Format Validation scenario completed</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="no-image-box">
+                    <span>No Screenshot Captured</span>
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Navigate to Booking Confirmation Page</span>
+                        <span class="step-time">Time: 4.99s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User navigates to BookingConfirm.php after a successful booking</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Booking confirmation page is displayed</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Navigated to BookingConfirm.php successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-01-navigate_https_adactinhotelapp_com.png" alt="Screenshot 5" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Navigate to Booking Confirmation Page (retry)</span>
+                        <span class="step-time">Time: 5.00s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User navigates to BookingConfirm.php after a successful booking (retry step)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Booking confirmation page is displayed</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Navigated to BookingConfirm.php successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-01-navigate_https_adactinhotelapp_com.png" alt="Screenshot 6" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Locate Order Number Field</span>
+                        <span class="step-time">Time: 6.84s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Locate the Order Number field using CSS selector input#order_no</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Order Number field is present on the page</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Order Number field located successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-02-type_text_locator_input_username.png" alt="Screenshot 7" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Locate Order Number Field (retry)</span>
+                        <span class="step-time">Time: 6.85s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Locate the Order Number field using CSS selector input#order_no (retry step)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Order Number field is present on the page</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Order Number field located successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-02-type_text_locator_input_username.png" alt="Screenshot 8" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Extract Order Number Value</span>
+                        <span class="step-time">Time: 8.69s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Extract the value of the order number using .inputValue() method</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Order number value is retrieved from the field</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Order number value extracted successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-03-type_text_locator_input_password.png" alt="Screenshot 9" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Extract Order Number Value (retry)</span>
+                        <span class="step-time">Time: 8.70s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Extract the value of the order number using .inputValue() method (retry step)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Order number value is retrieved from the field</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Order number value extracted successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-03-type_text_locator_input_password.png" alt="Screenshot 10" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Assert Order Number is Not Empty</span>
+                        <span class="step-time">Time: 11.07s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Assert that the extracted value is not empty</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Order number is a non-empty string</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Order number is not empty</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-04-click_locator_input_login.png" alt="Screenshot 11" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Assert Order Number is Not Empty (retry)</span>
+                        <span class="step-time">Time: 11.08s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Assert that the extracted value is not empty (retry step)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Order number is a non-empty string</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Order number is not empty</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-04-click_locator_input_login.png" alt="Screenshot 12" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Assert Order Number Matches Pattern</span>
+                        <span class="step-time">Time: 12.62s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Assert that the extracted value matches the expected alphanumeric pattern (e.g., 10 characters, alphanumeric like J38HV025J9)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Order number matches pattern /^[A-Z0-9]{10}$/</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Verified: Order number is a non-empty alphanumeric string of 10 characters matching pattern</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-05-select_option_locator_select_location.png" alt="Screenshot 13" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Assert Order Number Matches Pattern (retry)</span>
+                        <span class="step-time">Time: 12.62s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Assert that the extracted value matches the expected alphanumeric pattern (retry step)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Order number matches pattern /^[A-Z0-9]{10}$/</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Verified: Order number is a non-empty alphanumeric string of 10 characters matching pattern</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-06-select_option_locator_select_hotels.png" alt="Screenshot 14" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Select Hotel from Dropdown</span>
+                        <span class="step-time">Time: 14.12s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User selects a hotel from the hotel dropdown (select#hotels)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">A valid hotel option is selected</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Hotel selected from dropdown</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-07-select_option_locator_select_room_type.png" alt="Screenshot 15" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Select Room Type from Dropdown</span>
+                        <span class="step-time">Time: 15.63s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User selects a room type from the room type dropdown (select#room_type)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">A valid room type option is selected</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Room type selected from dropdown</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-08-select_option_locator_select_room_nos.png" alt="Screenshot 16" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Select Number of Rooms from Dropdown</span>
+                        <span class="step-time">Time: 17.09s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User selects number of rooms from the room number dropdown (select#room_nos)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">A valid room number option is selected</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Number of rooms selected from dropdown</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-09-type_text_locator_input_datepick_in.png" alt="Screenshot 17" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Enter Check-In Date</span>
+                        <span class="step-time">Time: 18.55s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User types check-in date into the date picker field (input#datepick_in)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Check-in date is entered correctly</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Check-in date entered in field</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-10-type_text_locator_input_datepick_out.png" alt="Screenshot 18" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Enter Check-Out Date</span>
+                        <span class="step-time">Time: 20.06s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User types check-out date into the date picker field (input#datepick_out)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Check-out date is entered correctly</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Check-out date entered in field</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-11-select_option_locator_select_adult_room.png" alt="Screenshot 19" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Select Adults per Room from Dropdown</span>
+                        <span class="step-time">Time: 21.57s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User selects number of adults from adults per room dropdown (select#adult_room)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">A valid adult count option is selected</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Adults per room selected from dropdown</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-12-select_option_locator_select_child_room.png" alt="Screenshot 20" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Select Children per Room from Dropdown</span>
+                        <span class="step-time">Time: 23.02s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User selects number of children from children per room dropdown (select#child_room)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">A valid child count option is selected</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Children per room selected from dropdown</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-13-click_locator_input_submit.png" alt="Screenshot 21" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Click Search Button</span>
+                        <span class="step-time">Time: 24.74s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User clicks on the Search button (input#Submit)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Click triggers search and navigates to next page</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Clicked Search button successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-14-click_locator_input_continue.png" alt="Screenshot 22" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Click Continue Button</span>
+                        <span class="step-time">Time: 27.50s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User clicks on the Continue button (input#continue)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Click triggers continuation and loads booking form</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Clicked Continue button successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-15-type_text_locator_input_first_name.png" alt="Screenshot 23" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Enter First Name</span>
+                        <span class="step-time">Time: 29.04s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User types first name into the first name field (input#first_name)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">First name is entered correctly</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">First name entered in field</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-16-type_text_locator_input_last_name.png" alt="Screenshot 24" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Enter Last Name</span>
+                        <span class="step-time">Time: 30.57s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User types last name into the last name field (input#last_name)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Last name is entered correctly</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Last name entered in field</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-17-type_text_locator_textarea_address.png" alt="Screenshot 25" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Enter Billing Address</span>
+                        <span class="step-time">Time: 32.08s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User types billing address into the address field (textarea#address)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Billing address is entered correctly</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Billing address entered in field</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-18-select_option_locator_select_cc_type.png" alt="Screenshot 26" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Select Credit Card Type from Dropdown</span>
+                        <span class="step-time">Time: 33.60s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User selects credit card type from the card type dropdown (select#cc_type)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">A valid credit card type option is selected</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Credit card type selected from dropdown</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-19-type_text_locator_input_cc_num.png" alt="Screenshot 27" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Enter Credit Card Number</span>
+                        <span class="step-time">Time: 35.15s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User types credit card number into the card number field (input#cc_num)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Credit card number is entered correctly</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Credit card number entered in field</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-20-select_option_locator_select_cc_exp_month.png" alt="Screenshot 28" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Select Card Expiry Month from Dropdown</span>
+                        <span class="step-time">Time: 36.77s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User selects expiration month from the month dropdown (select#cc_exp_month)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">A valid expiration month option is selected</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Expiry month selected from dropdown</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-21-select_option_locator_select_cc_exp_year.png" alt="Screenshot 29" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Select Card Expiry Year from Dropdown</span>
+                        <span class="step-time">Time: 38.31s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User selects expiration year from the year dropdown (select#cc_exp_year)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">A valid expiration year option is selected</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Expiry year selected from dropdown</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-22-type_text_locator_input_cc_cvv.png" alt="Screenshot 30" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Enter CVV Code</span>
+                        <span class="step-time">Time: 39.80s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User types CVV code into the CVV field (input#cc_cvv)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">CVV code is entered correctly</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">CVV code entered in field</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-23-click_locator_input_book_now.png" alt="Screenshot 31" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Click Book Now Button</span>
+                        <span class="step-time">Time: 41.35s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">User clicks on the Book Now button (input#book_now)</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Click triggers booking and redirects to booking confirmation page</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Clicked Book Now button successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="step-image">
+                    <img src="screenshots/step-23-click_locator_input_book_now.png" alt="Screenshot 32" />
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Session Storage Saved</span>
+                        <span class="step-time">Time: 45.88s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Save current browser session state to file for future reruns</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Session state is persisted</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Session storage saved successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="no-image-box">
+                    <span>No Screenshot Captured</span>
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Trace Generated</span>
+                        <span class="step-time">Time: 49.09s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Generate Playwright trace file for test run</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Trace file contains detailed execution log</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Trace generated successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="no-image-box">
+                    <span>No Screenshot Captured</span>
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Video Generated</span>
+                        <span class="step-time">Time: 49.20s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Generate screen recording of test execution</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Video file captures test session</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Video generated successfully</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="no-image-box">
+                    <span>No Screenshot Captured</span>
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Simulation Video Saved</span>
+                        <span class="step-time">Time: 49.21s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Save the simulation video with filename: page@a6db167358a81b6faced48d6f44696af.webm</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Video file is stored for review</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Simulation video saved</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="no-image-box">
+                    <span>No Screenshot Captured</span>
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">HTML Report Generated</span>
+                        <span class="step-time">Time: 49.24s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Generate HTML report summarizing test results</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Report contains test details and pass/fail status</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">HTML report generated</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="no-image-box">
+                    <span>No Screenshot Captured</span>
+                </div>
+                
+                </div>
+            </div>
+            
+
+            <div class="step-card">
+                <div class="step-left">
+                    <div class="step-header">
+                        <span class="step-num">Status: Completed</span>
+                        <span class="step-time">Time: 49.27s</span>
+                        <span class="step-status" style="margin-left: auto; font-weight: bold; color: #10b981;">✅ Passed</span>
+                    </div>
+                    <div class="step-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Action</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #3b82f6; font-size: 0.95rem; line-height: 1.5;">Test execution finishes with final status</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Expected</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #f59e0b; font-size: 0.95rem; color: #94a3b8; line-height: 1.5;">Test case reports completed status</div>
+                        </div>
+                        <div class="detail-row" style="margin-top: 8px;">
+                            <span class="detail-label">Actual</span>
+                            <div style="padding-left: 8px; border-left: 2px solid #10b981; font-size: 0.95rem; color: #cbd5e1; line-height: 1.5;">Test execution completed</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="step-right">
+                    
+                <div class="no-image-box">
+                    <span>No Screenshot Captured</span>
+                </div>
+                
+                </div>
+            </div>
+            
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-title">Execution Summary</div>
+            <div style="line-height: 1.6; color: #cbd5e1;">
+                The automated testcase completed successfully on the target application. A total of 38 steps were executed, verifying form element interactions. Visual screenshots were captured at critical checkpoints to verify correctness.
+            </div>
+        </div>
+    </div>
+
+    <script>
+    async function rerunTestCase(testCaseId) {
+        const btn = document.querySelector('.btn-rerun');
+        if (!btn) return;
+        btn.disabled = true;
+        btn.innerHTML = '🔄 Re-running...';
+        try {
+            const port = window.location.port;
+            const backendUrl = port === '3000' ? 'http://localhost:8000' : '';
+            const projectId = 'b4c13430-f95f-4ea5-b0ed-a09a0b3b324c';
+            const response = await fetch(`${backendUrl}/api/v1/projects/${projectId}/testcases/${testCaseId}/execute`, {
+                method: 'POST'
+            });
+            if (response.ok) {
+                const data = await response.json();
+                alert('Test case execution started! Redirecting to live simulation...');
+                window.open(`http://localhost:3000/execution/${data.execution_id}`, '_blank');
+            } else {
+                alert('Failed to trigger execution. Please try again from the dashboard.');
+            }
+        } catch (err) {
+            alert('Error: ' + err.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '🔄 Rerun Execution';
+        }
+    }
+    </script>
+</body>
+</html>

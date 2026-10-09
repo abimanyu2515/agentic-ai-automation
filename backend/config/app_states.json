@@ -1,0 +1,46 @@
+{
+  "application_states": [
+    {
+      "name": "LOGIN",
+      "url_contains": "adactinhotelapp.com",
+      "title_contains": "Adactin",
+      "required_elements": ["#username", "#password", "#login"]
+    },
+    {
+      "name": "SEARCH",
+      "url_contains": "SearchHotel.aspx",
+      "title_contains": "Search",
+      "required_elements": ["#location", "#hotels", "#Submit"]
+    },
+    {
+      "name": "RESULTS",
+      "url_contains": "SelectHotel.aspx",
+      "title_contains": "Select",
+      "required_elements": ["#select_hotel", "#continue"]
+    },
+    {
+      "name": "BOOKING",
+      "url_contains": "BookHotel.aspx",
+      "title_contains": "Book",
+      "required_elements": ["#first_name", "#book_now"]
+    },
+    {
+      "name": "CONFIRMATION",
+      "url_contains": "BookingConfirm.aspx",
+      "title_contains": "Confirm",
+      "required_elements": ["#order_no"]
+    },
+    {
+      "name": "PROFILE",
+      "url_contains": "Profile.aspx",
+      "title_contains": "Profile",
+      "required_elements": []
+    },
+    {
+      "name": "LOGOUT",
+      "url_contains": "Logout.aspx",
+      "title_contains": "Logout",
+      "required_elements": []
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+{
+  "metadata": {
+    "executionId": "6e145a72-c558-4dff-9415-53606ea4fda7",
+    "projectId": "7f65154f-9e54-4bad-8e8f-4904f4772612",
+    "testCaseIds": [
+      "d184493a-483c-4e5e-875a-6a39d7ba1637"
+    ],
+    "testCycleId": "c554a887-060d-4a83-869c-c7846bedd9a8",
+    "browser": "chromium",
+    "status": "completed",
+    "started": "2026-07-19T16:14:55.399Z",
+    "finished": "2026-07-19T16:15:02.595Z",
+    "duration": 7.196
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\nconst BASE_URL = process.env.TARGET_URL || 'https://adactinhotelapp.com/';\nconst USERNAME = process.env.TARGET_USERNAME || 'ADACTINFORQA';\nconst PASSWORD = process.env.TARGET_PASSWORD || '3U0515';\n\ntest('Successful login with valid credentials', async ({ page }) => {\n  // Step 1: Navigate to the application base URL\n  console.log('[Timeline] Navigate: to application base URL');\n  await page.goto(BASE_URL);\n\n  // Step 2: Enter username into the Username field\n  console.log('[Timeline] Type: enter username into Username field');\n  await page.locator('input#username').fill(USERNAME);\n\n  // Step 3: Enter password into the Password field\n  console.log('[Timeline] Type: enter password into Password field');\n  await page.locator('input#password').fill(PASSWORD);\n\n  // Step 4: Click the Login button\n  console.log('[Timeline] Click: Login button');\n  await page.locator('input#login').click();\n\n  // Expected result: User is redirected to Search Hotel page and welcome message is displayed\n  await expect(page).toHaveURL(/SearchHotel\\.php/);\n  await expect(page.locator('input#username_show')).toHaveValue('Hello ADACTINFORQA!');\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-07-19T16:14:55.399Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T16:14:55.415Z",
+      "time": 0.016,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T16:14:55.469Z",
+      "time": 0.07,
+      "event": "Session restored from storage state",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T16:14:55.481Z",
+      "time": 0.082,
+      "event": "Reusing existing browser context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T16:14:55.550Z",
+      "time": 0.151,
+      "event": "Running: Successful login with valid credentials",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T16:14:57.415Z",
+      "time": 2.016,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_adactinhotelapp_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T16:14:57.423Z",
+      "time": 2.024,
+      "event": "Navigate: https://adactinhotelapp.com/",
+      "details": "step-01-navigate_https_adactinhotelapp_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T16:14:59.001Z",
+      "time": 3.602,
+      "event": "Screenshot Captured",
+      "details": "step-02-type_text_locator_input_username.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T16:14:59.011Z",
+      "time": 3.612,
+      "event": "Type text: locator('input#username')",
+      "details": "step-02-type_text_locator_input_username.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T16:15:00.499Z",
+      "time": 5.1,
+      "event": "Screenshot Captured",
+      "details": "step-03-type_text_locator_input_password.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T16:15:00.506Z",
+      "time": 5.107,
+      "event": "Type text: locator('input#password')",
+      "details": "step-03-type_text_locator_input_password.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T16:15:02.465Z",
+      "time": 7.066,
+      "event": "Screenshot Captured",
+      "details": "step-04-click_locator_input_login.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T16:15:02.475Z",
+      "time": 7.076,
+      "event": "Click: locator('input#login')",
+      "details": "step-04-click_locator_input_login.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T16:15:02.538Z",
+      "time": 7.139,
+      "event": "Session storage state saved",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T16:15:02.550Z",
+      "time": 7.151,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T16:15:02.586Z",
+      "time": 7.187,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T16:15:02.596Z",
+      "time": 7.197,
+      "event": "Status: completed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_adactinhotelapp_com.png",
+      "step-02-type_text_locator_input_username.png",
+      "step-03-type_text_locator_input_password.png",
+      "step-04-click_locator_input_login.png"
+    ],
+    "logs": [],
+    "console": [
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SearchHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS."
+    ],
+    "trace": "trace.zip",
+    "htmlReport": "report.html"
+  }
+}

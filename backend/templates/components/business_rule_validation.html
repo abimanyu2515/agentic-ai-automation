@@ -1,0 +1,30 @@
+{% if context.business_rules %}
+<div class="card business-rule-validation">
+    <div class="section-header" style="margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0;">
+        <h2 style="margin: 0;">Business Rule Validation</h2>
+    </div>
+    
+    <table class="business-rule-table">
+        <thead>
+            <tr>
+                <th>Business Rule</th>
+                <th>Status</th>
+                <th>Confidence</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for rule in context.business_rules %}
+            <tr>
+                <td>{{ rule.rule }}</td>
+                <td>
+                    <span class="rule-status {{ 'status-pass' if rule.status == '✅' else 'status-fail' }}" style="padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 700;">
+                        {{ rule.status }}
+                    </span>
+                </td>
+                <td>{{ rule.confidence }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}

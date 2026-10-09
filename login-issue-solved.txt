@@ -1,0 +1,99 @@
+LOGIN ISSUE RESOLUTION
+======================
+
+Date: 2026-10-09
+
+Root causes addressed
+---------------------
+1. The authentication service had a JWT namespace conflict. It now uses
+   python-jose explicitly:
+
+       from jose import JWTError, jwt
+
+2. Existing development databases did not repair seeded password hashes.
+   The seeder updated names and roles but retained stale passwords, so a reused
+   database could reject the documented credentials.
+
+3. The documented Superadmin password and the seeded Superadmin password did
+   not match. The canonical development account is now:
+
+       admin@agenticai.com / admin123
+
+4. The frontend treated Admin differently from Superadmin during authenticated
+   startup. Admin users now follow the administrator dashboard flow.
+
+5. Project-loading failures were swallowed by the frontend. A successful login
+   followed by a failed bootstrap request could look like a failed login.
+   Project-loading failures now produce a visible, actionable message.
+
+6. Failed token refreshes could leave queued requests unresolved. Refresh
+   failure is now propagated to all waiting requests.
+
+7. The login handler now validates that the response contains an access token,
+   refresh token, and user object before starting authenticated initialization.
+
+8. On Windows, the static frontend served JavaScript files as text/plain.
+   Browsers refused to execute the ES module, so the login API succeeded but
+   the UI never hid the login overlay. The backend now explicitly registers
+   application/javascript for .js files before mounting StaticFiles.
+
+Implemented changes
+-------------------
+- backend/services/auth_service.py
+  Uses python-jose and catches jose.JWTError.
+
+- backend/database/db_seeder.py
+  Synchronizes development-user password hashes, roles, names, and active
+  status when running in development/testing mode.
+  Uses admin123 for admin@agenticai.com.
+
+- frontend/js/app.js
+  Treats Admin and Superadmin as administrator roles.
+  Validates the login response.
+  Propagates project bootstrap failures with a visible error.
+
+- frontend/js/api.js
+  Propagates token-refresh failure to queued requests.
+
+- backend/main.py
+  Registers the JavaScript MIME type as application/javascript for the static
+  frontend on Windows.
+
+- requirements.txt
+  Keeps python-jose as the JWT dependency and removes the conflicting PyJWT
+  declaration.
+
+- README.md
+  Uses the canonical admin@agenticai.com / admin123 credentials.
+
+Validation
+----------
+- JWT access-token creation and decoding: PASS
+- JWT refresh-token creation and decoding: PASS
+- Focused login tests: PASS
+- Live API login with dev@agenticai.com/devpassword: PASS
+- Live authenticated project/settings/permissions/roles requests: PASS
+- Frontend JavaScript syntax checks: PASS
+- Served app.js/api.js MIME type: application/javascript
+- Browser login flow: login overlay hidden, dashboard route loaded
+
+Required restart
+----------------
+Restart the FastAPI server so the startup seeder synchronizes the existing
+development users. Then clear sessionStorage for the application origin or use
+a private browsing window and sign in with:
+
+    admin@agenticai.com
+    admin123
+
+Other seeded development accounts:
+
+    dev@agenticai.com          / devpassword
+    pm@agenticai.com           / pmpassword
+    tester@agenticai.com       / testerpassword
+    stakeholder@agenticai.com  / stakeholderpassword
+
+Security note
+-------------
+Password synchronization is limited to development/testing environments by
+the existing settings.app_env guard. Production users are not overwritten.

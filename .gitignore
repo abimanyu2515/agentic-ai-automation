@@ -1,0 +1,57 @@
+# Python Caches & Virtual Envs
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.hypothesis/
+.qodo/
+.kiro/
+venv/
+.venv/
+.env/
+.env.local
+.env.production
+.env.staging
+
+# Node.js
+node_modules/
+dist/
+npm-debug.log*
+
+# Playwright & Testing Generated Files
+*.zip
+*.webm
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+trace/
+playwright-report/
+test-results/
+
+# Reports and JUnit Outputs
+junit_*.xml
+report_*.html
+report_*.pdf
+
+# Allow Sample-TestCases_HotelApplication.pdf
+!Sample-TestCases_HotelApplication.pdf
+
+# Databases
+*.db
+*.sqlite
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Scratch & Temporary
+scratch/
+temp/
+tmp/

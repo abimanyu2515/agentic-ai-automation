@@ -1,0 +1,96 @@
+<div class="card report-header">
+    <div class="header-hero" style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 32px; border-bottom: 1px solid #e2e8f0; margin-bottom: 32px;">
+        <div class="header-title">
+            <h1 style="margin: 0 0 8px 0; color: #0f172a;">TEST EXECUTION REPORT</h1>
+            <p class="execution-id" style="font-size: 13px; color: #64748b; font-family: 'Courier New', monospace; margin: 0;">
+                {{ context.execution_id }}
+            </p>
+        </div>
+        <div class="header-status">
+            <span class="badge {{ 'status-pass' if context.execution_status.value == 'PASS' else 'status-fail' if context.execution_status.value == 'FAIL' else 'status-warning' }}">
+                {{ context.execution_status.value }}
+            </span>
+        </div>
+    </div>
+    
+    <div class="header-scenario" style="margin-bottom: 32px;">
+        <div class="scenario-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 8px;">
+            Scenario
+        </div>
+        <div class="scenario-value" style="font-size: 20px; font-weight: 600; color: #1e293b; line-height: 1.4;">
+            {{ context.test_case_title }}
+        </div>
+    </div>
+    
+    <div class="header-metadata">
+        <div class="grid grid-3">
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Website
+                </div>
+                <div class="meta-value" style="font-size: 15px; font-weight: 500; color: #334155;">
+                    <a href="{{ context.website_url }}" target="_blank" style="color: #2563eb; text-decoration: none;">{{ context.website_url }}</a>
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Browser
+                </div>
+                <div class="meta-value" style="font-size: 15px; font-weight: 500; color: #334155;">
+                    Chromium {{ context.browser_version or '' }}
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div class="meta-value" style="font-size: 15px; font-weight: 500; color: #334155;">
+                    {{ "%.2f"|format(context.execution_duration_seconds) }}s
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Execution Time
+                </div>
+                <div class="meta-value" style="font-size: 15px; font-weight: 500; color: #334155;">
+                    {{ context.started_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Total Validations
+                </div>
+                <div class="meta-value" style="font-size: 15px; font-weight: 500; color: #334155;">
+                    {{ context.total_validations }}
+                </div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 6px;">
+                    Execution ID
+                </div>
+                <div class="meta-value" style="font-size: 15px; font-weight: 500; color: #334155; font-family: 'Courier New', monospace;">
+                    {{ context.execution_id[:8] }}...
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .report-header {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+    }
+    
+    @media (max-width: 768px) {
+        .header-hero {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        
+        .header-status {
+            align-self: flex-start;
+        }
+    }
+</style>

@@ -1,0 +1,413 @@
+{
+  "metadata": {
+    "executionId": "1455d9a5-22e9-421b-9bff-df1c6505fd3c",
+    "projectId": "7f65154f-9e54-4bad-8e8f-4904f4772612",
+    "testCaseIds": [
+      "3315353e-b98c-426d-bd03-66d72c2c8ea0"
+    ],
+    "testCycleId": null,
+    "browser": "chromium",
+    "status": "failed",
+    "started": "2026-07-21T08:00:25.060Z",
+    "browserVersion": "149.0.7827.55",
+    "finished": "2026-07-21T08:03:23.206Z",
+    "duration": 178.146
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\nconst BASE_URL = process.env.TARGET_URL || 'https://adactinhotelapp.com/';\nconst USERNAME = process.env.TARGET_USERNAME || 'ADACTINFORQA';\nconst PASSWORD = process.env.TARGET_PASSWORD || '3U0515';\n\ntest('Search with past check-in date', async ({ page }) => {\n  // Navigate to base URL\n  console.log('[Timeline] Navigate to Adactin Hotel App');\n  await page.goto(BASE_URL);\n\n  // Login\n  console.log('[Timeline] Login: enter username');\n  await page.locator('input#username').fill(USERNAME);\n  console.log('[Timeline] Login: enter password');\n  await page.locator('input#password').fill(PASSWORD);\n  console.log('[Timeline] Login: click Login button');\n  await page.locator('input#login').click();\n\n  // Wait for redirect to Search Hotel page\n  console.log('[Timeline] Wait for redirect to SearchHotel.php');\n  await expect(page).toHaveURL(/SearchHotel\\.php/);\n\n  // Step 1: Clear the Check In Date field\n  console.log('[Timeline] Clear default check-in date');\n  await page.locator('input#datepick_in').fill('');\n\n  // Step 2: Enter a past date\n  console.log('[Timeline] Enter past check-in date: 01/01/2020');\n  await page.locator('input#datepick_in').fill('01/01/2020');\n\n  // Step 3: Fill other mandatory fields\n  console.log('[Timeline] Select Location: Sydney');\n  await page.locator('select#location').selectOption({ label: 'Sydney' });\n\n  console.log('[Timeline] Select Number of Rooms: 1 - One');\n  await page.locator('select#room_nos').selectOption({ label: '1 - One' });\n\n  console.log('[Timeline] Enter Check Out Date: 05/01/2020');\n  await page.locator('input#datepick_out').fill('05/01/2020');\n\n  console.log('[Timeline] Select Adults per Room: 1');\n  await page.locator('select#adult_room').selectOption({ label: '1' });\n\n  // Step 4: Click Search button\n  console.log('[Timeline] Click Search button');\n  await page.locator('input#Submit').click();\n\n  // Assert: The form does not submit and the user remains on the Search Hotel page\n  console.log('[Timeline] Assert that user remains on SearchHotel.php');\n  await expect(page).toHaveURL(/SearchHotel\\.php/);\n  // Also verify that the search form is still present (e.g., location dropdown visible)\n  await expect(page.locator('select#location')).toBeVisible();\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-07-21T08:00:25.060Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-21T08:00:25.095Z",
+      "time": 0.035,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-21T08:00:26.034Z",
+      "time": 0.974,
+      "event": "Launching browser",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-21T08:00:30.182Z",
+      "time": 5.122,
+      "event": "Session restored from storage state",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:00:31.599Z",
+      "time": 6.539,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:00:31.679Z",
+      "time": 6.619,
+      "event": "Running: Search with past check-in date",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-21T08:00:59.399Z",
+      "time": 34.338,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_adactinhotelapp_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:00:59.442Z",
+      "time": 34.382,
+      "event": "Navigate: https://adactinhotelapp.com/",
+      "details": "step-01-navigate_https_adactinhotelapp_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:18.300Z",
+      "time": 53.24,
+      "event": "Screenshot Captured",
+      "details": "step-02-type_text_locator_input_username.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:18.305Z",
+      "time": 53.245,
+      "event": "Type text: locator('input#username')",
+      "details": "step-02-type_text_locator_input_username.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:31.468Z",
+      "time": 66.408,
+      "event": "Screenshot Captured",
+      "details": "step-03-type_text_locator_input_password.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:31.473Z",
+      "time": 66.413,
+      "event": "Type text: locator('input#password')",
+      "details": "step-03-type_text_locator_input_password.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:38.528Z",
+      "time": 73.468,
+      "event": "Screenshot Captured",
+      "details": "step-04-click_locator_input_login.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:38.532Z",
+      "time": 73.472,
+      "event": "Click: locator('input#login')",
+      "details": "step-04-click_locator_input_login.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:40.768Z",
+      "time": 75.708,
+      "event": "Screenshot Captured",
+      "details": "step-05-type_text_locator_input_datepick_in.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:40.772Z",
+      "time": 75.712,
+      "event": "Type text: locator('input#datepick_in')",
+      "details": "step-05-type_text_locator_input_datepick_in.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:42.365Z",
+      "time": 77.305,
+      "event": "Screenshot Captured",
+      "details": "step-06-type_text_locator_input_datepick_in.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:42.370Z",
+      "time": 77.31,
+      "event": "Type text: locator('input#datepick_in')",
+      "details": "step-06-type_text_locator_input_datepick_in.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:43.982Z",
+      "time": 78.922,
+      "event": "Screenshot Captured",
+      "details": "step-07-select_option_locator_select_location.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:43.988Z",
+      "time": 78.928,
+      "event": "Select option: locator('select#location')",
+      "details": "step-07-select_option_locator_select_location.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:45.578Z",
+      "time": 80.518,
+      "event": "Screenshot Captured",
+      "details": "step-08-select_option_locator_select_room_nos.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:45.583Z",
+      "time": 80.523,
+      "event": "Select option: locator('select#room_nos')",
+      "details": "step-08-select_option_locator_select_room_nos.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:47.119Z",
+      "time": 82.059,
+      "event": "Screenshot Captured",
+      "details": "step-09-type_text_locator_input_datepick_out.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:01:47.126Z",
+      "time": 82.066,
+      "event": "Type text: locator('input#datepick_out')",
+      "details": "step-09-type_text_locator_input_datepick_out.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:18.208Z",
+      "time": 113.148,
+      "event": "Failure detected: \"locator.selectOption: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('select#adult_room')\u001b[22m\n\u001b[2m    - locator resolved to <select id=\"adult_room\" name=\"adult_room\" class=\"search_combobox\">…</select>\u001b[22m\n\u001b[2m  - attempting select option action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m      - did not find some options\u001b[22m\n\u001b[2m    - retrying select option action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m      - did not find some options\u001b[22m\n\u001b[2m    - retrying select option action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    57 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m       - did not find some options\u001b[22m\n\u001b[2m     - retrying select option action\u001b[22m\n\u001b[2m       - waiting 500ms\u001b[22m\n\". Recovery action: retry",
+      "type": "warning"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:18.323Z",
+      "time": 113.263,
+      "event": "Retrying execution (Attempt 1)...",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:18.328Z",
+      "time": 113.268,
+      "event": "Session restored from storage state",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:18.461Z",
+      "time": 113.401,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:18.475Z",
+      "time": 113.415,
+      "event": "Running: Search with past check-in date",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:28.252Z",
+      "time": 123.192,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_adactinhotelapp_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:28.257Z",
+      "time": 123.197,
+      "event": "Navigate: https://adactinhotelapp.com/",
+      "details": "step-01-navigate_https_adactinhotelapp_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:31.962Z",
+      "time": 126.902,
+      "event": "Screenshot Captured",
+      "details": "step-02-type_text_locator_input_username.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:31.966Z",
+      "time": 126.906,
+      "event": "Type text: locator('input#username')",
+      "details": "step-02-type_text_locator_input_username.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:34.878Z",
+      "time": 129.818,
+      "event": "Screenshot Captured",
+      "details": "step-03-type_text_locator_input_password.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:34.889Z",
+      "time": 129.829,
+      "event": "Type text: locator('input#password')",
+      "details": "step-03-type_text_locator_input_password.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:40.019Z",
+      "time": 134.959,
+      "event": "Screenshot Captured",
+      "details": "step-04-click_locator_input_login.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:40.025Z",
+      "time": 134.965,
+      "event": "Click: locator('input#login')",
+      "details": "step-04-click_locator_input_login.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:41.636Z",
+      "time": 136.576,
+      "event": "Screenshot Captured",
+      "details": "step-05-type_text_locator_input_datepick_in.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:41.641Z",
+      "time": 136.581,
+      "event": "Type text: locator('input#datepick_in')",
+      "details": "step-05-type_text_locator_input_datepick_in.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:43.141Z",
+      "time": 138.081,
+      "event": "Screenshot Captured",
+      "details": "step-06-type_text_locator_input_datepick_in.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:43.148Z",
+      "time": 138.088,
+      "event": "Type text: locator('input#datepick_in')",
+      "details": "step-06-type_text_locator_input_datepick_in.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:44.713Z",
+      "time": 139.653,
+      "event": "Screenshot Captured",
+      "details": "step-07-select_option_locator_select_location.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:44.717Z",
+      "time": 139.657,
+      "event": "Select option: locator('select#location')",
+      "details": "step-07-select_option_locator_select_location.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:46.349Z",
+      "time": 141.289,
+      "event": "Screenshot Captured",
+      "details": "step-08-select_option_locator_select_room_nos.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:46.354Z",
+      "time": 141.294,
+      "event": "Select option: locator('select#room_nos')",
+      "details": "step-08-select_option_locator_select_room_nos.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:47.988Z",
+      "time": 142.928,
+      "event": "Screenshot Captured",
+      "details": "step-09-type_text_locator_input_datepick_out.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:02:47.994Z",
+      "time": 142.934,
+      "event": "Type text: locator('input#datepick_out')",
+      "details": "step-09-type_text_locator_input_datepick_out.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:03:19.167Z",
+      "time": 174.107,
+      "event": "Screenshot Captured",
+      "details": "error-2026-07-21T08-03-19.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:03:19.172Z",
+      "time": 174.112,
+      "event": "Screenshot captured on error: error-2026-07-21T08-03-19.png",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-07-21T08:03:22.990Z",
+      "time": 177.93,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:03:23.087Z",
+      "time": 178.027,
+      "event": "video Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:03:23.172Z",
+      "time": 178.112,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-21T08:03:23.179Z",
+      "time": 178.119,
+      "event": "Error Occurred",
+      "details": "locator.selectOption: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('select#adult_room')\u001b[22m\n\u001b[2m    - locator resolved to <select id=\"adult_room\" name=\"adult_room\" class=\"search_combobox\">…</select>\u001b[22m\n\u001b[2m  - attempting select option action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m      - did not find some options\u001b[22m\n\u001b[2m    - retrying select option action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m      - did not find some options\u001b[22m\n\u001b[2m    - retrying select option action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    57 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m       - did not find some options\u001b[22m\n\u001b[2m     - retrying select option action\u001b[22m\n\u001b[2m       - waiting 500ms\u001b[22m\n",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-07-21T08:03:23.207Z",
+      "time": 178.147,
+      "event": "Status: failed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_adactinhotelapp_com.png",
+      "step-02-type_text_locator_input_username.png",
+      "step-03-type_text_locator_input_password.png",
+      "step-04-click_locator_input_login.png",
+      "step-05-type_text_locator_input_datepick_in.png",
+      "step-06-type_text_locator_input_datepick_in.png",
+      "step-07-select_option_locator_select_location.png",
+      "step-08-select_option_locator_select_room_nos.png",
+      "step-09-type_text_locator_input_datepick_out.png",
+      "step-01-navigate_https_adactinhotelapp_com.png",
+      "step-02-type_text_locator_input_username.png",
+      "step-03-type_text_locator_input_password.png",
+      "step-04-click_locator_input_login.png",
+      "step-05-type_text_locator_input_datepick_in.png",
+      "step-06-type_text_locator_input_datepick_in.png",
+      "step-07-select_option_locator_select_location.png",
+      "step-08-select_option_locator_select_room_nos.png",
+      "step-09-type_text_locator_input_datepick_out.png",
+      "error-2026-07-21T08-03-19.png"
+    ],
+    "logs": [],
+    "console": [
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SearchHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS.",
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SearchHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS."
+    ],
+    "trace": "trace.zip",
+    "video": "page@b3a4a2dd1abafe0f1ed43cd5a9700397.webm",
+    "htmlReport": "report.html"
+  },
+  "error": "locator.selectOption: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('select#adult_room')\u001b[22m\n\u001b[2m    - locator resolved to <select id=\"adult_room\" name=\"adult_room\" class=\"search_combobox\">…</select>\u001b[22m\n\u001b[2m  - attempting select option action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m      - did not find some options\u001b[22m\n\u001b[2m    - retrying select option action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m      - did not find some options\u001b[22m\n\u001b[2m    - retrying select option action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    57 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m       - did not find some options\u001b[22m\n\u001b[2m     - retrying select option action\u001b[22m\n\u001b[2m       - waiting 500ms\u001b[22m\n"
+}

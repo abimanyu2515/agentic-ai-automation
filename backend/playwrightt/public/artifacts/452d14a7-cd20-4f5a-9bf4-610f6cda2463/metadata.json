@@ -1,0 +1,121 @@
+{
+  "metadata": {
+    "executionId": "452d14a7-cd20-4f5a-9bf4-610f6cda2463",
+    "projectId": "b4c13430-f95f-4ea5-b0ed-a09a0b3b324c",
+    "testCaseIds": [
+      "527350a5-3042-43c2-b19a-ab8c20f429c2"
+    ],
+    "testCycleId": "c554a887-060d-4a83-869c-c7846bedd9a8",
+    "browser": "chromium",
+    "status": "completed",
+    "started": "2026-07-19T08:52:15.866Z",
+    "finished": "2026-07-19T08:54:17.267Z",
+    "duration": 121.401
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\nconst BASE_URL = process.env.TARGET_URL || 'https://adactinhotelapp.com/';\nconst USERNAME = process.env.TARGET_USERNAME || 'ADACTINFORQA';\nconst PASSWORD = process.env.TARGET_PASSWORD || '3U0515';\n\ntest('Valid Login with Username and Password', async ({ page }) => {\n  console.log(\"[Timeline] Navigate: Navigating to target URL\");\n  await page.goto(BASE_URL);\n\n  console.log(\"[Timeline] Fill: Entering valid username into Username field\");\n  await page.locator('input#username').fill(USERNAME);\n\n  console.log(\"[Timeline] Fill: Entering valid password into Password field\");\n  await page.locator('input#password').fill(PASSWORD);\n\n  console.log(\"[Timeline] Click: Clicking Login button\");\n  await page.locator('input#login').click();\n\n  console.log(\"[Timeline] Search Page Load: Waiting for Search page to load\");\n  await page.locator('input#username_show').waitFor({ state: 'visible', timeout: 10000 });\n\n  console.log(\"[Timeline] Locator: Checking the Welcome Username field for expected result\");\n  await expect(page.locator('input#username_show')).toHaveValue(`Hello ${USERNAME}!`);\n});\n",
+  "timeline": [
+    {
+      "timestamp": "2026-07-19T08:52:15.866Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T08:52:15.923Z",
+      "time": 0.056,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T08:52:16.205Z",
+      "time": 0.339,
+      "event": "Session restored from storage state",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T08:52:16.243Z",
+      "time": 0.377,
+      "event": "Reusing existing browser context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T08:52:16.370Z",
+      "time": 0.504,
+      "event": "Running: Valid Login with Username and Password",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T08:52:39.691Z",
+      "time": 23.825,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_adactinhotelapp_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T08:52:39.726Z",
+      "time": 23.86,
+      "event": "Navigate: https://adactinhotelapp.com/",
+      "details": "step-01-navigate_https_adactinhotelapp_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T08:53:11.923Z",
+      "time": 56.057,
+      "event": "Type text: locator('input#username')",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T08:53:43.902Z",
+      "time": 88.036,
+      "event": "Type text: locator('input#password')",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T08:54:16.692Z",
+      "time": 120.826,
+      "event": "Click: locator('input#login')",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T08:54:17.049Z",
+      "time": 121.183,
+      "event": "Session storage state saved",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T08:54:17.103Z",
+      "time": 121.237,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T08:54:17.234Z",
+      "time": 121.368,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T08:54:17.267Z",
+      "time": 121.401,
+      "event": "Status: completed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_adactinhotelapp_com.png"
+    ],
+    "logs": [],
+    "console": [
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SearchHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS.",
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SearchHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS.",
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SearchHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS.",
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SearchHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS.",
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SearchHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS.",
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SearchHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS.",
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SearchHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS."
+    ],
+    "trace": "trace.zip",
+    "htmlReport": "report.html"
+  }
+}

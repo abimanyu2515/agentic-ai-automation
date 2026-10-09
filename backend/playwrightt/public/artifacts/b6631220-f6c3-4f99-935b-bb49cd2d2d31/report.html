@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Execution Report - b6631220-f6c3-4f99-935b-bb49cd2d2d31</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            padding: 40px 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .header {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+        .header-main {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 20px;
+        }
+        .header-title h1 {
+            margin: 0 0 6px 0;
+            font-size: 24px;
+            color: #3b82f6;
+        }
+        .header-title p {
+            margin: 0;
+            color: #64748b;
+            font-size: 13px;
+            font-family: monospace;
+        }
+        .header-metadata {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .meta-row {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .meta-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 600px) {
+            .meta-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .meta-label {
+            font-size: 11px;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: bold;
+        }
+        .meta-value {
+            font-size: 15px;
+            color: #e2e8f0;
+            font-weight: 500;
+        }
+        .link-value {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+        .link-value:hover {
+            text-decoration: underline;
+        }
+        .badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .badge-passed { background-color: #10b981; color: #ffffff; }
+        .badge-failed { background-color: #ef4444; color: #ffffff; }
+        .badge-error { background-color: #f59e0b; color: #ffffff; }
+        
+        .error-banner {
+            background-color: #7f1d1d;
+            border: 1px solid #ef4444;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 32px;
+        }
+        .error-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #fca5a5;
+            margin-bottom: 8px;
+        }
+        .error-msg {
+            font-family: monospace;
+            font-size: 13px;
+            color: #fecaca;
+            white-space: pre-wrap;
+            background-color: #450a0a;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #991b1b;
+            overflow-x: auto;
+        }
+        .success-banner {
+            background-color: #064e3b;
+            border: 1px solid #10b981;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 32px;
+        }
+        .success-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #a7f3d0;
+        }
+        .btn-rerun {
+            background-color: #3b82f6;
+            color: #ffffff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .btn-rerun:hover {
+            background-color: #2563eb;
+        }
+        .btn-rerun:disabled {
+            background-color: #4b5563;
+            cursor: not-allowed;
+        }
+        .btn-workspace {
+            background-color: #1e293b;
+            color: #e2e8f0;
+            border: 1px solid #475569;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-block;
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+        .btn-workspace:hover {
+            background-color: #334155;
+            border-color: #64748b;
+        }
+
+        h2 {
+            font-size: 20px;
+            color: #f1f5f9;
+            margin-top: 32px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 8px;
+        }
+        
+        .step-card {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 24px;
+        }
+        @media (max-width: 768px) {
+            .step-card {
+                grid-template-columns: 1fr;
+            }
+        }
+        .step-left {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .step-right {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .step-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 12px;
+            margin-bottom: 12px;
+        }
+        .step-num {
+            background-color: #3b82f6;
+            color: #ffffff;
+            font-size: 12px;
+            font-weight: bold;
+            padding: 4px 10px;
+            border-radius: 6px;
+            text-transform: uppercase;
+        }
+        .step-title {
+            font-weight: bold;
+            font-size: 16px;
+            color: #e2e8f0;
+            flex-grow: 1;
+        }
+        .step-time {
+            font-family: monospace;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        .step-details {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            font-size: 14px;
+        }
+        .detail-row {
+            line-height: 1.6;
+            color: #cbd5e1;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #94a3b8;
+            display: block;
+            margin-bottom: 2px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .step-image img {
+            max-width: 100%;
+            max-height: 240px;
+            border-radius: 8px;
+            border: 1px solid #475569;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            object-fit: contain;
+        }
+        .no-image-box {
+            width: 100%;
+            height: 150px;
+            background-color: #0f172a;
+            border: 2px dashed #334155;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #475569;
+            font-size: 13px;
+        }
+        .summary-card {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 24px;
+            margin-top: 32px;
+        }
+        .summary-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #3b82f6;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-main">
+                <span class="badge badge-passed">
+                    PASSED
+                </span>
+                <div class="header-title">
+                    <h1>Enterprise Test Execution Report</h1>
+                    <p>Execution ID: b6631220-f6c3-4f99-935b-bb49cd2d2d31</p>
+                </div>
+            </div>
+            <div class="header-metadata">
+                <div class="meta-row">
+                    <span class="meta-label">Website Under Test</span>
+                    <a href="https://adactinhotelapp.com/" target="_blank" class="meta-value link-value">https://adactinhotelapp.com/</a>
+                </div>
+                <div class="meta-grid">
+                    <div class="meta-item">
+                        <span class="meta-label">Started At</span>
+                        <span class="meta-value">2026-07-18 12:44:41 UTC</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Execution Duration</span>
+                        <span class="meta-value">48.79 seconds</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Browser</span>
+                        <span class="meta-value">Chromium </span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Total Steps</span>
+                        <span class="meta-value">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        
+        <div class="success-banner">
+            <div class="success-title">Test Execution Passed</div>
+            <div style="margin-top: 16px; display: flex; gap: 12px; align-items: center;">
+                <button class="btn-rerun" onclick="rerunTestCase('2bd9e82e-a8be-4008-a3ba-ab7be5e88073')">Rerun Execution</button>
+                <a href="http://localhost:3000/execution/b6631220-f6c3-4f99-935b-bb49cd2d2d31" target="_blank" class="btn-workspace">Open in Playwright Workspace</a>
+            </div>
+        </div>
+        
+        
+        <h2>Step-by-Step Walkthrough</h2>
+        <div class="steps-container">
+            <div class='step-card'><p>No execution timeline events recorded.</p></div>
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-title">Execution Summary</div>
+            <div style="line-height: 1.6; color: #cbd5e1;">
+                The automated testcase completed successfully on the target application. A total of 0 steps were executed, verifying form element interactions. Visual screenshots were captured at critical checkpoints to verify correctness.
+            </div>
+        </div>
+    </div>
+
+    <script>
+    async function rerunTestCase(testCaseId) {
+        const btn = document.querySelector('.btn-rerun');
+        if (!btn) return;
+        btn.disabled = true;
+        btn.innerHTML = '🔄 Re-running...';
+        try {
+            const port = window.location.port;
+            const backendUrl = port === '3000' ? 'http://localhost:8000' : '';
+            const projectId = 'b4c13430-f95f-4ea5-b0ed-a09a0b3b324c';
+            const response = await fetch(`${backendUrl}/api/v1/projects/${projectId}/testcases/${testCaseId}/execute`, {
+                method: 'POST'
+            });
+            if (response.ok) {
+                const data = await response.json();
+                alert('Test case execution started! Redirecting to live simulation...');
+                window.open(`http://localhost:3000/execution/${data.execution_id}`, '_blank');
+            } else {
+                alert('Failed to trigger execution. Please try again from the dashboard.');
+            }
+        } catch (err) {
+            alert('Error: ' + err.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '🔄 Rerun Execution';
+        }
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,84 @@
+<div class="card validation-summary">
+    <div class="summary-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid #e2e8f0;">
+        <h2 style="margin: 0; display: flex; align-items: center; gap: 12px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            Validation Summary
+        </h2>
+        <div class="validation-count" style="background: #f1f5f9; color: #64748b; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;">
+            {{ context.total_validations }} Validations
+        </div>
+    </div>
+    
+    <div class="summary-stats" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-bottom: 32px;">
+        <div class="stat-card stat-pass" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 24px; text-align: center;">
+            <div class="stat-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #166534; margin-bottom: 8px;">PASS</div>
+            <div class="stat-value" style="font-size: 48px; font-weight: 700; color: #16a34a; line-height: 1;">{{ context.passed_count }}</div>
+        </div>
+        <div class="stat-card stat-fail" style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 24px; text-align: center;">
+            <div class="stat-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #991b1b; margin-bottom: 8px;">FAIL</div>
+            <div class="stat-value" style="font-size: 48px; font-weight: 700; color: #dc2626; line-height: 1;">{{ context.failed_count }}</div>
+        </div>
+        <div class="stat-card stat-warning" style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 24px; text-align: center;">
+            <div class="stat-label" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #92400e; margin-bottom: 8px;">WARNING</div>
+            <div class="stat-value" style="font-size: 48px; font-weight: 700; color: #d97706; line-height: 1;">{{ context.warning_count }}</div>
+        </div>
+    </div>
+    
+    <div class="summary-checklist" style="display: flex; flex-direction: column; gap: 8px;">
+        <div class="checklist-header" style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 12px;">
+            Validation Checklist
+        </div>
+        {% for validation in context.validations %}
+        {% set validation_index = loop.index %}
+        <a href="#validation-{{ validation_index }}" class="checklist-item {{ 'status-pass' if validation.result.value == 'PASS' else 'status-fail' if validation.result.value == 'FAIL' else 'status-warning' }}" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px; font-size: 14px; color: #475569; text-decoration: none; transition: background-color 0.2s;">
+            <span class="check-icon" style="font-size: 16px; font-weight: 600;">
+                {% if validation.result.value == 'PASS' %}✓{% elif validation.result.value == 'FAIL' %}✗{% else %}!{% endif %}
+            </span>
+            <span class="check-text">{{ validation.validation_title }}</span>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+
+<style>
+    .checklist-item.status-pass {
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+    }
+    
+    .checklist-item.status-fail {
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+    }
+    
+    .checklist-item.status-warning {
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+    }
+    
+    .checklist-item.status-pass .check-icon {
+        color: #16a34a;
+    }
+    
+    .checklist-item.status-fail .check-icon {
+        color: #dc2626;
+    }
+    
+    .checklist-item.status-warning .check-icon {
+        color: #d97706;
+    }
+    
+    .checklist-item:hover {
+        background-color: #f8fafc;
+    }
+    
+    @media (max-width: 768px) {
+        .summary-stats {
+            grid-template-columns: 1fr;
+        }
+        
+        .stat-value {
+            font-size: 36px;
+        }
+    }
+</style>

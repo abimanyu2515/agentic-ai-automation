@@ -1,0 +1,1322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agentic AI Automation</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
+</head>
+<body>
+
+  <!-- Login Overlay -->
+  <div id="login-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; background: rgba(10, 10, 10, 0.85); backdrop-filter: blur(16px); display: flex; align-items: center; justify-content: center;">
+    <div style="background: var(--bg-secondary); padding: 40px; border-radius: var(--border-radius-lg); border: 1px solid var(--border-color); width: 100%; max-width: 400px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); text-align: center;">
+      <div style="display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1.5rem; margin-bottom: 24px; color: var(--text-primary);">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 32px; height: 32px; color: var(--accent-primary);">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+        </svg>
+        <span style="color: var(--text-primary);">Agentic </span><span style="color: white;">AI</span><span style="color: var(--text-primary);"> Automation</span>
+      </div>
+      <h2 style="font-size: 1.4rem; font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">Sign In</h2>
+      <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 24px;">Access AI Test Automation Platform</p>
+      
+      <div id="login-error-msg" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; padding: 12px; border-radius: var(--border-radius-md); font-size: 0.85rem; margin-bottom: 20px; text-align: left;"></div>
+      
+      <form id="login-form">
+        <div class="form-group" style="text-align: left; margin-bottom: 16px;">
+          <label for="login-email" style="font-size: 0.8rem; margin-bottom: 6px; color: var(--text-secondary);">Email Address</label>
+          <input type="email" id="login-email" class="form-control" placeholder="admin@agenticai.com" required style="padding: 12px; font-size: 0.9rem;" />
+        </div>
+        <div class="form-group" style="text-align: left; margin-bottom: 24px;">
+          <label for="login-password" style="font-size: 0.8rem; margin-bottom: 6px; color: var(--text-secondary);">Password</label>
+          <input type="password" id="login-password" class="form-control" placeholder="••••••••" required style="padding: 12px; font-size: 0.9rem;" />
+        </div>
+        <button type="submit" class="btn btn-primary w-100" style="padding: 12px; font-size: 0.95rem; font-weight: 600;">Sign In</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Left Sidebar -->
+  <aside class="sidebar" id="sidebar-container" style="display: none;">
+    <div class="sidebar-header">
+      <div class="sidebar-logo">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 24px; height: 24px; color: var(--accent-primary);">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+        </svg>
+        <span style="color: var(--accent-primary);">Agentic </span><span style="color: white;">AI</span><span style="color: var(--accent-primary);"> Automation</span>
+      </div>
+    </div>
+    
+    <nav class="sidebar-nav">
+      <!-- Level 0: Global items -->
+      <div class="nav-item active" data-view="dashboard" data-level="0">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2v-4z" />
+        </svg>
+        QA Testing Dashboard
+      </div>
+      
+      <div class="nav-item" data-view="project" data-level="0">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+        </svg>
+        Project
+      </div>
+      
+      <!-- Level 1: Project-specific items (hidden by default) -->
+      <div class="nav-item nav-item-indented" data-view="requirements" data-level="1" style="display: none;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+        Requirement
+      </div>
+
+      <div class="nav-item nav-item-indented" data-view="scenarios" data-level="1" style="display: none;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+        </svg>
+        Scenarios
+      </div>
+
+      <div class="nav-item nav-item-indented" data-view="testcases" data-level="1" style="display: none;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+        </svg>
+        Test Cases
+      </div>
+
+      <div class="nav-item nav-item-indented" data-view="playwright" data-level="1" style="display: none;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        </svg>
+        Test Automation
+      </div>
+
+      <div class="nav-item nav-item-indented" data-view="executions" data-level="1" style="display: none;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        Execution Workspace
+      </div>
+
+      <div class="nav-item nav-item-indented" data-view="reports" data-level="1" style="display: none;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+        Reports
+      </div>
+
+      <!-- Level 0: Global items (continued) -->
+      <div class="nav-item" data-view="langsmith" data-level="0">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+        </svg>
+        LangSmith
+      </div>
+
+      <div class="nav-item" data-view="settings" data-level="0" style="margin-top: auto;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+        Master Settings
+      </div>
+    </nav>
+  </aside>
+
+  <!-- Main Layout -->
+  <main class="main-content">
+    
+    <!-- Top Navbar -->
+    <header class="top-nav" id="project-select-wrapper" style="display: none;">
+      <div class="project-selector-container" style="display: flex; align-items: center; gap: 12px;">
+        <select id="project-select" style="display: none;"></select>
+        <div id="project-combobox" class="project-combobox" style="position: relative;">
+          <div id="project-combobox-display" class="project-combobox-display" tabindex="0" style="cursor: pointer; display: flex; align-items: center; gap: 6px; background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--border-radius-md); padding: 6px 12px; font-size: 0.85rem; font-weight: 500; color: var(--text-primary); min-width: 200px; height: 32px;">
+            <svg style="width: 14px; height: 14px; color: var(--text-secondary); flex-shrink: 0;" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+            <span id="project-combobox-label" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Select Project</span>
+            <svg style="width: 12px; height: 12px; color: var(--text-secondary); margin-left: auto; flex-shrink: 0;" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </div>
+          <div id="project-combobox-dropdown" class="project-combobox-dropdown" style="display: none; position: absolute; top: calc(100% + 4px); left: 0; min-width: 280px; background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--border-radius-md); box-shadow: 0 8px 24px rgba(0,0,0,0.2); z-index: 1000; overflow: hidden;">
+            <input id="project-combobox-search" type="text" placeholder="Search projects..." style="width: 100%; padding: 8px 12px; border: none; border-bottom: 1px solid var(--border-color); background-color: var(--bg-primary); color: var(--text-primary); font-size: 0.85rem; font-family: var(--font-family); outline: none;" />
+            <div id="project-combobox-list" class="project-combobox-list" style="max-height: 240px; overflow-y: auto;"></div>
+          </div>
+        </div>
+        <select id="release-select" class="project-dropdown" style="display: none; background-color: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 6px 32px 6px 12px; border-radius: var(--border-radius-md); font-size: 0.85rem; font-weight: 500; cursor: pointer; outline: none; min-width: 160px; height: 32px; appearance: none; background-image: url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23666'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E&quot;); background-repeat: no-repeat; background-position: right 8px center; background-size: 14px;"></select>
+        <select id="cycle-select" class="project-dropdown" disabled style="display: none; background-color: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 6px 32px 6px 12px; border-radius: var(--border-radius-md); font-size: 0.85rem; font-weight: 500; cursor: pointer; outline: none; min-width: 160px; height: 32px; opacity: 0.5; appearance: none; background-image: url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23666'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E&quot;); background-repeat: no-repeat; background-position: right 8px center; background-size: 14px;"></select>
+      </div>
+      <div class="top-nav-actions" style="display: flex; align-items: center; gap: 16px; margin-left: auto;">
+        <button class="btn btn-secondary" id="btn-exit-project" title="Exit Project" style="display: none; align-items: center; gap: 6px; padding: 6px 12px; font-size: 0.8rem; height: 32px; background-color: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: var(--border-radius-md); cursor: pointer;">
+          <svg style="width: 14px; height: 14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+          <span class="btn-text">Exit Project</span>
+        </button>
+        <button class="btn btn-secondary" id="theme-toggle-btn" title="Toggle Theme" style="padding: 8px; border-radius: 50%; min-width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center;">
+          <svg id="theme-toggle-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px; color: var(--text-primary);">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+          </svg>
+        </button>
+        <button class="btn btn-primary" id="btn-create-requirement">+ Create Requirement</button>
+        <div id="user-profile-widget" style="display: flex; align-items: center; gap: 12px; border-left: 1px solid var(--border-color); padding-left: 16px; margin-left: 8px;">
+          <div style="text-align: right;">
+            <div id="current-user-name" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Guest</div>
+            <div id="current-user-role" style="font-size: 0.75rem; color: var(--accent-primary); font-weight: 500;">Role</div>
+          </div>
+          <button class="btn btn-secondary" onclick="handleLogout()" style="padding: 6px 10px; font-size: 0.8rem; height: 32px;">Logout</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace Container -->
+    <div class="workspace" id="workspace-container">
+      
+      <!-- VIEW: Project Start -->
+      <div class="view-panel" id="project-start-view"></div>
+
+      <!-- VIEW: Project -->
+      <div class="view-panel" id="project-view" style="display: none;">
+        <div class="page-header">
+          <h1>Projects</h1>
+          <input type="text" id="project-search" placeholder="Search projects..." 
+                 class="form-control" style="max-width: 300px;" />
+        </div>
+        <p class="page-description">Select a project to continue or create a new one.</p>
+        <div id="project-grid-container" class="project-grid">
+          <!-- Project cards will be populated dynamically -->
+        </div>
+      </div>
+
+      <!-- VIEW: Dashboard -->
+      <div class="view-panel active" id="dashboard-view">
+        
+        <!-- Header -->
+        <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; border-bottom: 1px solid var(--border-color); padding-bottom: 16px;">
+          <div>
+            <h1 style="font-size: 1.8rem; font-weight: 700; color: var(--text-primary); margin-bottom: 4px;">QA Testing Dashboard</h1>
+            <div style="display: flex; align-items: center; gap: 24px; font-size: 0.9rem; color: var(--text-secondary); margin-top: 8px; flex-wrap: wrap;">
+              <span id="dashboard-project-subtitle" style="color: var(--accent-teal); font-weight: 600;">Project: Loading...</span>
+              <span>Last Execution: <strong id="dashboard-last-exec-lbl" style="color: var(--text-primary);">Today 09:35 AM</strong></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="dashboard-scope-tabs" style="display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+          <button id="btn-db-scope-project" class="tab-btn active" onclick="window.switchDashboardScope('project')" style="background: none; border: none; color: var(--text-primary); cursor: pointer; padding: 6px 16px; font-weight: 600; font-size: 0.85rem; border-bottom: 2px solid var(--accent-primary); border-radius: 0;">Project Overview</button>
+          <button id="btn-db-scope-release" class="tab-btn" onclick="window.switchDashboardScope('release')" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 6px 16px; font-weight: 500; font-size: 0.85rem; border-radius: 0;">Release Info</button>
+          <button id="btn-db-scope-cycle" class="tab-btn" onclick="window.switchDashboardScope('cycle')" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 6px 16px; font-weight: 500; font-size: 0.85rem; border-radius: 0;">Test Cycle Info</button>
+        </div>
+
+        <!-- Row 1: KPI Cards -->
+        <div class="dashboard-grid kpi-grid" id="dashboard-metrics-grid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 16px; margin-bottom: 24px;">
+          <!-- KPI Cards populated dynamically (6 equal columns) -->
+        </div>
+
+        <!-- Row 2: Main Analytics (2 columns) -->
+        <div class="dashboard-layout-row row-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+          <!-- Left: Execution Status Pie Chart -->
+          <div class="section-card chart-card" style="display: flex; flex-direction: column; justify-content: space-between;">
+            <h2>Execution Status</h2>
+            <div style="position: relative; height: 210px; display: flex; align-items: center; justify-content: center;">
+              <canvas id="execution-pie-chart"></canvas>
+            </div>
+            <div id="execution-pie-chart-legend" style="display: flex; justify-content: space-around; font-size: 0.85rem; margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 12px;">
+              <!-- Dynamic legend counts -->
+            </div>
+          </div>
+          <!-- Right: Execution Summary Stats Table -->
+          <div class="section-card" style="display: flex; flex-direction: column; justify-content: space-between;">
+            <h2>Execution Summary</h2>
+            <div class="table-container" style="border: none; background: transparent; padding: 0; margin-top: 12px; flex-grow: 1; display: flex; align-items: center;">
+              <table class="custom-table dashboard-summary-table" style="width: 100%;">
+                <tbody id="dashboard-summary-tbody">
+                  <!-- Generated dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- NEW: Requirement Documents Section -->
+        <div class="section-card" id="requirement-documents-section" style="margin-bottom: 24px;">
+          <div class="requirement-documents-header" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="app.toggleRequirementDocuments()">
+            <h2 style="display: flex; align-items: center; gap: 8px; margin: 0;">
+              <span id="req-docs-toggle-icon">▼</span>
+              <span>Requirement Documents</span>
+              <span id="req-docs-count" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">(0)</span>
+            </h2>
+          </div>
+          <div id="requirement-documents-grid" class="requirement-documents-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin-top: 20px;">
+            <!-- Document cards will be rendered here dynamically -->
+          </div>
+        </div>
+
+        <!-- Row 3: Trend & Scenario Approval -->
+        <div class="dashboard-layout-row row-3" style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 24px; margin-bottom: 24px;">
+          <!-- Left: Execution Trend Bar Chart -->
+          <div class="section-card chart-card">
+            <h2>Execution Trend</h2>
+            <div style="position: relative; height: 220px; margin-top: 12px;">
+              <canvas id="trend-bar-chart"></canvas>
+            </div>
+          </div>
+          <!-- Right: Scenario Approval Donut Chart -->
+          <div class="section-card chart-card" style="display: flex; flex-direction: column; justify-content: space-between;">
+            <h2>Scenario Approval</h2>
+            <div style="position: relative; height: 180px; display: flex; align-items: center; justify-content: center; margin-top: 12px;">
+              <canvas id="approval-donut-chart"></canvas>
+            </div>
+            <div id="approval-donut-chart-legend" style="display: flex; justify-content: space-around; font-size: 0.85rem; margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 10px;">
+              <!-- Dynamic legend counts -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 4: Recent Executions, Workflow Progress, and General Activities -->
+        <div class="dashboard-layout-row row-4" style="display: grid; grid-template-columns: 1.2fr 0.9fr 0.9fr; gap: 24px; margin-bottom: 24px;">
+          <!-- Left: Recent Executions Table -->
+          <div class="section-card" style="display: flex; flex-direction: column;">
+            <h2>Recent Executions</h2>
+            <div class="table-container" style="border: none; background: transparent; padding: 0; margin-top: 12px; flex-grow: 1; max-height: 280px; overflow-y: auto;">
+              <table class="custom-table dashboard-recent-exec-table" style="width: 100%; border-collapse: collapse;">
+                <thead>
+                  <tr style="border-bottom: 1px solid var(--border-color);">
+                    <th style="text-align: left; padding: 8px 12px; font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">Test Case</th>
+                    <th style="text-align: center; padding: 8px 12px; font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">Status</th>
+                    <th style="text-align: right; padding: 8px 12px; font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">Duration</th>
+                    <th style="text-align: right; padding: 8px 12px; font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">Time</th>
+                  </tr>
+                </thead>
+                <tbody id="recent-executions-tbody">
+                  <!-- Dynamic rows -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <!-- Middle: Workflow Progress Timeline -->
+          <div class="section-card" style="display: flex; flex-direction: column;">
+            <h2>Workflow Progress</h2>
+            <div class="vertical-timeline" id="workflow-timeline-vertical" style="margin-top: 16px; flex-grow: 1; display: flex; flex-direction: column; gap: 14px;">
+              <!-- Generated dynamically -->
+            </div>
+          </div>
+          <!-- Right: Recent Activity Feed (Audit Logs) -->
+          <div class="section-card" style="display: flex; flex-direction: column;">
+            <h2>Recent Activity Feed</h2>
+            <div class="activities-list" id="recent-activity-list" style="max-height: 280px; overflow-y: auto; margin-top: 12px;">
+              <!-- Logs populated dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 5: Secondary Analytics (3 columns) -->
+        <div class="dashboard-layout-row row-5" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+          <!-- Left: Requirement Distribution Bar Chart -->
+          <div class="section-card chart-card">
+            <h2>Requirement Distribution</h2>
+            <div style="position: relative; height: 180px; margin-top: 12px;">
+              <canvas id="domain-bar-chart"></canvas>
+            </div>
+          </div>
+          <!-- Middle: Test Case Priority Donut Chart -->
+          <div class="section-card chart-card">
+            <h2>Test Case Priority</h2>
+            <div style="position: relative; height: 180px; margin-top: 12px;">
+              <canvas id="priority-donut-chart"></canvas>
+            </div>
+          </div>
+          <!-- Right: Defect Status Pie Chart -->
+          <div class="section-card chart-card">
+            <h2>Defect Status</h2>
+            <div style="position: relative; height: 180px; margin-top: 12px;">
+              <canvas id="defect-pie-chart"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Health Status Footer -->
+        <div class="dashboard-footer" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; padding: 16px; border-radius: var(--border-radius-lg); background-color: var(--bg-secondary); border: 1px solid var(--border-color); font-size: 0.85rem; font-weight: 500;">
+          <div class="footer-health-item" style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <span class="health-dot" id="health-langsmith" style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--color-success);"></span>
+            <span>LangSmith: <strong id="health-lbl-langsmith" style="color: var(--text-primary);">Connected</strong></span>
+          </div>
+          <div class="footer-health-item" style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <span class="health-dot" id="health-jira" style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--color-success);"></span>
+            <span>Jira Integration: <strong id="health-lbl-jira" style="color: var(--text-primary);">Connected</strong></span>
+          </div>
+          <div class="footer-health-item" style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <span class="health-dot" id="health-rag" style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--color-success);"></span>
+            <span>RAG Store: <strong id="health-lbl-rag" style="color: var(--text-primary);">Connected</strong></span>
+          </div>
+          <div class="footer-health-item" style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <span class="health-dot" id="health-playwright" style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--color-success);"></span>
+            <span>Playwright: <strong id="health-lbl-playwright" style="color: var(--text-primary);">Ready</strong></span>
+          </div>
+          <div class="footer-health-item" style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <span class="health-dot" style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--color-success);"></span>
+            <span>Database Status: <strong style="color: var(--text-primary);">Healthy</strong></span>
+          </div>
+        </div>
+
+        <!-- Hidden old timeline node to prevent js error -->
+        <div id="workflow-timeline" style="display: none;"></div>
+
+      </div>
+
+      <!-- VIEW: Requirements -->
+      <div class="view-panel" id="requirements-view">
+        <div class="page-header">
+          <h1>Requirement</h1>
+          <div class="gap-12" style="display: flex; align-items: center; gap: 12px;">
+            <div style="display: flex; align-items: center; border: 1px solid var(--border-color); border-radius: var(--border-radius); overflow: hidden; height: 38px;">
+              <input type="text" id="jira-story-key-input" placeholder="JIRA Story Key (e.g. QA-101)" style="border: none; padding: 0 12px; font-size: 0.85rem; background: var(--bg-secondary); color: var(--text-primary); outline: none; width: 220px; height: 100%;" />
+              <button class="btn btn-primary" id="btn-import-jira-story" style="border: none; border-radius: 0; height: 100%; display: flex; align-items: center; padding: 0 16px; font-size: 0.85rem;">Import JIRA Story</button>
+            </div>
+            <button class="btn btn-secondary" onclick="document.getElementById('import-req-file').click()">Import Requirement File</button>
+            <input type="file" id="import-req-file" style="display: none;" accept=".xlsx,.xls,.pdf,.docx,.doc,.txt" />
+          </div>
+        </div>
+
+        <!-- Dropzone for Requirement Document Import -->
+        <div class="form-group" style="margin-bottom: 24px;">
+          <div id="req-upload-dropzone" style="border: 2px dashed var(--border-color); padding: 32px; border-radius: var(--border-radius-lg); text-align: center; color: var(--text-muted); cursor: pointer; transition: all var(--transition-fast); background-color: var(--bg-secondary);">
+            Drag and drop requirement document files here to parse (XLSX, PDF, DOCX, TXT)
+          </div>
+        </div>
+
+        <p class="page-description">Specify requirements below. Scenarios are drafted automatically using requirement scopes.</p>
+        <div id="requirements-list-container">
+          <!-- Table loaded dynamically -->
+        </div>
+      </div>
+
+      <!-- VIEW: Scenarios -->
+      <div class="view-panel" id="scenarios-view">
+        <div class="page-header">
+          <h1>Scenario Generation</h1>
+          <div id="scenarios-actions-toolbar" class="gap-12" style="display: none; align-items: center;">
+            <button class="btn btn-secondary" id="btn-bulk-approve">Bulk Approve</button>
+            <button class="btn btn-secondary" id="btn-bulk-reject">Bulk Reject</button>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 500;">Count:</span>
+              <input type="number" id="sc-generation-count" class="form-control" value="3" min="1" max="50" style="width: 60px; padding: 4px 8px; font-size: 0.85rem;" />
+            </div>
+            <button class="btn btn-primary" id="btn-generate-scenarios">Generate Scenarios</button>
+          </div>
+        </div>
+        
+        <div class="form-group" style="max-width: 400px; margin-bottom: 24px; gap: 8px;">
+          <label for="scenario-req-search">Search Requirement</label>
+          <input type="text" id="scenario-req-search" class="form-control" placeholder="Search requirement by title, ID, desc..." style="padding: 6px 12px; font-size: 0.85rem;" />
+          <label for="scenario-req-select">Select Active Requirement</label>
+          <select id="scenario-req-select" class="form-control">
+            <option value="" disabled selected>▼ Choose Requirement</option>
+          </select>
+        </div>
+
+        <div id="scenarios-list-container">
+          <!-- Loaded dynamically -->
+        </div>
+      </div>
+
+      <div class="view-panel" id="testcases-view">
+        <div class="page-header">
+          <h1>Test Cases Workspace</h1>
+          <div id="testcases-actions-toolbar" class="gap-12" style="display: none;">
+            <button class="btn btn-secondary" id="btn-bulk-tc-approve">Bulk Approve</button>
+            <button class="btn btn-secondary" id="btn-bulk-tc-reject">Bulk Reject</button>
+            <span id="tc-generation-warning" style="color: var(--color-warning); font-size: 0.8rem; align-self: center; display: none;"></span>
+            <button class="btn btn-primary" id="btn-generate-testcases">Generate & Evaluate Test Cases</button>
+          </div>
+        </div>
+
+        <div id="testcases-jira-trace-container" style="display: none; background: rgba(30, 41, 59, 0.5); border: 1px solid var(--border-color); border-radius: var(--border-radius-md); padding: 16px; margin-bottom: 24px; font-size: 0.9rem;">
+          <!-- Populated dynamically -->
+        </div>
+
+        <div class="form-group" style="max-width: 400px; margin-bottom: 24px; gap: 8px;">
+          <label for="tc-req-search">Search Requirement</label>
+          <input type="text" id="tc-req-search" class="form-control" placeholder="Search requirement by title, ID, desc..." style="padding: 6px 12px; font-size: 0.85rem;" />
+          <label for="tc-req-select">Select Active Requirement</label>
+          <select id="tc-req-select" class="form-control">
+            <option value="" disabled selected>▼ Choose Requirement</option>
+          </select>
+        </div>
+
+        <div id="testcases-list-container">
+          <!-- Loaded dynamically -->
+        </div>
+
+        <div id="testcase-framework-footer" style="margin-top: 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">Framework:</span>
+            <select id="project-framework-select" class="form-control" style="width: 120px; padding: 4px 8px; font-size: 0.85rem; height: 36px;">
+              <option value="playwright">Playwright</option>
+              <option value="selenium">Selenium</option>
+              <option value="cucumber">Cucumber</option>
+            </select>
+          </div>
+          <div id="testcase-bulk-script-container" style="display: none; gap: 12px;">
+            <button class="btn btn-primary" id="btn-generate-all-scripts" style="padding: 10px 20px; font-size: 0.9rem;">Generate Playwright Scripts for All Approved Test Cases</button>
+            <button class="btn btn-primary" id="btn-run-selected-batch" style="padding: 10px 20px; font-size: 0.9rem; background-color: var(--color-success); border-color: var(--color-success);">Run Selected Batch</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEW: Scenario Approval -->
+      <div class="view-panel" id="scenario-approval-view">
+        <div class="page-header">
+          <h1>Scenario Approval Checkpoint</h1>
+          <div id="sc-approval-actions-toolbar" class="gap-12" style="display: none;">
+            <button class="btn btn-secondary" id="btn-sc-approval-bulk-approve">Bulk Approve</button>
+            <button class="btn btn-secondary" id="btn-sc-approval-bulk-reject">Bulk Reject</button>
+          </div>
+        </div>
+        
+        <div class="form-group" style="max-width: 400px; margin-bottom: 24px;">
+          <label for="sc-approval-req-select">Select Active Requirement</label>
+          <select id="sc-approval-req-select" class="form-control">
+            <option value="" disabled selected>▼ Choose Requirement</option>
+          </select>
+        </div>
+
+        <div id="scenario-approval-list-container">
+          <!-- Loaded dynamically -->
+        </div>
+      </div>
+
+      <!-- VIEW: Test Case Approval -->
+      <div class="view-panel" id="testcase-approval-view">
+        <div class="page-header">
+          <h1>Test Case Approval & Scripting</h1>
+          <div id="tc-approval-actions-toolbar" class="gap-12" style="display: none;">
+            <button class="btn btn-secondary" id="btn-tc-approval-bulk-approve">Bulk Approve</button>
+            <button class="btn btn-secondary" id="btn-tc-approval-bulk-reject">Bulk Reject</button>
+          </div>
+        </div>
+
+        <div class="form-group" style="max-width: 400px; margin-bottom: 24px;">
+          <label for="tc-approval-req-select">Select Active Requirement</label>
+          <select id="tc-approval-req-select" class="form-control">
+            <option value="" disabled selected>▼ Choose Requirement</option>
+          </select>
+        </div>
+
+        <div id="testcase-approval-list-container">
+          <!-- Loaded dynamically -->
+        </div>
+      </div>
+
+      <!-- VIEW: Playwright Workspace -->
+      <div class="view-panel" id="playwright-view">
+        <div class="page-header">
+          <h1>Test Automation Workspace</h1>
+        </div>
+        <p class="page-description">Author, edit, and run automated script executions in the dedicated Test Automation Workspace.</p>
+        
+        <div style="display: flex; justify-content: center; align-items: center; min-height: 400px; padding: 20px;">
+          <div class="metric-card" style="max-width: 500px; text-align: center; padding: 40px; display: flex; flex-direction: column; align-items: center; gap: 20px;">
+            <div style="background-color: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 50%; width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px;">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 36px; height: 36px; color: var(--accent-primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+              </svg>
+            </div>
+            <h2 style="font-size: 1.5rem; font-weight: 600; margin: 0; color: var(--text-primary);">Test Automation Execution Subsystem</h2>
+            <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; margin: 0;">
+              Execute browser automation scripts with real-time browser preview, interactive timelines, console logs, and video/trace collection.
+            </p>
+            <button class="btn btn-primary" id="btn-launch-playwright-workspace" style="padding: 12px 24px; font-size: 0.95rem; margin-top: 8px;">
+              Open Test Automation Workspace
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEW: Execution Workspace Observer -->
+      <div class="view-panel" id="execution-workspace-view">
+        <div class="page-header">
+          <h1>Execution Workspace Observer</h1>
+          <button class="btn btn-secondary" onclick="window.location.hash = '#/executions'">Back to History</button>
+        </div>
+        <p class="page-description" id="obs-title-desc">Monitoring test automation stream in real-time. Survives page refreshes.</p>
+        <div id="execution-observer-body">
+          <!-- 5-panels layout loaded dynamically -->
+        </div>
+      </div>
+
+      <!-- VIEW: Executions History -->
+      <div class="view-panel" id="executions-view">
+        <div class="page-header">
+          <h1>Executions History</h1>
+        </div>
+        <p class="page-description">Chronological log of test automation executions, statuses, timing parameters, and test replays.</p>
+        <div id="executions-list-container">
+          <!-- Table loaded dynamically -->
+        </div>
+      </div>
+
+      <!-- VIEW: Reports -->
+      <div class="view-panel" id="reports-view">
+        <div class="page-header">
+          <h1>Execution Reports</h1>
+        </div>
+        <p class="page-description">Aggregated status indicators and JUnit XML document logs generated automatically post execution run.</p>
+        
+        <!-- Filter Controls -->
+        <div class="section-card" style="margin-bottom: 24px;">
+          <h3 style="margin-bottom: 16px; font-size: 1.1rem; color: var(--text-primary);">Filter Reports</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 16px; align-items: end;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="filter-us-number" style="font-size: 0.85rem; margin-bottom: 6px; color: var(--text-secondary);">User Story (US)</label>
+              <select id="filter-us-number" class="form-control" style="padding: 10px; font-size: 0.9rem;">
+                <option value="">All User Stories</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="filter-tc-number" style="font-size: 0.85rem; margin-bottom: 6px; color: var(--text-secondary);">Test Case (TC)</label>
+              <select id="filter-tc-number" class="form-control" style="padding: 10px; font-size: 0.9rem;">
+                <option value="">All Test Cases</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="filter-status" style="font-size: 0.85rem; margin-bottom: 6px; color: var(--text-secondary);">Status</label>
+              <select id="filter-status" class="form-control" style="padding: 10px; font-size: 0.9rem;">
+                <option value="">All Statuses</option>
+                <option value="passed">Passed</option>
+                <option value="failed">Failed</option>
+                <option value="error">Error</option>
+                <option value="skipped">Skipped</option>
+              </select>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary" onclick="app.applyReportFilters()" style="padding: 10px 20px; font-size: 0.9rem; white-space: nowrap;">Apply Filters</button>
+              <button class="btn btn-secondary" onclick="app.clearReportFilters()" style="padding: 10px 20px; font-size: 0.9rem; white-space: nowrap;">Clear</button>
+            </div>
+          </div>
+          <div id="filter-results-summary" style="margin-top: 12px; font-size: 0.85rem; color: var(--text-secondary);"></div>
+        </div>
+        
+        <div id="reports-workspace-container">
+          <!-- Loaded dynamically -->
+        </div>
+      </div>
+
+      <!-- VIEW: LangSmith -->
+      <div class="view-panel" id="langsmith-view">
+        <div class="page-header">
+          <h1>LangSmith Traces</h1>
+        </div>
+        <p class="page-description">Trace latency, costs, prompt logs, and retry behaviors on LLM agent calls.</p>
+        <div id="langsmith-traces-container">
+          <!-- Tracks loaded dynamically -->
+        </div>
+      </div>
+
+      <!-- VIEW: Settings -->
+      <div class="view-panel" id="settings-view">
+        <div class="page-header">
+          <h1>Master Settings</h1>
+        </div>
+        
+        <div class="settings-tabs" style="display: flex; gap: 16px; margin-bottom: 24px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+          <button class="tab-btn active" onclick="switchSettingsTab('general')" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 8px 16px; font-weight: 500; font-size: 0.9rem; position: relative; bottom: -9px; border-bottom: 2px solid transparent;">General Settings</button>
+          <button class="tab-btn" onclick="switchSettingsTab('external-tools')" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 8px 16px; font-weight: 500; font-size: 0.9rem; position: relative; bottom: -9px; border-bottom: 2px solid transparent;">External Tools</button>
+          <button class="tab-btn" onclick="switchSettingsTab('project')" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 8px 16px; font-weight: 500; font-size: 0.9rem; position: relative; bottom: -9px; border-bottom: 2px solid transparent;">Project Settings</button>
+          <button class="tab-btn" onclick="switchSettingsTab('rbac')" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 8px 16px; font-weight: 500; font-size: 0.9rem; position: relative; bottom: -9px; border-bottom: 2px solid transparent;">Access Rights (RBAC)</button>
+          <button class="tab-btn" onclick="switchSettingsTab('users')" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 8px 16px; font-weight: 500; font-size: 0.9rem; position: relative; bottom: -9px; border-bottom: 2px solid transparent;">User Management</button>
+          <button class="tab-btn" onclick="switchSettingsTab('audit')" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 8px 16px; font-weight: 500; font-size: 0.9rem; position: relative; bottom: -9px; border-bottom: 2px solid transparent;">Audit Logs</button>
+          <button class="tab-btn" onclick="switchSettingsTab('admin')" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 8px 16px; font-weight: 500; font-size: 0.9rem; position: relative; bottom: -9px; border-bottom: 2px solid transparent;">Admin Controls</button>
+        </div>
+
+        <!-- Tab 1: General Settings Form -->
+        <div id="settings-tab-general" class="settings-tab-content active">
+          <p class="page-description">Configure the global platform parameters below. Overrides are persisted directly inside override.yaml.</p>
+          <form id="settings-form">
+            <div class="settings-grid">
+              <div>
+                <div class="settings-section">
+                  <div class="settings-section-title">Large Language Model Settings</div>
+                  <div class="form-group">
+                    <label for="settings-llm-provider">LLM Provider</label>
+                    <select id="settings-llm-provider" class="form-control">
+                      <option value="openai">OpenAI</option>
+                      <option value="gemini">Gemini</option>
+                      <option value="ollama">Ollama / Local LLM</option>
+                      <option value="anthropic">Anthropic Claude</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-llm-model">Model Name</label>
+                    <input type="text" id="settings-llm-model" class="form-control" />
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-llm-temp">Temperature (0.0 - 1.0)</label>
+                    <input type="number" step="0.1" min="0" max="1" id="settings-llm-temp" class="form-control" />
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-llm-key">API Key (Optional)</label>
+                    <input type="password" id="settings-llm-key" class="form-control" placeholder="••••••••" />
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-llm-base">API Base URL (Ollama / Local Only)</label>
+                    <input type="text" id="settings-llm-base" class="form-control" placeholder="http://localhost:11434" />
+                  </div>
+                </div>
+                
+                <div class="settings-section">
+                  <div class="settings-section-title">Workflow & Review Settings</div>
+                  <div class="form-group">
+                    <label for="settings-wf-mode">Workflow Mode</label>
+                    <select id="settings-wf-mode" class="form-control">
+                      <option value="sequential">Sequential Process</option>
+                      <option value="parallel">Parallel Branches</option>
+                      <option value="langgraph">LangGraph Orchestrated</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-wf-review">Enable Human Review</label>
+                    <select id="settings-wf-review" class="form-control">
+                      <option value="true">Enable Manual Review</option>
+                      <option value="false">Fully Automated (Auto-Approve)</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-wf-eval-threshold">Evaluation Quality Threshold</label>
+                    <input type="number" step="0.05" min="0" max="1" id="settings-wf-eval-threshold" class="form-control" />
+                  </div>
+                </div>
+              </div>
+              
+              <div>
+                <div class="settings-section">
+                  <div class="settings-section-title">Automation Generation Settings</div>
+                  <div class="form-group">
+                    <label for="settings-gen-count">Default Scenario Count</label>
+                    <input type="number" id="settings-gen-count" class="form-control" min="1" max="100" />
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-eval-dup">Duplicate Word Overlap (Jaccard) Threshold</label>
+                    <input type="number" step="0.05" min="0" max="1" id="settings-eval-dup" class="form-control" />
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-eval-rej">Relevance Rejection Floor</label>
+                    <input type="number" step="0.05" min="0" max="1" id="settings-eval-rej" class="form-control" />
+                  </div>
+                </div>
+                
+                <div class="settings-section">
+                  <div class="settings-section-title">Test Automation Browser Settings</div>
+                  <div class="form-group">
+                    <label for="settings-browser-type">Browser Target</label>
+                    <select id="settings-browser-type" class="form-control">
+                      <option value="chromium">Chromium (Chrome)</option>
+                      <option value="firefox">Firefox</option>
+                      <option value="webkit">WebKit (Safari)</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-browser-headless">Headless execution</label>
+                    <select id="settings-browser-headless" class="form-control">
+                      <option value="true">Headless (Background)</option>
+                      <option value="false">Headed (Visual Screen)</option>
+                    </select>
+                  </div>
+                </div>
+                
+                <div class="settings-section">
+                  <div class="settings-section-title">Knowledge Base RAG Settings</div>
+                  <div class="form-group">
+                    <label for="settings-rag-enabled">Enable RAG Engine</label>
+                    <select id="settings-rag-enabled" class="form-control">
+                      <option value="true">Active (Use RAG context)</option>
+                      <option value="false">Inactive (Direct LLM generation)</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-rag-provider">Vector DB / RAG Provider</label>
+                    <select id="settings-rag-provider" class="form-control">
+                      <option value="ragflow">RAGFlow Platform</option>
+                      <option value="qdrant">Qdrant DB</option>
+                      <option value="chroma">Chroma DB (Local)</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-rag-api-base">RAGFlow API Base URL</label>
+                    <input type="text" id="settings-rag-api-base" class="form-control" placeholder="http://localhost:9380" />
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-rag-api-key">RAGFlow API Key</label>
+                    <input type="password" id="settings-rag-api-key" class="form-control" placeholder="••••••••" />
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-rag-dataset-id">RAGFlow Dataset ID</label>
+                    <input type="text" id="settings-rag-dataset-id" class="form-control" placeholder="your-dataset-uuid" />
+                  </div>
+                </div>
+                
+                <div class="settings-section">
+                  <div class="settings-section-title">JIRA Integration Settings</div>
+                  <div class="form-group">
+                    <label for="settings-jira-base-url">JIRA Base URL</label>
+                    <input type="text" id="settings-jira-base-url" class="form-control" placeholder="https://your-domain.atlassian.net" />
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-jira-email">JIRA Account Email</label>
+                    <input type="text" id="settings-jira-email" class="form-control" placeholder="user@company.com" />
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-jira-api-token">JIRA API Token</label>
+                    <input type="password" id="settings-jira-api-token" class="form-control" placeholder="••••••••" />
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-jira-project-key">Default JIRA Project Key</label>
+                    <input type="text" id="settings-jira-project-key" class="form-control" placeholder="QA" />
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-jira-default-issue-type">Default Issue Type</label>
+                    <input type="text" id="settings-jira-default-issue-type" class="form-control" placeholder="Story" />
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-jira-resolved-statuses">Resolved Bug Statuses (Comma Separated)</label>
+                    <input type="text" id="settings-jira-resolved-statuses" class="form-control" placeholder="Done, Closed, Resolved" />
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-jira-verify-ssl">Verify SSL Certificates</label>
+                    <select id="settings-jira-verify-ssl" class="form-control">
+                      <option value="true">True</option>
+                      <option value="false">False</option>
+                    </select>
+                  </div>
+                </div>
+                
+                <button type="submit" class="btn btn-primary w-100" style="padding: 12px;">Save Global Master Settings</button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <!-- Tab: External Tools Integration -->
+        <div id="settings-tab-external-tools" class="settings-tab-content">
+          <p class="page-description">Integrate external tools and services by providing API keys and configuration. Settings are saved to .env file.</p>
+          
+          <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--border-radius-lg); padding: 24px; max-width: 800px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+              <h2 style="font-size: 1.1rem; font-weight: 600;">External Tools Integration</h2>
+            </div>
+            
+            <div id="external-tools-container">
+              <!-- Tool Selection -->
+              <div class="form-group" style="margin-bottom: 20px;">
+                <label for="external-tool-select" style="display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500;">Select Tool to Configure</label>
+                <select id="external-tool-select" class="form-control" onchange="window.loadExternalToolForm()" style="width: 100%;">
+                  <option value="">-- Choose a tool --</option>
+                  <option value="adio">Adio</option>
+                  <option value="langsmith">LangSmith</option>
+                  <option value="ragflow">RAGFlow</option>
+                  <option value="jira">JIRA</option>
+                  <option value="custom">Custom Tool</option>
+                </select>
+              </div>
+
+              <!-- Dynamic Tool Configuration Form -->
+              <div id="external-tool-form-container" style="display: block;">
+                <form id="external-tool-form" onsubmit="window.saveExternalToolConfig(event)">
+                  <div class="form-group" style="margin-bottom: 16px;">
+                    <label for="tool-name" style="display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500;">Tool Name</label>
+                    <input type="text" id="tool-name" class="form-control" placeholder="e.g., My Adio Instance" style="width: 100%;" required />
+                  </div>
+                  
+                  <div class="form-group" style="margin-bottom: 16px;">
+                    <label for="tool-api-key" style="display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500;">API Key</label>
+                    <input type="password" id="tool-api-key" class="form-control" placeholder="••••••••" style="width: 100%;" required />
+                  </div>
+                  
+                  <div class="form-group" style="margin-bottom: 16px;">
+                    <label for="tool-api-url" style="display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500;">API URL</label>
+                    <input type="text" id="tool-api-url" class="form-control" placeholder="https://api.example.com" style="width: 100%;" required />
+                  </div>
+
+                  <div class="form-group" style="margin-bottom: 24px;">
+                    <label for="tool-description" style="display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500;">Description (Optional)</label>
+                    <textarea id="tool-description" class="form-control" placeholder="Brief description of this tool integration..." style="width: 100%; min-height: 80px;"></textarea>
+                  </div>
+
+                  <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                    <button type="button" class="btn btn-secondary" onclick="window.cancelExternalToolConfig()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Configuration</button>
+                  </div>
+                </form>
+              </div>
+
+              <!-- Configured Tools List -->
+              <div id="configured-tools-list" style="margin-top: 24px;">
+                <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 12px;">Configured Tools</h3>
+                <div id="configured-tools-container" style="display: flex; flex-direction: column; gap: 12px;">
+                  <!-- Dynamically populated -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 5: Project Settings (Target Application Credentials) -->
+        <div id="settings-tab-project" class="settings-tab-content">
+          <p class="page-description">Configure target URL and automation credentials for the currently selected project workspace.</p>
+          <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--border-radius-lg); padding: 24px; max-width: 600px; margin: 0 auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+              <h2 style="font-size: 1.1rem; font-weight: 600;">Project Target Application Settings</h2>
+            </div>
+            
+            <form id="project-settings-form" onsubmit="saveProjectSettings(event)">
+              <div class="form-group" style="margin-bottom: 16px;">
+                <label for="project-settings-url" style="display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500;">Target Application Base URL</label>
+                <input type="text" id="project-settings-url" class="form-control" placeholder="https://adactinhotelapp.com" style="width: 100%;" required />
+              </div>
+              <div class="form-group" style="margin-bottom: 16px;">
+                <label for="project-settings-username" style="display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500;">Target Application Username</label>
+                <input type="text" id="project-settings-username" class="form-control" placeholder="e.g. adactin_user" style="width: 100%;" />
+              </div>
+              <div class="form-group" style="margin-bottom: 24px;">
+                <label for="project-settings-password" style="display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500;">Target Application Password</label>
+                <input type="password" id="project-settings-password" class="form-control" placeholder="••••••••" style="width: 100%;" />
+              </div>
+              <button type="submit" class="btn btn-primary w-100" style="padding: 12px; font-weight: 600;">Save Project Settings</button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Tab 2: Access Rights (RBAC) -->
+        <div id="settings-tab-rbac" class="settings-tab-content">
+          <p class="page-description">Manage access permissions across different modules. Select checkboxes to assign permissions dynamically.</p>
+          <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--border-radius-lg); padding: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+              <div class="form-group" style="width: 250px; margin-bottom: 0;">
+                <label for="rbac-role-select">Select Role to Edit</label>
+                <select id="rbac-role-select" class="form-control" onchange="loadRolePermissionsGrid()">
+                  <!-- Dynamically populated -->
+                </select>
+              </div>
+              <button class="btn btn-primary" onclick="saveRolePermissionsGrid()">Save Permissions Matrix</button>
+            </div>
+            
+            <div class="table-container">
+              <table class="perm-matrix-table">
+                <thead>
+                  <tr>
+                    <th style="text-align: left;">Module</th>
+                    <th>View</th>
+                    <th>Create</th>
+                    <th>Edit</th>
+                    <th>Delete</th>
+                    <th>Approve</th>
+                  </tr>
+                </thead>
+                <tbody id="perm-matrix-tbody">
+                  <!-- Dynamically populated via JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: User Management -->
+        <div id="settings-tab-users" class="settings-tab-content">
+          <p class="page-description">Create, deactivate, and assign roles to platform operators globally or per workspace.</p>
+          <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--border-radius-lg); padding: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+              <h2 style="font-size: 1.1rem; font-weight: 600;">System Users</h2>
+              <button class="btn btn-primary" onclick="openModal('create-user-modal')">+ Create User</button>
+            </div>
+            <div class="table-container">
+              <table class="custom-table">
+                <thead>
+                  <tr>
+                    <th>Operator</th>
+                    <th>Email</th>
+                    <th>System Role</th>
+                    <th>Status</th>
+                    <th style="text-align: right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="user-management-tbody">
+                  <!-- Dynamically populated -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 4: Audit Logs -->
+        <div id="settings-tab-audit" class="settings-tab-content">
+          <p class="page-description">Trace platform activity trails, operations, security sessions, and dynamic state transitions.</p>
+          <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--border-radius-lg); padding: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+              <h2 style="font-size: 1.1rem; font-weight: 600;">Operation Logs</h2>
+              <button class="btn btn-secondary" onclick="loadAuditLogsTab()">Refresh</button>
+            </div>
+            <div class="table-container">
+              <table class="custom-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Operator</th>
+                    <th>Project</th>
+                    <th>Module</th>
+                    <th>Action</th>
+                    <th>Change Details</th>
+                  </tr>
+                </thead>
+                <tbody id="audit-logs-tbody">
+                  <!-- Dynamically populated -->
+                </tbody>
+              </table>
+          </div>
+        </div>
+
+        <!-- Tab 5: Admin Actions -->
+        <div id="settings-tab-admin" class="settings-tab-content">
+          <p class="page-description">Administrative operations and workspace maintenance utilities.</p>
+          <div style="background: rgba(239, 68, 68, 0.03); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: var(--border-radius-lg); padding: 24px; max-width: 600px;">
+            <h3 style="color: #ef4444; margin-top: 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;">
+              <span>⚠️</span> Danger Zone
+            </h3>
+            <p style="color: var(--text-secondary); font-size: 0.85rem; line-height: 1.6; margin-bottom: 16px;">
+              Resetting demo data will delete all sample projects (BANK, BANKsdcx, Vehicle Insurance, etc.) and clean up orphaned executions, reports, and screenshots from the system. Users, roles, settings, and audit logs will remain intact.
+            </p>
+            <button class="btn btn-danger" id="btn-reset-demo-data" style="background-color: #ef4444; border-color: #ef4444; color: white; padding: 10px 20px; font-weight: bold; border-radius: 6px; cursor: pointer; font-size: 0.85rem;" onclick="resetDemoData()">
+              Reset Demo Data
+            </button>
+          </div>
+        </div>
+
+      </div>
+      
+    </div>
+  </main>
+
+  <!-- MODAL: Create Project -->
+  <div class="modal-overlay" id="create-project-modal">
+    <div class="modal-container">
+      <div class="modal-header">
+        <h3>Create New Project</h3>
+        <button class="modal-close" onclick="closeModal('create-project-modal')">✕</button>
+      </div>
+      <form id="create-project-form">
+        <div class="form-group">
+          <label for="new-proj-name">Project Name <span style="color: var(--color-danger);">*</span></label>
+          <input type="text" id="new-proj-name" class="form-control" placeholder="e.g. Healthcare Portal" required />
+        </div>
+        <div class="form-group">
+          <label for="new-proj-desc">Description <span style="color: var(--color-danger);">*</span></label>
+          <textarea id="new-proj-desc" class="form-control" placeholder="Brief workspace description..." required></textarea>
+          <div id="new-proj-desc-error" style="color: var(--color-danger); font-size: 0.85rem; margin-top: 4px; display: none;"></div>
+        </div>
+        <div class="form-group">
+          <label for="new-proj-lob">Line of Business <span style="color: var(--color-danger);">*</span></label>
+          <div class="searchable-select-container" id="new-proj-lob-container">
+            <div class="searchable-select-trigger" id="new-proj-lob-trigger">
+              <span class="searchable-select-value">General</span>
+              <span class="searchable-select-arrow">▼</span>
+            </div>
+            <div class="searchable-select-dropdown" id="new-proj-lob-dropdown">
+              <div class="searchable-select-search-wrapper">
+                <input type="text" class="searchable-select-search-input" id="new-proj-lob-search" placeholder="Search line of business..." autocomplete="off">
+              </div>
+              <div class="searchable-select-options" id="new-proj-lob-options">
+                <!-- Will be dynamically populated via JS -->
+              </div>
+            </div>
+            <input type="hidden" id="new-proj-lob" value="general">
+          </div>
+        </div>
+        <input type="hidden" id="new-proj-framework" value="playwright" />
+        <input type="hidden" id="new-proj-jira-key" value="" />
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('create-project-modal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Workspace</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Create Requirement -->
+  <div class="modal-overlay" id="create-requirement-modal">
+    <div class="modal-container">
+      <div class="modal-header">
+        <h3>Add Requirement</h3>
+        <button class="modal-close" onclick="closeModal('create-requirement-modal')">✕</button>
+      </div>
+      <form id="create-requirement-form">
+        <div class="form-group">
+          <label for="req-title">Requirement Title</label>
+          <input type="text" id="req-title" class="form-control" placeholder="e.g. Profile Picture Upload Size Limit" required />
+        </div>
+        <div class="form-group">
+          <label for="req-desc">Scope Details (Description)</label>
+          <textarea id="req-desc" class="form-control" placeholder="Users can upload a JPEG up to 5MB..." required></textarea>
+        </div>
+        <div class="form-group">
+          <label for="req-priority">Priority</label>
+          <select id="req-priority" class="form-control">
+            <option value="low">Low</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="req-domain">Business Domain</label>
+          <input type="text" id="req-domain" class="form-control" placeholder="e.g. Authentication, Uploads" value="general" />
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('create-requirement-modal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Requirement</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Existing Scenarios Found Confirm -->
+  <div class="modal-overlay" id="confirm-scenarios-modal">
+    <div class="modal-container" style="width: 400px; max-width: 95%;">
+      <div class="modal-header">
+        <h3>Existing Scenarios Found</h3>
+        <button class="modal-close" onclick="closeModal('confirm-scenarios-modal')">✕</button>
+      </div>
+      <div style="padding: 16px 0; color: var(--text-secondary);">
+        There are already scenarios configured for this requirement. Would you like to replace the existing scenarios or append new ones?
+      </div>
+      <div class="form-actions" style="display: flex; gap: 8px; justify-content: flex-end;">
+        <button class="btn btn-secondary" onclick="closeModal('confirm-scenarios-modal')">Cancel</button>
+        <button class="btn btn-secondary" id="btn-confirm-sc-append">Append</button>
+        <button class="btn btn-primary" id="btn-confirm-sc-replace">Replace Existing</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Playwright Script Workspace -->
+  <div class="modal-overlay" id="script-workspace-modal">
+    <div class="modal-container" style="width: 720px; max-width: 95%;">
+      <div class="modal-header">
+        <h3>Test Automation Script</h3>
+        <button class="modal-close" onclick="closeModal('script-workspace-modal')">✕</button>
+      </div>
+      <div id="script-modal-workspace-body">
+        <!-- Loaded dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Execution Workspace (Four-Panel Layout) -->
+  <div class="modal-overlay" id="execution-workspace-modal">
+    <div class="modal-container" style="width: 1080px; max-width: 95%; max-height: 90vh;">
+      <div class="modal-header">
+        <h3>Execution Workspace</h3>
+        <button class="modal-close" onclick="if (window.appInstance && window.appInstance.activeExecutionStream) window.appInstance.activeExecutionStream.close(); closeModal('execution-workspace-modal')">✕</button>
+      </div>
+      <div id="execution-workspace-modal-body">
+        <!-- Loaded dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Create Release -->
+  <div class="modal-overlay" id="create-release-modal">
+    <div class="modal-container" style="width: 440px; max-width: 95%;">
+      <div class="modal-header">
+        <h3>Create New Release</h3>
+        <button class="modal-close" onclick="closeModal('create-release-modal')">✕</button>
+      </div>
+      <form id="create-release-form">
+        <div class="form-group">
+          <label for="new-release-name">Release Name</label>
+          <input type="text" id="new-release-name" class="form-control" placeholder="e.g. Release 1.0" required />
+        </div>
+        <div class="form-group">
+          <label for="new-release-desc">Description</label>
+          <textarea id="new-release-desc" class="form-control" placeholder="Describe the release scope..." rows="3"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="new-release-status">Status</label>
+          <select id="new-release-status" class="form-control">
+            <option value="Active" selected>Active</option>
+            <option value="Planned">Planned</option>
+            <option value="Completed">Completed</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('create-release-modal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Release</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Create Test Cycle -->
+  <div class="modal-overlay" id="create-cycle-modal">
+    <div class="modal-container" style="width: 440px; max-width: 95%;">
+      <div class="modal-header">
+        <h3>Create New Test Cycle</h3>
+        <button class="modal-close" onclick="closeModal('create-cycle-modal')">✕</button>
+      </div>
+      <form id="create-cycle-form">
+        <div class="form-group">
+          <label for="new-cycle-name">Test Cycle Name</label>
+          <input type="text" id="new-cycle-name" class="form-control" placeholder="e.g. Cycle 1" required />
+        </div>
+        <div class="form-group">
+          <label for="new-cycle-desc">Description</label>
+          <textarea id="new-cycle-desc" class="form-control" placeholder="Describe the cycle focus..." rows="3"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="new-cycle-status">Status</label>
+          <select id="new-cycle-status" class="form-control">
+            <option value="Active" selected>Active</option>
+            <option value="Completed">Completed</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('create-cycle-modal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Cycle</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Create User -->
+  <div class="modal-overlay" id="create-user-modal">
+    <div class="modal-container" style="width: 440px; max-width: 95%;">
+      <div class="modal-header">
+        <h3>Create New User</h3>
+        <button class="modal-close" onclick="closeModal('create-user-modal')">✕</button>
+      </div>
+      <form id="create-user-form" onsubmit="handleCreateUserSubmit(event)">
+        <div class="form-group">
+          <label for="new-user-fullname">Full Name</label>
+          <input type="text" id="new-user-fullname" class="form-control" placeholder="e.g. Alice Smith" required />
+        </div>
+        <div class="form-group">
+          <label for="new-user-email">Email Address</label>
+          <input type="email" id="new-user-email" class="form-control" placeholder="e.g. alice@agenticai.com" required />
+        </div>
+        <div class="form-group">
+          <label for="new-user-password">Initial Password</label>
+          <input type="password" id="new-user-password" class="form-control" placeholder="••••••••" required />
+        </div>
+        <div class="form-group">
+          <label for="new-user-role">Global Role</label>
+          <select id="new-user-role" class="form-control">
+            <option value="Superadmin">Superadmin</option>
+            <option value="Admin">Admin</option>
+            <option value="Project Manager" selected>Project Manager</option>
+            <option value="Tester">Tester</option>
+            <option value="Stakeholder">Stakeholder</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('create-user-modal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create User</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Assign User to Project -->
+  <div class="modal-overlay" id="assign-project-user-modal">
+    <div class="modal-container" style="width: 440px; max-width: 95%;">
+      <div class="modal-header">
+        <h3>Workspace Role Assignment</h3>
+        <button class="modal-close" onclick="closeModal('assign-project-user-modal')">✕</button>
+      </div>
+      <form id="assign-project-user-form" onsubmit="handleAssignProjectUserSubmit(event)">
+        <input type="hidden" id="assign-user-id" />
+        <div class="form-group">
+          <label>Operator Email</label>
+          <input type="text" id="assign-user-email" class="form-control" readonly style="opacity: 0.65; cursor: not-allowed;" />
+        </div>
+        <div class="form-group">
+          <label for="assign-role-id">Project Role</label>
+          <select id="assign-role-id" class="form-control">
+            <!-- Loaded dynamically with role options -->
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('assign-project-user-modal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Assign Role</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Defect Triage Details -->
+  <div class="modal-overlay" id="triage-modal">
+    <div class="modal-container" style="width: 600px; max-width: 95%;">
+      <div class="modal-header">
+        <h3>Defect Triage Details</h3>
+        <button class="modal-close" onclick="closeModal('triage-modal')">✕</button>
+      </div>
+      <div style="padding: 20px;">
+        <div style="display: grid; grid-template-columns: 140px 1fr; gap: 12px; margin-bottom: 16px;">
+          <div style="font-weight: 600; color: var(--text-muted);">Execution ID:</div>
+          <div id="triage-execution-id" style="font-family: monospace; font-size: 0.85rem;"></div>
+          
+          <div style="font-weight: 600; color: var(--text-muted);">Failure Category:</div>
+          <div id="triage-failure-category"></div>
+          
+          <div style="font-weight: 600; color: var(--text-muted);">Root Cause:</div>
+          <div id="triage-root-cause" style="font-size: 0.9rem;"></div>
+          
+          <div style="font-weight: 600; color: var(--text-muted);">Trace Analysis:</div>
+          <div id="triage-trace-analysis" style="font-size: 0.85rem; color: var(--text-secondary);"></div>
+          
+          <div style="font-weight: 600; color: var(--text-muted);">Screenshot Findings:</div>
+          <div id="triage-screenshot-findings" style="font-size: 0.85rem; color: var(--text-secondary);"></div>
+          
+          <div style="font-weight: 600; color: var(--text-muted);">Suggest Retry:</div>
+          <div id="triage-suggest-retry"></div>
+          
+          <div style="font-weight: 600; color: var(--text-muted);">Bug Candidate:</div>
+          <div id="triage-bug-candidate"></div>
+          
+          <div style="font-weight: 600; color: var(--text-muted);">JIRA Bug:</div>
+          <div id="triage-jira-bug"></div>
+        </div>
+        <div style="text-align: right; margin-top: 20px;">
+          <button class="btn btn-secondary" onclick="closeModal('triage-modal')">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/js/app.js?v=12"></script>
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      if (window.handleLoginSubmit) {
+        window.handleLoginSubmit(e);
+        return;
+      }
+      var email = document.getElementById('login-email').value.trim();
+      var password = document.getElementById('login-password').value;
+      var errorEl = document.getElementById('login-error-msg');
+      errorEl.style.display = 'none';
+      try {
+        var res = await fetch('/api/v1/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email, password: password })
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Invalid credentials');
+        sessionStorage.setItem('access_token', data.access_token);
+        sessionStorage.setItem('refresh_token', data.refresh_token);
+        sessionStorage.setItem('user', JSON.stringify(data.user));
+        window.location.reload();
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

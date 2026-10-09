@@ -1,0 +1,453 @@
+{
+  "metadata": {
+    "executionId": "dfe2eacd-2eb1-417c-a659-fccee6236bd8",
+    "projectId": "b4c13430-f95f-4ea5-b0ed-a09a0b3b324c",
+    "testCaseIds": [
+      "ad7678d9-51e0-461a-9608-380c44f54ab9"
+    ],
+    "testCycleId": "c554a887-060d-4a83-869c-c7846bedd9a8",
+    "browser": "chromium",
+    "status": "completed",
+    "started": "2026-07-19T10:41:23.566Z",
+    "browserVersion": "149.0.7827.55",
+    "finished": "2026-07-19T10:42:14.733Z",
+    "duration": 51.167
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\nconst BASE_URL = process.env.TARGET_URL || 'https://adactinhotelapp.com/';\nconst USERNAME = process.env.TARGET_USERNAME || 'ADACTINFORQA';\nconst PASSWORD = process.env.TARGET_PASSWORD || '3U0515';\n\ntest('Valid booking generates order number', async ({ page }) => {\n  // [Timeline] Navigate to base URL\n  console.log('[Timeline] Navigate to base URL');\n  await page.goto(BASE_URL);\n\n  // [Timeline] Log in with valid credentials\n  console.log('[Timeline] Log in with valid credentials');\n  await page.locator('input#username').fill(USERNAME);\n  await page.locator('input#password').fill(PASSWORD);\n  await page.locator('input#login').click();\n  await expect(page).toHaveURL(/SearchHotel\\.php/);\n\n  // [Timeline] Perform hotel search (precondition: user has completed search and selected a hotel)\n  console.log('[Timeline] Perform hotel search');\n  await expect(page.locator('input#username_show')).toHaveValue('Hello ADACTINFORQA!');\n  await page.locator('select#location').selectOption({ label: 'Sydney' });\n  await page.locator('select#hotels').selectOption({ label: 'Hotel Creek' });\n  await page.locator('select#room_type').selectOption({ label: 'Standard' });\n  await page.locator('select#room_nos').selectOption({ label: '1 - One' });\n  await page.locator('input#datepick_in').fill('20/08/2026');\n  await page.locator('input#datepick_out').fill('25/08/2026');\n  await page.locator('select#adult_room').selectOption({ label: '1 - One' });\n  await page.locator('select#child_room').selectOption({ label: '0 - None' });\n  await page.locator('input#Submit').click();\n  await expect(page).toHaveURL(/SelectHotel\\.php/);\n\n  // [Timeline] Select the first hotel (precondition: user selected a hotel)\n  console.log('[Timeline] Select the first hotel');\n  await page.locator('input#radiobutton_0').check();\n  await page.locator('input#continue').click();\n  await expect(page).toHaveURL(/BookHotel\\.php/);\n\n  // Now on BookHotel.php – proceed with given steps\n  // [Timeline] Fill in First Name\n  console.log('[Timeline] Fill in First Name');\n  await page.locator('input#first_name').fill('John');\n  // [Timeline] Fill in Last Name\n  console.log('[Timeline] Fill in Last Name');\n  await page.locator('input#last_name').fill('Doe');\n  // [Timeline] Fill in Billing Address\n  console.log('[Timeline] Fill in Billing Address');\n  await page.locator('textarea#address').fill('123 Test Street, Sydney, NSW');\n  // [Timeline] Select Credit Card Type as VISA\n  console.log('[Timeline] Select Credit Card Type as VISA');\n  await page.locator('select#cc_type').selectOption({ label: 'VISA' });\n  // [Timeline] Fill in Credit Card Number\n  console.log('[Timeline] Fill in Credit Card Number');\n  await page.locator('input#cc_num').fill('1234567890123456');\n  // [Timeline] Select Expiry Month as December\n  console.log('[Timeline] Select Expiry Month as December');\n  await page.locator('select#cc_exp_month').selectOption({ label: 'December' });\n  // [Timeline] Select Expiry Year as 2028\n  console.log('[Timeline] Select Expiry Year as 2028');\n  await page.locator('select#cc_exp_year').selectOption({ label: '2028' });\n  // [Timeline] Fill in CVV Number\n  console.log('[Timeline] Fill in CVV Number');\n  await page.locator('input#cc_cvv').fill('123');\n  // [Timeline] Click Book Now button\n  console.log('[Timeline] Click Book Now button');\n  await page.locator('input#book_now').click();\n\n  // [Timeline] Assert redirection to BookingConfirm.php and numeric order number\n  console.log('[Timeline] Assert redirection to BookingConfirm.php and numeric order number');\n  await expect(page).toHaveURL(/BookingConfirm\\.php/, { timeout: 15000 });\n  const orderNumber = await page.locator('input#order_no').inputValue();\n  expect(orderNumber).toMatch(/^\\d+$/);\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-07-19T10:41:23.566Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:23.581Z",
+      "time": 0.015,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:23.627Z",
+      "time": 0.061,
+      "event": "Launching browser",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:25.224Z",
+      "time": 1.658,
+      "event": "Session restored from storage state",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:25.495Z",
+      "time": 1.929,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:25.505Z",
+      "time": 1.939,
+      "event": "Running: Valid booking generates order number",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:33.215Z",
+      "time": 9.649,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_adactinhotelapp_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:33.223Z",
+      "time": 9.657,
+      "event": "Navigate: https://adactinhotelapp.com/",
+      "details": "step-01-navigate_https_adactinhotelapp_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:35.366Z",
+      "time": 11.8,
+      "event": "Screenshot Captured",
+      "details": "step-02-type_text_locator_input_username.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:35.374Z",
+      "time": 11.808,
+      "event": "Type text: locator('input#username')",
+      "details": "step-02-type_text_locator_input_username.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:37.079Z",
+      "time": 13.513,
+      "event": "Screenshot Captured",
+      "details": "step-03-type_text_locator_input_password.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:37.084Z",
+      "time": 13.518,
+      "event": "Type text: locator('input#password')",
+      "details": "step-03-type_text_locator_input_password.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:39.008Z",
+      "time": 15.442,
+      "event": "Screenshot Captured",
+      "details": "step-04-click_locator_input_login.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:39.017Z",
+      "time": 15.451,
+      "event": "Click: locator('input#login')",
+      "details": "step-04-click_locator_input_login.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:40.464Z",
+      "time": 16.898,
+      "event": "Screenshot Captured",
+      "details": "step-05-select_option_locator_select_location.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:40.470Z",
+      "time": 16.904,
+      "event": "Select option: locator('select#location')",
+      "details": "step-05-select_option_locator_select_location.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:41.927Z",
+      "time": 18.361,
+      "event": "Screenshot Captured",
+      "details": "step-06-select_option_locator_select_hotels.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:41.934Z",
+      "time": 18.368,
+      "event": "Select option: locator('select#hotels')",
+      "details": "step-06-select_option_locator_select_hotels.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:43.350Z",
+      "time": 19.784,
+      "event": "Screenshot Captured",
+      "details": "step-07-select_option_locator_select_room_type.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:43.357Z",
+      "time": 19.791,
+      "event": "Select option: locator('select#room_type')",
+      "details": "step-07-select_option_locator_select_room_type.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:44.791Z",
+      "time": 21.225,
+      "event": "Screenshot Captured",
+      "details": "step-08-select_option_locator_select_room_nos.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:44.796Z",
+      "time": 21.23,
+      "event": "Select option: locator('select#room_nos')",
+      "details": "step-08-select_option_locator_select_room_nos.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:46.252Z",
+      "time": 22.686,
+      "event": "Screenshot Captured",
+      "details": "step-09-type_text_locator_input_datepick_in.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:46.259Z",
+      "time": 22.693,
+      "event": "Type text: locator('input#datepick_in')",
+      "details": "step-09-type_text_locator_input_datepick_in.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:47.687Z",
+      "time": 24.121,
+      "event": "Screenshot Captured",
+      "details": "step-10-type_text_locator_input_datepick_out.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:47.696Z",
+      "time": 24.13,
+      "event": "Type text: locator('input#datepick_out')",
+      "details": "step-10-type_text_locator_input_datepick_out.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:49.187Z",
+      "time": 25.621,
+      "event": "Screenshot Captured",
+      "details": "step-11-select_option_locator_select_adult_room.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:49.192Z",
+      "time": 25.626,
+      "event": "Select option: locator('select#adult_room')",
+      "details": "step-11-select_option_locator_select_adult_room.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:50.689Z",
+      "time": 27.123,
+      "event": "Screenshot Captured",
+      "details": "step-12-select_option_locator_select_child_room.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:50.695Z",
+      "time": 27.129,
+      "event": "Select option: locator('select#child_room')",
+      "details": "step-12-select_option_locator_select_child_room.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:52.622Z",
+      "time": 29.056,
+      "event": "Screenshot Captured",
+      "details": "step-13-click_locator_input_submit.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:52.630Z",
+      "time": 29.064,
+      "event": "Click: locator('input#Submit')",
+      "details": "step-13-click_locator_input_submit.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:55.342Z",
+      "time": 31.776,
+      "event": "Screenshot Captured",
+      "details": "step-14-click_locator_input_continue.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:55.347Z",
+      "time": 31.781,
+      "event": "Click: locator('input#continue')",
+      "details": "step-14-click_locator_input_continue.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:56.777Z",
+      "time": 33.211,
+      "event": "Screenshot Captured",
+      "details": "step-15-type_text_locator_input_first_name.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:56.785Z",
+      "time": 33.219,
+      "event": "Type text: locator('input#first_name')",
+      "details": "step-15-type_text_locator_input_first_name.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:58.217Z",
+      "time": 34.651,
+      "event": "Screenshot Captured",
+      "details": "step-16-type_text_locator_input_last_name.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:58.223Z",
+      "time": 34.657,
+      "event": "Type text: locator('input#last_name')",
+      "details": "step-16-type_text_locator_input_last_name.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:59.662Z",
+      "time": 36.096,
+      "event": "Screenshot Captured",
+      "details": "step-17-type_text_locator_textarea_address.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:41:59.669Z",
+      "time": 36.103,
+      "event": "Type text: locator('textarea#address')",
+      "details": "step-17-type_text_locator_textarea_address.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:01.092Z",
+      "time": 37.526,
+      "event": "Screenshot Captured",
+      "details": "step-18-select_option_locator_select_cc_type.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:01.099Z",
+      "time": 37.533,
+      "event": "Select option: locator('select#cc_type')",
+      "details": "step-18-select_option_locator_select_cc_type.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:02.527Z",
+      "time": 38.961,
+      "event": "Screenshot Captured",
+      "details": "step-19-type_text_locator_input_cc_num.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:02.540Z",
+      "time": 38.974,
+      "event": "Type text: locator('input#cc_num')",
+      "details": "step-19-type_text_locator_input_cc_num.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:03.975Z",
+      "time": 40.409,
+      "event": "Screenshot Captured",
+      "details": "step-20-select_option_locator_select_cc_exp_month.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:03.981Z",
+      "time": 40.415,
+      "event": "Select option: locator('select#cc_exp_month')",
+      "details": "step-20-select_option_locator_select_cc_exp_month.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:05.373Z",
+      "time": 41.807,
+      "event": "Screenshot Captured",
+      "details": "step-21-select_option_locator_select_cc_exp_year.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:05.378Z",
+      "time": 41.812,
+      "event": "Select option: locator('select#cc_exp_year')",
+      "details": "step-21-select_option_locator_select_cc_exp_year.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:06.780Z",
+      "time": 43.214,
+      "event": "Screenshot Captured",
+      "details": "step-22-type_text_locator_input_cc_cvv.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:06.785Z",
+      "time": 43.219,
+      "event": "Type text: locator('input#cc_cvv')",
+      "details": "step-22-type_text_locator_input_cc_cvv.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:08.241Z",
+      "time": 44.675,
+      "event": "Screenshot Captured",
+      "details": "step-23-click_locator_input_book_now.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:08.247Z",
+      "time": 44.681,
+      "event": "Click: locator('input#book_now')",
+      "details": "step-23-click_locator_input_book_now.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:12.629Z",
+      "time": 49.063,
+      "event": "Session storage state saved",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:14.611Z",
+      "time": 51.045,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:14.619Z",
+      "time": 51.053,
+      "event": "video Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:14.647Z",
+      "time": 51.081,
+      "event": "Simulation video saved: page@64ef0f2026c9d9b24523cf3d0810d986.webm",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:14.724Z",
+      "time": 51.158,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T10:42:14.733Z",
+      "time": 51.167,
+      "event": "Status: completed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_adactinhotelapp_com.png",
+      "step-02-type_text_locator_input_username.png",
+      "step-03-type_text_locator_input_password.png",
+      "step-04-click_locator_input_login.png",
+      "step-05-select_option_locator_select_location.png",
+      "step-06-select_option_locator_select_hotels.png",
+      "step-07-select_option_locator_select_room_type.png",
+      "step-08-select_option_locator_select_room_nos.png",
+      "step-09-type_text_locator_input_datepick_in.png",
+      "step-10-type_text_locator_input_datepick_out.png",
+      "step-11-select_option_locator_select_adult_room.png",
+      "step-12-select_option_locator_select_child_room.png",
+      "step-13-click_locator_input_submit.png",
+      "step-14-click_locator_input_continue.png",
+      "step-15-type_text_locator_input_first_name.png",
+      "step-16-type_text_locator_input_last_name.png",
+      "step-17-type_text_locator_textarea_address.png",
+      "step-18-select_option_locator_select_cc_type.png",
+      "step-19-type_text_locator_input_cc_num.png",
+      "step-20-select_option_locator_select_cc_exp_month.png",
+      "step-21-select_option_locator_select_cc_exp_year.png",
+      "step-22-type_text_locator_input_cc_cvv.png",
+      "step-23-click_locator_input_book_now.png"
+    ],
+    "logs": [],
+    "console": [
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SearchHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS.",
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SelectHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS.",
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/BookHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS.",
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/BookingConfirm.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS.",
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SearchHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS.",
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/SelectHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS.",
+      "[error] Mixed Content: The page at 'https://adactinhotelapp.com/BookHotel.php' was loaded over HTTPS, but requested an insecure frame 'http://www.adactinhotelapp.com/img-horizontal-carousel/index.html'. This request has been blocked; the content must be served over HTTPS."
+    ],
+    "trace": "trace.zip",
+    "video": "page@64ef0f2026c9d9b24523cf3d0810d986.webm",
+    "htmlReport": "report.html"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "script": "await page.goto('https://adactinhotelapp.com/', { waitUntil: 'networkidle' }); addLog('Navigated to Adactin Hotel Portal'); await screenshot('01-initial-state'); await page.fill('#username', 'adactin_demo_user'); await page.fill('#password', 'demo_password'); await page.click('#login'); addLog('Credentials submitted'); await page.waitForSelector('#location', { state: 'attached', timeout: 5000 }); await screenshot('02-login-success'); await page.selectOption('#location', 'Sydney'); addLog('Selected Sydney location'); await page.click('#Submit'); addLog('Search submitted'); await page.waitForSelector('#radiobutton_0', { state: 'attached', timeout: 5000 }); await screenshot('03-search-results'); addLog('All steps completed');",
+  "projectId": "5471e234-c6bd-4ed7-a26f-7db5850ec41f",
+  "testCaseIds": ["126fff68-4583-495f-a125-ed4e62de1e7a"],
+  "browser": "chromium"
+}

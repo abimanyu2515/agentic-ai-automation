@@ -1,0 +1,160 @@
+{
+  "metadata": {
+    "executionId": "6d429004-63c0-4869-b87c-b372a48a8170",
+    "projectId": "7f65154f-9e54-4bad-8e8f-4904f4772612",
+    "testCaseIds": [
+      "f44d14c0-77d7-41de-9bdf-368bca156060"
+    ],
+    "testCycleId": "c554a887-060d-4a83-869c-c7846bedd9a8",
+    "browser": "chromium",
+    "status": "completed",
+    "started": "2026-07-19T18:18:45.877Z",
+    "browserVersion": "149.0.7827.55",
+    "finished": "2026-07-19T18:19:06.651Z",
+    "duration": 20.774
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\nconst BASE_URL = process.env.TARGET_URL || 'https://adactinhotelapp.com/';\nconst USERNAME = process.env.TARGET_USERNAME || 'ADACTINFORQA';\n\ntest('Login with incorrect password', async ({ page }) => {\n  // Navigate to the Adactin Hotel Application\n  await page.goto(BASE_URL, { waitUntil: 'networkidle' });\n  console.log('Navigated to Adactin Hotel Portal');\n\n  // Take a screenshot of the initial state\n  await page.screenshot({ path: '01-initial-state.png' });\n\n  // Perform Login with valid username but incorrect password\n  await page.locator('#username').fill(USERNAME);\n  await page.locator('#password').fill('WrongPassword123');\n  await page.locator('#login').click();\n  console.log('Filled credentials and clicked Login');\n\n  // Wait a moment for the page to respond\n  await page.waitForTimeout(2000);\n\n  // Verify user is still on the login page (not redirected to SearchHotel.php)\n  // The login page is at the root URL, not /index.php\n  await expect(page).toHaveURL(/adactinhotelapp\\.com/);\n  // Also verify we're NOT on the search hotel page\n  await expect(page).not.toHaveURL(/SearchHotel\\.php/);\n  console.log('User remains on login page as expected');\n\n  // Verify login form is still visible (confirming we're on login page)\n  await expect(page.locator('#username')).toBeVisible();\n  await expect(page.locator('#password')).toBeVisible();\n  await expect(page.locator('#login')).toBeVisible();\n  console.log('Login form still visible - confirmed on login page');\n\n  // Take screenshot of error state\n  await page.screenshot({ path: '02-invalid-login-error.png' });\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-07-19T18:18:45.877Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T18:18:45.887Z",
+      "time": 0.01,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T18:18:45.929Z",
+      "time": 0.052,
+      "event": "Launching browser",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T18:18:46.154Z",
+      "time": 0.277,
+      "event": "Session restored from storage state",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:18:46.455Z",
+      "time": 0.578,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:18:46.470Z",
+      "time": 0.593,
+      "event": "Running: Login with incorrect password",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-07-19T18:18:51.312Z",
+      "time": 5.435,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_adactinhotelapp_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:18:51.316Z",
+      "time": 5.439,
+      "event": "Navigate: https://adactinhotelapp.com/",
+      "details": "step-01-navigate_https_adactinhotelapp_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:18:59.022Z",
+      "time": 13.145,
+      "event": "Screenshot Captured",
+      "details": "step-02-type_text_locator_username.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:18:59.025Z",
+      "time": 13.148,
+      "event": "Type text: locator('#username')",
+      "details": "step-02-type_text_locator_username.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:19:00.986Z",
+      "time": 15.109,
+      "event": "Screenshot Captured",
+      "details": "step-03-type_text_locator_password.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:19:00.990Z",
+      "time": 15.113,
+      "event": "Type text: locator('#password')",
+      "details": "step-03-type_text_locator_password.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:19:03.130Z",
+      "time": 17.253,
+      "event": "Screenshot Captured",
+      "details": "step-04-click_locator_login.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:19:03.133Z",
+      "time": 17.256,
+      "event": "Click: locator('#login')",
+      "details": "step-04-click_locator_login.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:19:05.588Z",
+      "time": 19.711,
+      "event": "Session storage state saved",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:19:06.477Z",
+      "time": 20.6,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:19:06.483Z",
+      "time": 20.606,
+      "event": "video Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:19:06.503Z",
+      "time": 20.626,
+      "event": "Simulation video saved: page@54a2716c07ba7c148396fbe51a48e626.webm",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:19:06.647Z",
+      "time": 20.77,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-07-19T18:19:06.651Z",
+      "time": 20.774,
+      "event": "Status: completed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_adactinhotelapp_com.png",
+      "step-02-type_text_locator_username.png",
+      "step-03-type_text_locator_password.png",
+      "step-04-click_locator_login.png"
+    ],
+    "logs": [],
+    "console": [],
+    "trace": "trace.zip",
+    "video": "page@54a2716c07ba7c148396fbe51a48e626.webm",
+    "htmlReport": "report.html"
+  }
+}
