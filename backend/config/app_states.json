@@ -2,44 +2,50 @@
   "application_states": [
     {
       "name": "LOGIN",
-      "url_contains": "adactinhotelapp.com",
-      "title_contains": "Adactin",
-      "required_elements": ["#username", "#password", "#login"]
+      "url_contains": "",
+      "title_contains": "login",
+      "required_elements": ["username", "password"]
     },
     {
-      "name": "SEARCH",
-      "url_contains": "SearchHotel.aspx",
-      "title_contains": "Search",
-      "required_elements": ["#location", "#hotels", "#Submit"]
+      "name": "HOME",
+      "url_contains": "",
+      "title_contains": "home",
+      "required_elements": []
     },
     {
-      "name": "RESULTS",
-      "url_contains": "SelectHotel.aspx",
-      "title_contains": "Select",
-      "required_elements": ["#select_hotel", "#continue"]
+      "name": "DASHBOARD",
+      "url_contains": "dashboard",
+      "title_contains": "dashboard",
+      "required_elements": []
     },
     {
-      "name": "BOOKING",
-      "url_contains": "BookHotel.aspx",
-      "title_contains": "Book",
-      "required_elements": ["#first_name", "#book_now"]
+      "name": "LIST",
+      "url_contains": "",
+      "title_contains": "list",
+      "required_elements": []
+    },
+    {
+      "name": "DETAIL",
+      "url_contains": "",
+      "title_contains": "detail",
+      "required_elements": []
+    },
+    {
+      "name": "FORM",
+      "url_contains": "",
+      "title_contains": "form",
+      "required_elements": []
     },
     {
       "name": "CONFIRMATION",
-      "url_contains": "BookingConfirm.aspx",
-      "title_contains": "Confirm",
-      "required_elements": ["#order_no"]
-    },
-    {
-      "name": "PROFILE",
-      "url_contains": "Profile.aspx",
-      "title_contains": "Profile",
+      "url_contains": "confirm",
+      "title_contains": "confirm",
       "required_elements": []
     },
     {
       "name": "LOGOUT",
-      "url_contains": "Logout.aspx",
-      "title_contains": "Logout",
+      "url_contains": "logout",
+      "title_contains": "logout",
       "required_elements": []
     }
   ]

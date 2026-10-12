@@ -88,8 +88,8 @@ class JiraService:
             return {
                 "key": issue_key,
                 "fields": {
-                    "summary": f"Mock Story for {issue_key}: Book a Hotel room in Adactin",
-                    "description": "As a registered user, I want to book a hotel room using Adactin Hotel App so that I can secure accommodation.",
+                    "summary": f"Mock Story for {issue_key}: Sample user story",
+                    "description": "As a registered user, I want to use the target application so that I can achieve my goal.",
                     "priority": {"name": "High"},
                     "issuetype": {"name": "Story"}
                 }

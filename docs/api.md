@@ -52,7 +52,7 @@ POST /api/v1/projects
   "line_of_business": "general",
   "framework": "playwright",
   "jira_project_key": null,
-  "target_url": "https://adactinhotelapp.com/",
+  "target_url": "https://your-app.example.com/",
   "target_username": "user",
   "target_password": "pass"
 }

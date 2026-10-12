@@ -1,38 +1,61 @@
-from typing import List, Dict
+from typing import List
+
 
 class NavigationPlanner:
-    def __init__(self):
-        # Default state transitions graph.
-        # Edges denote the transition target, values denote the abstract actions.
-        self.transitions = {
+    """Target-agnostic navigation planner.
+
+    States are generic application lifecycle states (LOGIN, HOME,
+    DASHBOARD, LIST, DETAIL, FORM, CONFIRMATION, LOGOUT) resolved via
+    ``backend/config/app_states.json``. No vendor-specific pages, URLs,
+    or element IDs are assumed here.
+
+    The graph below only encodes universally valid transitions (e.g. any
+    authenticated state can return to LOGIN via logout). Anything unknown
+    falls back to ``["navigate_direct"]`` so the executor navigates to the
+    project's own ``target_url`` instead of following a hardcoded flow.
+    """
+
+    def __init__(self, transitions: dict | None = None):
+        # Default transitions are intentionally generic. Callers may inject
+        # a per-project graph discovered from requirements or a site map.
+        self.transitions = transitions if transitions is not None else {
             "LOGIN": {
-                "SEARCH": ["enter_credentials", "click_login"]
+                "HOME": ["enter_credentials", "click_login"],
+                "DASHBOARD": ["enter_credentials", "click_login"],
             },
-            "SEARCH": {
-                "RESULTS": ["fill_search_fields", "click_search"],
-                "LOGIN": ["click_logout"]
+            "HOME": {
+                "LIST": ["navigate_to_list"],
+                "FORM": ["open_form"],
+                "LOGIN": ["click_logout"],
             },
-            "RESULTS": {
-                "BOOKING": ["select_hotel", "click_continue"],
-                "SEARCH": ["click_back"],
-                "LOGIN": ["click_logout"]
+            "DASHBOARD": {
+                "LIST": ["navigate_to_list"],
+                "FORM": ["open_form"],
+                "LOGIN": ["click_logout"],
             },
-            "BOOKING": {
-                "CONFIRMATION": ["fill_billing_details", "click_book_now"],
-                "RESULTS": ["click_cancel"],
-                "LOGIN": ["click_logout"]
+            "LIST": {
+                "DETAIL": ["select_item"],
+                "FORM": ["open_form"],
+                "LOGIN": ["click_logout"],
+            },
+            "DETAIL": {
+                "FORM": ["open_form"],
+                "LIST": ["go_back_to_list"],
+                "LOGIN": ["click_logout"],
+            },
+            "FORM": {
+                "CONFIRMATION": ["fill_form", "submit_form"],
+                "LIST": ["cancel_form"],
+                "LOGIN": ["click_logout"],
             },
             "CONFIRMATION": {
-                "SEARCH": ["click_search_hotel"],
-                "LOGIN": ["click_logout"]
-            },
-            "PROFILE": {
-                "SEARCH": ["click_search_hotel"],
-                "LOGIN": ["click_logout"]
+                "HOME": ["return_home"],
+                "LIST": ["return_to_list"],
+                "LOGIN": ["click_logout"],
             },
             "LOGOUT": {
-                "LOGIN": ["click_login_again"]
-            }
+                "LOGIN": ["click_login_again"],
+            },
         }
 
     def plan_navigation(self, current_state: str, target_state: str) -> List[str]:
@@ -51,7 +74,7 @@ class NavigationPlanner:
                 # Compile the actions needed for the path transitions
                 actions = []
                 for i in range(len(path) - 1):
-                    actions.extend(self.transitions[path[i]][path[i+1]])
+                    actions.extend(self.transitions[path[i]][path[i + 1]])
                 return actions
 
             for neighbor in self.transitions.get(node, {}):

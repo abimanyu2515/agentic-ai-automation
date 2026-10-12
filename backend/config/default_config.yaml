@@ -38,7 +38,9 @@ evaluation:
   relevance_rejection_threshold: 0.3
 
 playwright:
-  base_url: https://adactinhotelapp.com/
+  # No default target application. Set per project via target_url
+  # (Project Settings UI or PUT /api/v1/projects/{id}).
+  base_url: ""
   browser: chromium
   headless: true
   timeout: 60

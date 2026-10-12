@@ -118,7 +118,7 @@ class PostgresProjectRepository(ProjectRepository):
             requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted]
         )
 
-    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = "https://adactinhotelapp.com/", target_username: str | None = None, target_password_enc: str | None = None) -> Project:
+    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = None, target_username: str | None = None, target_password_enc: str | None = None) -> Project:
         from datetime import datetime, timezone
         from uuid import uuid4
         session = self.session

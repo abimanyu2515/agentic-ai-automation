@@ -1,28 +1,41 @@
 export class NavigationPlanner {
+  // Target-agnostic transitions over generic lifecycle states
+  // (LOGIN, HOME, DASHBOARD, LIST, DETAIL, FORM, CONFIRMATION, LOGOUT).
+  // Unknown state pairs fall back to direct navigation to the project's
+  // own target_url instead of a hardcoded vendor flow.
   private transitions: Record<string, Record<string, string[]>> = {
     LOGIN: {
-      SEARCH: ["enter_credentials", "click_login"]
+      HOME: ["enter_credentials", "click_login"],
+      DASHBOARD: ["enter_credentials", "click_login"]
     },
-    SEARCH: {
-      RESULTS: ["fill_search_fields", "click_search"],
+    HOME: {
+      LIST: ["navigate_to_list"],
+      FORM: ["open_form"],
       LOGIN: ["click_logout"]
     },
-    RESULTS: {
-      BOOKING: ["select_hotel", "click_continue"],
-      SEARCH: ["click_back"],
+    DASHBOARD: {
+      LIST: ["navigate_to_list"],
+      FORM: ["open_form"],
       LOGIN: ["click_logout"]
     },
-    BOOKING: {
-      CONFIRMATION: ["fill_billing_details", "click_book_now"],
-      RESULTS: ["click_cancel"],
+    LIST: {
+      DETAIL: ["select_item"],
+      FORM: ["open_form"],
+      LOGIN: ["click_logout"]
+    },
+    DETAIL: {
+      FORM: ["open_form"],
+      LIST: ["go_back_to_list"],
+      LOGIN: ["click_logout"]
+    },
+    FORM: {
+      CONFIRMATION: ["fill_form", "submit_form"],
+      LIST: ["cancel_form"],
       LOGIN: ["click_logout"]
     },
     CONFIRMATION: {
-      SEARCH: ["click_search_hotel"],
-      LOGIN: ["click_logout"]
-    },
-    PROFILE: {
-      SEARCH: ["click_search_hotel"],
+      HOME: ["return_home"],
+      LIST: ["return_to_list"],
       LOGIN: ["click_logout"]
     },
     LOGOUT: {

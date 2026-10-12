@@ -234,7 +234,7 @@ def resolve_project_response(p) -> ProjectResponse:
         created_at=p.created_at,
         requirements=p.requirements,
         jira_project_key=getattr(p, "jira_project_key", None),
-        target_url=getattr(p, "target_url", "https://adactinhotelapp.com/"),
+        target_url=getattr(p, "target_url", None),
         target_username=username if username else (getattr(p, "target_username", None) if getattr(p, "target_username", None) != "vault_secured" else None)
     )
 
@@ -1570,10 +1570,12 @@ def get_project_credentials(project_id: UUID):
                     password = p
                     break
                     
-        # Hard fallback to standard Adactin hotel app credentials
+        # No hardcoded demo-app fallback: credentials must come from the
+        # project's vault. Return None when unset so callers handle it
+        # explicitly (e.g. placeholder credentials in generated scripts).
         if not username or not password:
-            username = "ADACTINFORQA"
-            password = "hanish13"
+            username = username or None
+            password = password or None
             
         return {
             "username": username,

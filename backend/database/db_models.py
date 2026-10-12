@@ -32,7 +32,7 @@ class ProjectDB(Base):
     line_of_business = Column(String(100), nullable=False, default="general")
     framework = Column(String(100), nullable=False, default="playwright")
     jira_project_key = Column(String(100), nullable=True)
-    target_url = Column(String(500), nullable=True, default="https://adactinhotelapp.com/")
+    target_url = Column(String(500), nullable=True, default=None)
     target_username = Column(String(255), nullable=True)
     target_password_enc = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
