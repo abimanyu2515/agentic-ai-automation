@@ -56,3 +56,5 @@ report_*.pdf
 scratch/
 temp/
 tmp/
+
+proj-guide.md

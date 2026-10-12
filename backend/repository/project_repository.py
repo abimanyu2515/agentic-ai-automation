@@ -26,7 +26,7 @@ class ProjectRepository(ABC):
         pass
 
     @abstractmethod
-    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = "https://adactinhotelapp.com/", target_username: str | None = None, target_password_enc: str | None = None) -> Project:
+    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = None, target_username: str | None = None, target_password_enc: str | None = None) -> Project:
         pass
 
     @abstractmethod
@@ -314,7 +314,7 @@ class JSONProjectRepository(ProjectRepository):
                 return p
         return None
 
-    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = "https://adactinhotelapp.com/", target_username: str | None = None, target_password_enc: str | None = None) -> Project:
+    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = None, target_username: str | None = None, target_password_enc: str | None = None) -> Project:
         raw = self._read_raw()
         project = Project(
             id=uuid4(),

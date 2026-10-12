@@ -83,7 +83,7 @@ class EvaluationConfig(BaseModel):
 
 
 class PlaywrightConfig(BaseModel):
-    base_url: str = "https://adactinhotelapp.com/"
+    base_url: str = ""
     browser: str = "chromium"
     headless: bool = True
     timeout: int = 60

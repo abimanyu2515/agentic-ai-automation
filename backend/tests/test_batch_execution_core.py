@@ -107,17 +107,17 @@ def test_app_state_resolver(tmp_path):
 
 def test_navigation_planner():
     planner = NavigationPlanner()
-    
-    # LOGIN to SEARCH path
-    path = planner.plan_navigation("LOGIN", "SEARCH")
+
+    # LOGIN to DASHBOARD path (generic lifecycle)
+    path = planner.plan_navigation("LOGIN", "DASHBOARD")
     assert path == ["enter_credentials", "click_login"]
 
-    # RESULTS to CONFIRMATION path via BOOKING
-    path = planner.plan_navigation("RESULTS", "CONFIRMATION")
-    assert path == ["select_hotel", "click_continue", "fill_billing_details", "click_book_now"]
+    # LIST to CONFIRMATION path via FORM
+    path = planner.plan_navigation("LIST", "CONFIRMATION")
+    assert path == ["select_item", "open_form", "fill_form", "submit_form"]
 
     # Same state requires no action
-    path = planner.plan_navigation("SEARCH", "SEARCH")
+    path = planner.plan_navigation("HOME", "HOME")
     assert path == []
 
     # Fallback to direct navigation for unknown states

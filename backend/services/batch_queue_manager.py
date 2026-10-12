@@ -217,11 +217,13 @@ class BatchQueueManager:
 
     def _make_login_conditional(self, script: str) -> str:
         import re
-        # Look for typical adactin login sequence matching both page.fill and page.locator().fill
-        pattern = r"((?:console\.log\([^)]+\);\s*)?await\s+page\.(?:locator\([^)]+\)\.)?fill\(\s*['\"](?:input)?#username['\"].*?await\s+page\.(?:locator\([^)]+\)\.)?click\(\s*['\"](?:input)?#login['\"]\);?)"
-        
+        # Wrap a generic username/password + login-click sequence so it is
+        # skipped when the session is already authenticated. No vendor-specific
+        # URLs or element IDs are assumed.
+        pattern = r"((?:console\.log\([^)]+\);\s*)?await\s+page\.(?:locator\([^)]+\)\.)?fill\(\s*['\"][^'\"]*username[^'\"]*['\"].*?await\s+page\.(?:locator\([^)]+\)\.)?click\(\s*['\"][^'\"]*login[^'\"]*['\"]\);?)"
+
         replacement = """\
-  const is_logged_in = page.url().includes('SearchHotel.php') || (await page.$('#username').catch(() => null)) === null;
+  const is_logged_in = !page.url().toLowerCase().includes('login') || (await page.$('#username, input[name=\"username\"], input[type=\"password\"]').catch(() => null)) === null;
   if (!is_logged_in) {
     \\1
   } else {

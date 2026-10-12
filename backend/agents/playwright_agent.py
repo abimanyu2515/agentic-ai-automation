@@ -52,11 +52,11 @@ Validation:
     - Selenium: Must contain "import" and ("webdriver" or "pytest" or "selenium")
     - Cucumber: Must contain "Feature:" or "Scenario:" or "@given" or "given("
 
-Critical Rules for Adactin Hotel Application:
-    - Buttons are ALWAYS <input> tags, not <button> tags
-    - Login button: input#login or input[name="login"]
-    - Dropdowns use <select> tags with selectOption()
-    - Input fields use fill() or type(), never selectOption()
+Critical Rules (target-agnostic):
+    - Never hardcode selectors, URLs, or credentials for a specific demo app
+    - Derive every locator and value from the test case inputs
+    - Prefer accessible locators (getByRole/getByLabel) over raw CSS IDs
+    - Resolve credentials only from the project's vault / environment variables
 
 Design Decision:
     One LLM call per test case (not batched) to isolate errors.
@@ -75,54 +75,42 @@ from uuid import UUID
 _SYSTEM_PROMPT = (
     "You are a senior QA automation engineer who writes clean, idiomatic Playwright TypeScript tests. "
     "You output ONLY code - no explanation, no markdown code fences, nothing before or after it.\n\n"
-    "CRITICAL selector rules for Adactin Hotel Application:\n"
-    "1. Buttons in Adactin are ALWAYS <input> tags, NEVER <button> tags.\n"
-    "   - Login button locator: `input#login` or `input[name=\"login\"]` (NEVER click `button[name=\"login\"]` or `button:has-text(\"Login\")`)\n"
-    "   - Login error container: `b#loginerror` (contains the error text: 'Invalid Login details') - use ID selector, not class\n"
-    "   - Search button locator: `input#Submit` (NEVER click `button[name=\"search\"]`)\n"
-    "   - Continue button locator: `input#continue`\n"
-    "   - Book Now button locator: `input#book_now`\n"
-    "2. Dropdowns in Adactin are `<select>` tags and must use selectOption:\n"
-    "   - Location: `select#location`\n"
-    "   - Hotels: `select#hotels`\n"
-    "   - Room Type: `select#room_type`\n"
-    "   - Room Nos: `select#room_nos`\n"
-    "   - Adults per Room: `select#adult_room` (ID is `adult_room`, NOT `adults` or `adults_room`)\n"
-    "   - Children per Room: `select#child_room` (ID is `child_room`, NOT `children_room`)\n"
-    "   - Credit Card Type: `select#cc_type`\n"
-    "   - Expiry Month: `select#cc_exp_month`\n"
-    "   - Expiry Year: `select#cc_exp_year`\n"
-    "3. Input fields are `<input>` tags and must use fill/type (NEVER use selectOption on these):\n"
-    "   - Username: `input#username` or `input[name=\"username\"]`\n"
-    "   - Password: `input#password` or `input[name=\"password\"]`\n"
-    "   - First Name: `input#first_name`\n"
-    "   - Last Name: `input#last_name`\n"
-    "   - Billing Address: `textarea#address`\n"
-    "   - Credit Card No: `input#cc_num`\n"
-    "   - CVV Number: `input#cc_cvv`\n"
-    "   - Check-in Date: `input#datepick_in` (format as DD/MM/YYYY, e.g. '17/07/2026')\n"
-    "   - Check-out Date: `input#datepick_out` (format as DD/MM/YYYY, e.g. '18/07/2026')\n"
-    "   - Welcome Message / Username Show field (read-only input field showing the logged in user): `input#username_show` (to assert its value, use `await expect(page.locator('input#username_show')).toHaveValue('Hello USERNAME!')`)\n"
-    "4. Do NOT perform pre-login actions (like logging in with valid credentials) unless explicitly specified in the Preconditions or Steps. Start directly by navigating to the base URL (goto(BASE_URL)) and then execute the steps in order.\n"
-    "5. After clicking the login button (input#login), you MUST wait for the redirection to the dashboard/search page to complete (e.g., wait for the URL to contain 'SearchHotel.php' or wait for the selector 'input#username_show' or 'select#location' to be visible) before executing any subsequent steps. Do NOT manually navigate to arbitrary URLs like '?q=Search' right after login.\n"
-    "6. ALWAYS use page.locator('selector').click() and page.locator('selector').fill('text') instead of page.click('selector') or page.fill('selector'). This is required by the platform to capture step-by-step screenshots and timeline reports.\n"
-    "7. Do NOT use `const text = await locator.textContent(); expect(text).toContain('val')`. This does not auto-wait and causes race conditions. ALWAYS use Playwright's auto-waiting assertions, e.g. `await expect(page.locator('selector')).toContainText('val')` or `await expect(page.locator('selector')).toHaveValue('val')`.\n"
-    "8. After clicking the Search button (input#Submit), the page navigates to SelectHotel.php, NOT SearchHotel.php. Assert with `await expect(page).toHaveURL(/SelectHotel\\.php/)` or verify `#select_hotel` is visible.\n"
-    "9. IMPORTANT: Date format for datepick_in and datepick_out is DD/MM/YYYY (e.g. '17/07/2026'). Do NOT use ISO format (YYYY-MM-DD) as the site rejects it. Generate dates as UTC string formatted to DD/MM/YYYY.\n"
-    "10. ALWAYS import { test, expect } from '@playwright/test' (not just `test`). The `expect` is required for assertions.\n"
+    "CRITICAL rules (apply to ANY target web application):\n"
+    "1. The test case inputs (title, preconditions, steps, expected result) plus the project's "
+    "target base URL are the ONLY source of truth. Never rely on prior knowledge of any specific "
+    "demo site, and never hardcode selectors, URLs, or credentials from memory.\n"
+    "2. Derive every locator from the steps: prefer accessible locators (getByRole, getByLabel, "
+    "getByPlaceholder, getByText) with unambiguous names; fall back to stable CSS/ID selectors only "
+    "when the steps name them. If a locator cannot be derived with confidence, emit a "
+    "`// TODO: locator not specified in inputs` comment instead of fabricating one.\n"
+    "3. Match the control type to the wording: `<select>` dropdowns use selectOption({ label: '...' }); "
+    "text inputs use fill(); buttons/links use click(). Never call selectOption on a text input.\n"
+    "4. Do NOT perform pre-login actions unless explicitly specified in the Preconditions or Steps. "
+    "Start directly by navigating to the base URL (goto(BASE_URL)) and then execute the steps in order.\n"
+    "5. After submitting a login form, wait for the post-login landing to complete (e.g. wait for a URL "
+    "change or for a dashboard/home element named in the steps to become visible) before executing "
+    "subsequent steps. Do NOT navigate to arbitrary deep URLs right after login.\n"
+    "6. ALWAYS use page.locator('selector').click() and page.locator('selector').fill('text') instead of "
+    "page.click('selector') or page.fill('selector'). This is required by the platform to capture "
+    "step-by-step screenshots and timeline reports.\n"
+    "7. Do NOT use `const text = await locator.textContent(); expect(text).toContain('val')`. This does not "
+    "auto-wait and causes race conditions. ALWAYS use Playwright's auto-waiting assertions, e.g. "
+    "`await expect(page.locator('selector')).toContainText('val')` or "
+    "`await expect(page.locator('selector')).toHaveValue('val')`.\n"
+    "8. Only assert the navigation or outcome stated in the expected result. Never invent destination URLs, "
+    "page names, or success messages.\n"
+    "9. Never assume a date/data format. If the steps do not specify one, use a reasonable format and flag it "
+    "with a `// NOTE:` comment.\n"
+    "10. ALWAYS import { test, expect } from '@playwright/test' (not just `test`). The `expect` is required "
+    "for assertions.\n"
     "11. CRITICAL DROPDOWN RULES:\n"
-    "    - If a step says to keep a dropdown or field at its default value or do nothing, do NOT interact with it or call `selectOption`. Simply generate a comment, e.g. `// Keep default - no action needed`.\n"
-    "    - When using `selectOption` to select an option, ALWAYS select by label wrapper: `selectOption({ label: \"Option Label Text\" })` (e.g. `selectOption({ label: \"Sydney\" })`). Do NOT pass raw strings like `selectOption(\"Sydney\")` directly.\n"
-    "12. CRITICAL BOOKING CONFIRMATION RULES:\n"
-    "    - After clicking 'Book Now' button (input#book_now) on BookHotel.php, the application displays a processing message: 'Please wait! We are processing your hotel booking...'\n"
-    "    - This processing takes approximately 5-6 seconds before redirecting to BookingConfirm.php\n"
-    "    - You MUST use an adequate timeout when waiting for the URL change: `await expect(page).toHaveURL(/BookingConfirm\\.php/, { timeout: 15000 });`\n"
-    "    - After successful booking confirmation, you MUST extract the Order ID from the confirmation page\n"
-    "    - Order ID locator: `input#order_no` (read-only input field containing the order number)\n"
-    "    - Extract Order ID using: `const orderNumber = await page.locator('input#order_no').inputValue();`\n"
-    "    - Log the Order ID to console for reporting with [Timeline] prefix: `console.log('[Timeline] Order Confirmed - Order ID:', orderNumber);`\n"
-    "    - The Order ID MUST be captured and included in test execution reports for traceability\n"
-    "    - Validate that the Order ID is numeric: `expect(orderNumber).toMatch(/^\\d+$/);`\n"
+    "    - If a step says to keep a dropdown or field at its default value or do nothing, do NOT interact with "
+    "it or call `selectOption`. Simply generate a comment, e.g. `// Keep default - no action needed`.\n"
+    "    - When using `selectOption` to select an option, ALWAYS select by label wrapper: "
+    "`selectOption({ label: \"Option Label Text\" })`. Do NOT pass unexplained raw strings.\n"
+    "12. For async operations (e.g. form submissions that process server-side), wait with an adequate timeout "
+    "on the expected outcome (e.g. `await expect(page).toHaveURL(/confirm/, { timeout: 15000 });`) instead of "
+    "fixed sleeps. Rely on Playwright auto-waiting; never use waitForTimeout().\n"
 )
 
 
@@ -215,25 +203,14 @@ class PlaywrightAgent(BaseAgent):
                 except Exception as vault_err:
                     state.add_log(f"[PlaywrightAgent] Vault load warning: {vault_err}")
 
-                # Hard fallback to first non-null vault entry or standard credentials
+                # No hardcoded credential fallback: if neither the project nor the
+                # vault provides credentials, leave them as None so generated
+                # scripts use clearly-marked placeholders / env variables.
                 if not target_username or not target_password:
-                    try:
-                        from backend.services.vault_service import VaultService
-                        from backend.utils.crypto import decrypt_value
-                        vault = VaultService()._read_vault()
-                        for pid, creds in vault.items():
-                            u = decrypt_value(creds.get("username_enc"))
-                            p = decrypt_value(creds.get("password_enc"))
-                            if u and p:
-                                target_username = u
-                                target_password = p
-                                break
-                    except Exception:
-                        pass
-                
-                if not target_username or not target_password:
-                    target_username = "ADACTINFORQA"
-                    target_password = "hanish13"
+                    state.add_log(
+                        f"[{self.name}] No project/vault credentials found; "
+                        "scripts will use placeholder credentials."
+                    )
 
         for test_case in approved:
             test_case.playwright_script = self._generate_script(test_case, framework, target_url, target_username, target_password)
@@ -245,21 +222,11 @@ class PlaywrightAgent(BaseAgent):
         import os
         import json
         settings = get_settings()
-        base_url = target_url or settings.playwright.base_url
+        base_url = target_url or settings.playwright.base_url or ""
 
         # Override framework if configured at test case level
         if getattr(test_case, "automation_framework", None):
             framework = test_case.automation_framework.lower()
-
-        # Load Adactin reference guide for accurate selectors and page flow understanding
-        adactin_reference = ""
-        adactin_guide_path = os.path.join(os.getcwd(), "adactin_reference_guide.md")
-        if os.path.exists(adactin_guide_path):
-            try:
-                with open(adactin_guide_path, "r", encoding="utf-8") as f:
-                    adactin_reference = f.read()
-            except Exception:
-                pass
 
         framework_context_str = "None specified"
         if "imported" in framework or "existing" in framework:
@@ -322,7 +289,7 @@ class PlaywrightAgent(BaseAgent):
                         f"BASE_URL = os.environ.get('TARGET_URL', '{base_url}')\n"
                         f"USERNAME = os.environ.get('TARGET_USERNAME', '{target_username}')\n"
                         f"PASSWORD = os.environ.get('TARGET_PASSWORD', '{target_password}')\n"
-                        f"Navigate to BASE_URL. Type USERNAME into the username field, PASSWORD into the password field, click login, and wait for the page to redirect (e.g. wait for the URL to contain 'SearchHotel.aspx' or wait for the element with ID 'location' to be visible) before executing subsequent steps."
+                        f"Navigate to BASE_URL. Type USERNAME into the username field, PASSWORD into the password field, click login, and wait for the post-login landing to load (e.g. wait for a URL change or for a dashboard element named in the steps to become visible) before executing subsequent steps."
                     )
             prompt += "\n\nWrite this test case using Selenium Python with pytest instead of Playwright."
         elif framework == "cucumber":
@@ -356,25 +323,7 @@ class PlaywrightAgent(BaseAgent):
             prompt += "\n\nWrite this test case using Gherkin feature syntax and Python step definitions instead of Playwright."
         else:
             system_prompt = _SYSTEM_PROMPT
-            
-            # Inject Adactin reference guide into system prompt for accurate page structure knowledge
-            if adactin_reference:
-                system_prompt += (
-                    "\n\n## ADACTIN APPLICATION REFERENCE GUIDE\n\n"
-                    "Below is the complete reference guide for the Adactin Hotel Application. "
-                    "Use this as the authoritative source for page structures, selectors, workflows, and validation patterns. "
-                    "Do NOT make assumptions about page elements - refer to this guide for exact selectors and page flow.\n\n"
-                    f"{adactin_reference}\n\n"
-                    "CRITICAL: For SelectHotel.php, do NOT attempt to verify table column headers by text content. "
-                    "The reference guide does not specify exact table header text verification. Instead:\n"
-                    "1. Check that the radio button (input#radiobutton_0) is visible and clickable\n"
-                    "2. Check the radio button\n"
-                    "3. Verify the Continue button (input#continue) becomes enabled\n"
-                    "4. Click Continue\n"
-                    "5. Verify navigation to BookHotel.php\n"
-                    "Do NOT try to validate table headers like 'Hotel Name', 'Location', etc. - this causes timeouts."
-                )
-            
+
             prompt = load_prompt(
                 "playwright_prompt.txt",
                 title=test_case.title,
@@ -402,7 +351,7 @@ class PlaywrightAgent(BaseAgent):
                         f"const BASE_URL = process.env.TARGET_URL || '{base_url}';\n"
                         f"const USERNAME = process.env.TARGET_USERNAME || '{target_username}';\n"
                         f"const PASSWORD = process.env.TARGET_PASSWORD || '{target_password}';\n"
-                        f"Navigate to BASE_URL. Type USERNAME into the username field, PASSWORD into the password field, click login, and wait for the page to redirect (e.g. wait for the URL to contain 'SearchHotel.aspx' or wait for the selector '#location' to be visible) before executing subsequent steps."
+                        f"Navigate to BASE_URL. Type USERNAME into the username field, PASSWORD into the password field, click login, and wait for the post-login landing to load (e.g. wait for a URL change or for a dashboard element named in the steps to become visible) before executing subsequent steps."
                     )
 
         raw_output = self.llm_service.generate(system=system_prompt, user=prompt)

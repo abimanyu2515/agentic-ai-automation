@@ -1,0 +1,400 @@
+-- -------------------------------------------------
+-- users
+-- -------------------------------------------------
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    full_name VARCHAR(200) NULL,
+    role VARCHAR(50) NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -------------------------------------------------
+-- projects
+-- -------------------------------------------------
+CREATE TABLE projects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    name VARCHAR(200) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    line_of_business VARCHAR(100) NOT NULL DEFAULT 'general',
+    framework VARCHAR(100) NOT NULL DEFAULT 'playwright',
+    jira_project_key VARCHAR(100) NULL,
+    target_url VARCHAR(500) NOT NULL DEFAULT 'https://adactinhotelapp.com/',
+    target_username VARCHAR(255) NULL,
+    target_password_enc VARCHAR(500) NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ NULL,
+    deleted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    UNIQUE (owner_id, name)
+);
+
+-- -------------------------------------------------
+-- releases
+-- -------------------------------------------------
+CREATE TABLE releases (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'Active',
+    start_date TIMESTAMPTZ NULL,
+    end_date TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -------------------------------------------------
+-- test_cycles
+-- -------------------------------------------------
+CREATE TABLE test_cycles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    release_id UUID NOT NULL REFERENCES releases(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'Active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -------------------------------------------------
+-- requirements
+-- -------------------------------------------------
+CREATE TABLE requirements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    release_id UUID REFERENCES releases(id) ON DELETE SET NULL,
+    title VARCHAR(200) NOT NULL,
+    description TEXT NOT NULL,
+    source VARCHAR(50) NOT NULL DEFAULT 'manual',
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    original_filename VARCHAR(255) NULL,
+    requirement_id VARCHAR(100) NULL,
+    requirement_title VARCHAR(200) NULL,
+    priority VARCHAR(50) NOT NULL DEFAULT 'medium',
+    business_domain VARCHAR(100) NOT NULL DEFAULT 'general',
+    attachments JSON NOT NULL DEFAULT '[]',
+    feature_mapping TEXT NULL,
+    jira_issue_key VARCHAR(100) NULL,
+    jira_issue_url VARCHAR(500) NULL,
+    jira_sync_status VARCHAR(50) NULL,
+    jira_last_synced_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ NULL,
+    deleted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    UNIQUE (project_id, requirement_id)
+);
+
+-- -------------------------------------------------
+-- scenarios
+-- -------------------------------------------------
+CREATE TABLE scenarios (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    requirement_id UUID NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
+    scenario_ref_id VARCHAR(20) NULL,
+    scenario_name VARCHAR(200) NOT NULL,
+    description TEXT NOT NULL,
+    priority VARCHAR(50) NOT NULL DEFAULT 'medium',
+    confidence FLOAT NOT NULL DEFAULT 0,
+    approved BOOLEAN NOT NULL DEFAULT FALSE,
+    rejected BOOLEAN NOT NULL DEFAULT FALSE,
+    path_type VARCHAR(100) NOT NULL DEFAULT 'happy_path',
+    tags JSON NOT NULL DEFAULT '[]',
+    reviewer VARCHAR(100) NULL,
+    approved_at TIMESTAMPTZ NULL,
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    jira_issue_key VARCHAR(100) NULL,
+    jira_issue_id VARCHAR(100) NULL,
+    jira_issue_url VARCHAR(500) NULL,
+    jira_sync_status VARCHAR(50) NULL,
+    jira_last_synced_at TIMESTAMPTZ NULL,
+    last_jira_sync_error TEXT NULL,
+    jira_sync_retry_count INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ NULL,
+    deleted_by UUID REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- -------------------------------------------------
+-- test_cases
+-- -------------------------------------------------
+CREATE TABLE test_cases (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    scenario_id UUID NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
+    test_case_ref_id VARCHAR(30) NULL,
+    title VARCHAR(200) NOT NULL,
+    preconditions JSON NOT NULL DEFAULT '[]',
+    steps JSON NOT NULL DEFAULT '[]',
+    expected_result TEXT NOT NULL,
+    priority VARCHAR(50) NOT NULL DEFAULT 'medium',
+    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    confidence FLOAT NOT NULL DEFAULT 0,
+    evaluation_status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    evaluation_reason TEXT NULL,
+    playwright_script TEXT NULL,
+    reviewer VARCHAR(100) NULL,
+    approved_at TIMESTAMPTZ NULL,
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_frozen BOOLEAN NOT NULL DEFAULT FALSE,
+    jira_issue_key VARCHAR(100) NULL,
+    jira_issue_url VARCHAR(500) NULL,
+    jira_sync_status VARCHAR(50) NULL,
+    jira_last_synced_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ NULL,
+    deleted_by UUID REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- -------------------------------------------------
+-- executions
+-- -------------------------------------------------
+CREATE TABLE executions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    test_case_id UUID NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    test_cycle_id UUID REFERENCES test_cycles(id) ON DELETE SET NULL,
+    status VARCHAR(50) NOT NULL,
+    duration_seconds FLOAT NOT NULL DEFAULT 0,
+    error_message TEXT NULL,
+    screenshot_path VARCHAR(500) NULL,
+    video_path VARCHAR(500) NULL,
+    trace_path VARCHAR(500) NULL,
+    browser_version VARCHAR(100) NULL,
+    executed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    timeline JSON NULL,
+    screenshots JSON NULL,
+    failure_category VARCHAR(100) NULL,
+    root_cause_summary TEXT NULL,
+    suggest_retry BOOLEAN NULL DEFAULT FALSE,
+    retest_pending_candidate BOOLEAN NULL DEFAULT FALSE,
+    jira_bug_id VARCHAR(100) NULL,
+    jira_bug_url VARCHAR(500) NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -------------------------------------------------
+-- reports
+-- -------------------------------------------------
+CREATE TABLE reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    execution_id UUID UNIQUE NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
+    junit_path VARCHAR(500) NULL,
+    html_path VARCHAR(500) NULL,
+    pdf_path VARCHAR(500) NULL,
+    jira_attachment_id VARCHAR(100) NULL,
+    jira_last_uploaded_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ NULL,
+    deleted_by UUID REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- -------------------------------------------------
+-- documents
+-- -------------------------------------------------
+CREATE TABLE documents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    filename VARCHAR(255) NOT NULL,
+    original_filename VARCHAR(255) NOT NULL,
+    mime_type VARCHAR(100) NOT NULL,
+    size INTEGER NOT NULL,
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    storage_provider VARCHAR(100) NOT NULL DEFAULT 'local',
+    storage_key VARCHAR(500) NOT NULL,
+    embedding_status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    vector_collection VARCHAR(255) NULL,
+    metadata JSON NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -------------------------------------------------
+-- scenario_notes
+-- -------------------------------------------------
+CREATE TABLE scenario_notes (
+    id SERIAL PRIMARY KEY,
+    scenario_id UUID NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
+    note TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -------------------------------------------------
+-- test_case_notes
+-- -------------------------------------------------
+CREATE TABLE test_case_notes (
+    id SERIAL PRIMARY KEY,
+    test_case_id UUID NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+    note TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -------------------------------------------------
+-- roles
+-- -------------------------------------------------
+CREATE TABLE roles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) UNIQUE NOT NULL
+);
+
+-- -------------------------------------------------
+-- permissions
+-- -------------------------------------------------
+CREATE TABLE permissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    module VARCHAR(100) NOT NULL,
+    action VARCHAR(100) NOT NULL
+);
+
+-- -------------------------------------------------
+-- role_permissions (junction)
+-- -------------------------------------------------
+CREATE TABLE role_permissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE
+);
+
+-- -------------------------------------------------
+-- project_users (many‑to‑many user↔project)
+-- -------------------------------------------------
+CREATE TABLE project_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE
+);
+
+-- -------------------------------------------------
+-- refresh_tokens
+-- -------------------------------------------------
+CREATE TABLE refresh_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token VARCHAR(500) UNIQUE NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+-- -------------------------------------------------
+-- audit_logs
+-- -------------------------------------------------
+CREATE TABLE audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    action VARCHAR(50) NOT NULL,
+    module VARCHAR(50) NOT NULL,
+    field_changes JSON NOT NULL DEFAULT '{}'
+);
+
+-- -------------------------------------------------
+-- Sample INSERT statements
+-- -------------------------------------------------
+-- Insert a default admin user
+INSERT INTO users (email, password_hash, full_name, role, is_active)
+VALUES (
+    'qwerty@agenticai.com',
+  '$2a$12$C/xG7pSchtGSRmPBH2mzauGTSAhAD/es7vaX/G0g8in57rNOgkK7C',
+    'Admin User',
+    'Superadmin',
+    TRUE
+);
+
+--  Insert a project owned by that user
+INSERT INTO projects (owner_id, name, description, line_of_business, framework, target_url)
+SELECT
+    id,
+    'Hotel Booking Project',
+    'End‑to‑end tests for the Adactin hotel demo application',
+    'general',
+    'playwright',
+    'https://adactinhotelapp.com/'
+FROM users
+WHERE email = 'admin@agenticai.com';
+
+--  Insert a release linked to the project
+INSERT INTO releases (project_id, name, description, status)
+SELECT
+    projects.id,
+    'Release 1.0',
+    'Initial release for the hotel project',
+    'Active'
+FROM projects
+WHERE name = 'Hotel Booking Project';
+
+-- Insert a requirement under that release
+INSERT INTO requirements (project_id, release_id, title, description, priority, business_domain)
+SELECT
+    projects.id,
+    releases.id,
+    'Validate login flow',
+    'User must be able to log in with valid credentials',
+    'high',
+    'auth'
+FROM projects, releases
+WHERE projects.name = 'Hotel Booking Project'
+  AND releases.name = 'Release 1.0';
+
+-- Insert a scenario for the requirement
+INSERT INTO scenarios (requirement_id, scenario_name, description, priority, path_type, approved)
+SELECT
+    requirements.id,
+    'Valid login',
+    'Verify that a registered user can successfully log in',
+    'high',
+    'happy_path',
+    FALSE
+FROM requirements
+WHERE title = 'Validate login flow';
+
+-- Insert a test case under the scenario
+INSERT INTO test_cases (scenario_id, title, preconditions, steps, expected_result, priority, status)
+SELECT
+    scenarios.id,
+    'Login with valid credentials',
+    '[]'::json,
+    '[{"action":"type","target":"username","value":"user123"},{"action":"type","target":"password","value":"pass123"},{"action":"click","target":"loginBtn","value":""}]'::json,
+    'User is redirected to the home page and session is established',
+    'high',
+    'pending'
+FROM scenarios
+WHERE scenario_name = 'Valid login';
+
+-- Insert an execution record for the test case
+INSERT INTO executions (test_case_id, project_id, status, duration_seconds)
+SELECT
+    test_cases.id,
+    projects.id,
+    'passed',
+    3.45
+FROM test_cases, projects
+WHERE test_cases.title = 'Login with valid credentials'
+  AND projects.name = 'Hotel Booking Project';
+
+-- Insert a report linked to that execution
+INSERT INTO reports (project_id, execution_id, html_path, pdf_path)
+SELECT
+    projects.id,
+    executions.id,
+    '/reports/exec_001.html',
+    '/reports/exec_001.pdf'
+FROM projects, executions
+WHERE projects.name = 'Hotel Booking Project'
+  AND executions.status = 'passed';

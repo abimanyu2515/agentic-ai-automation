@@ -428,7 +428,7 @@ Example transformations:
         # Determine target web URL
         from backend.config.settings import get_settings
         settings = get_settings()
-        web_url = payload.get("base_url") or settings.playwright.base_url or "https://adactinhotelapp.com/"
+        web_url = payload.get("base_url") or settings.playwright.base_url or ""
 
         # 1. Compile JUnit XML
         junit_path = reports_dir / f"junit_{execution_id_str}.xml"
