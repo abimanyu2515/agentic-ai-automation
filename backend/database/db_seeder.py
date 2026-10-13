@@ -5,7 +5,7 @@ from backend.config.settings import get_settings
 
 DEFAULT_ROLES = ["Superadmin", "Admin", "Project Manager", "Tester", "Stakeholder"]
 
-MODULES = ["Dashboard", "Requirements", "Scenarios", "TestCases", "Playwright", "Executions", "Reports", "Settings", "Users", "Roles", "Permissions"]
+MODULES = ["Dashboard", "Requirements", "Scenarios", "TestCases", "Playwright", "Executions", "Reports", "Settings", "Users", "Roles", "Permissions", "Projects"]
 ACTIONS = ["view", "create", "edit", "delete", "approve"]
 
 def seed_database(db: Session) -> None:
@@ -88,6 +88,7 @@ def seed_database(db: Session) -> None:
     for module in ["Dashboard", "Requirements", "Scenarios", "TestCases", "Playwright", "Executions", "Reports"]:
         for action in ACTIONS:
             assign_perm("Project Manager", module, action)
+    assign_perm("Project Manager", "Projects", "create")
     assign_perm("Project Manager", "Settings", "view")
 
     # Tester gets view, create, edit for scenarios, testcases, executions, playwright, and view-only for dashboard, requirements, reports

@@ -25,10 +25,10 @@ class ProjectService:
     def get_project(self, project_id: UUID) -> Project | None:
         return self.repo.get_project(project_id)
 
-    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = None, target_username: str | None = None, target_password_enc: str | None = None) -> Project:
+    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = None, target_username: str | None = None, target_password_enc: str | None = None, owner_id: UUID | None = None, created_by: UUID | None = None) -> Project:
         return self.repo.create_project(
             name, description, line_of_business, framework, jira_project_key,
-            target_url, target_username, target_password_enc
+            target_url, target_username, target_password_enc, owner_id, created_by
         )
 
     def get_requirements(self, project_id: UUID) -> list[Requirement]:
@@ -560,4 +560,3 @@ class ProjectService:
             })
             
         return parsed
-

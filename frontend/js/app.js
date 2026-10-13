@@ -248,11 +248,17 @@ class App {
         const lob = document.getElementById('new-proj-lob').value;
         const framework = document.getElementById('new-proj-framework').value;
         const jiraKey = document.getElementById('new-proj-jira-key').value.trim() || null;
+        const targetUrl = document.getElementById('new-proj-target-url').value.trim();
         
         const descError = document.getElementById('new-proj-desc-error');
+        const targetUrlError = document.getElementById('new-proj-target-url-error');
         if (descError) {
           descError.style.display = 'none';
           descError.textContent = '';
+        }
+        if (targetUrlError) {
+          targetUrlError.style.display = 'none';
+          targetUrlError.textContent = '';
         }
 
         if (!name) return;
@@ -263,19 +269,33 @@ class App {
           }
           return;
         }
+        if (!targetUrl) {
+          if (targetUrlError) {
+            targetUrlError.textContent = 'Target URL is required.';
+            targetUrlError.style.display = 'block';
+          }
+          return;
+        }
 
         try {
-          const proj = await API.createProject(name, desc, lob, framework, jiraKey);
+          const proj = await API.createProject(name, desc, lob, framework, jiraKey, targetUrl);
           this.addLog(`Project '${name}' in LOB '${lob}' created`);
           await this.loadProjects();
           this.closeModal('create-project-modal');
           await this.selectProject(proj.id);
         } catch (err) {
-          if (descError) {
-            descError.textContent = `Failed to create project: ${err.message}`;
+          const detail = err.detail || {};
+          const invalidTargetUrl = detail.invalid_fields && detail.invalid_fields.target_url;
+          if (targetUrlError && invalidTargetUrl) {
+            targetUrlError.textContent = invalidTargetUrl === 'duplicate_url'
+              ? 'A project with this target URL already exists for your account.'
+              : detail.message || 'Enter a valid absolute HTTP or HTTPS URL.';
+            targetUrlError.style.display = 'block';
+          } else if (descError) {
+            descError.textContent = detail.message || `Failed to create project: ${err.message}`;
             descError.style.display = 'block';
           } else {
-            alert(`Failed to create project: ${err.message}`);
+            alert(detail.message || `Failed to create project: ${err.message}`);
           }
         }
       });
@@ -3877,7 +3897,7 @@ class App {
     }
     const proj = this.projects.find(x => x.id === this.currentProjectId);
     if (!proj) return;
-    document.getElementById('project-settings-url').value = proj.target_url || 'https://adactinhotelapp.com/';
+    document.getElementById('project-settings-url').value = proj.target_url || '';
     document.getElementById('project-settings-username').value = proj.target_username || '';
     document.getElementById('project-settings-password').value = proj.target_username ? '********' : '';
   }

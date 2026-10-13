@@ -1,4 +1,5 @@
 import json
+import threading
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,12 @@ from backend.models.test_cycle import TestCycle
 STORE_PATH = Path(__file__).parent.parent / "database" / "project_store.json"
 
 
+class ProjectURLConflictError(ValueError):
+    def __init__(self, conflicting_project_id: UUID | None = None):
+        super().__init__("A project with this target URL already exists for the current owner.")
+        self.conflicting_project_id = conflicting_project_id
+
+
 class ProjectRepository(ABC):
     @abstractmethod
     def list_projects(self, include_deleted: bool = False) -> list[Project]:
@@ -26,7 +33,7 @@ class ProjectRepository(ABC):
         pass
 
     @abstractmethod
-    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = None, target_username: str | None = None, target_password_enc: str | None = None) -> Project:
+    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = None, target_username: str | None = None, target_password_enc: str | None = None, owner_id: UUID | None = None, created_by: UUID | None = None) -> Project:
         pass
 
     @abstractmethod
@@ -235,6 +242,8 @@ class ProjectRepository(ABC):
 
 
 class JSONProjectRepository(ProjectRepository):
+    _write_lock = threading.RLock()
+
     def __init__(self, file_path: Path = STORE_PATH):
         self.file_path = file_path
         self._ensure_store_exists()
@@ -314,35 +323,67 @@ class JSONProjectRepository(ProjectRepository):
                 return p
         return None
 
-    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = None, target_username: str | None = None, target_password_enc: str | None = None) -> Project:
-        raw = self._read_raw()
-        project = Project(
-            id=uuid4(),
-            name=name,
-            description=description,
-            line_of_business=line_of_business,
-            framework=framework,
-            jira_project_key=jira_project_key,
-            target_url=target_url,
-            target_username=target_username,
-            target_password_enc=target_password_enc,
-            created_at=datetime.now(timezone.utc),
-            requirements=[]
-        )
-        raw.setdefault("projects", []).append(project.model_dump(mode="json"))
-        self._write_raw(raw)
-        return project
+    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = None, target_username: str | None = None, target_password_enc: str | None = None, owner_id: UUID | None = None, created_by: UUID | None = None) -> Project:
+        from backend.services.project_configuration import normalize_target_url
+
+        with self._write_lock:
+            raw = self._read_raw()
+            normalized_url = normalize_target_url(target_url)
+            for existing in raw.get("projects", []):
+                if existing.get("is_deleted", False):
+                    continue
+                if (
+                    owner_id is not None
+                    and existing.get("owner_id") == str(owner_id)
+                    and normalized_url is not None
+                    and existing.get("target_url") == normalized_url
+                ):
+                    raise ProjectURLConflictError(UUID(existing["id"]))
+
+            project = Project(
+                id=uuid4(),
+                owner_id=owner_id,
+                created_by=created_by,
+                name=name,
+                description=description,
+                line_of_business=line_of_business,
+                framework=framework,
+                jira_project_key=jira_project_key,
+                target_url=normalized_url,
+                target_username=target_username,
+                target_password_enc=target_password_enc,
+                created_at=datetime.now(timezone.utc),
+                requirements=[]
+            )
+            raw.setdefault("projects", []).append(project.model_dump(mode="json"))
+            self._write_raw(raw)
+            return project
 
     def update_project(self, project: Project) -> Project | None:
-        raw = self._read_raw()
-        projects = raw.setdefault("projects", [])
-        p_id_str = str(project.id)
-        for idx, p in enumerate(projects):
-            if p["id"] == p_id_str:
-                projects[idx] = project.model_dump(mode="json")
-                self._write_raw(raw)
-                return project
-        return None
+        from backend.services.project_configuration import normalize_target_url
+
+        with self._write_lock:
+            raw = self._read_raw()
+            projects = raw.setdefault("projects", [])
+            p_id_str = str(project.id)
+            normalized_url = normalize_target_url(project.target_url)
+            for existing in projects:
+                if existing.get("id") == p_id_str or existing.get("is_deleted", False):
+                    continue
+                if (
+                    project.owner_id is not None
+                    and existing.get("owner_id") == str(project.owner_id)
+                    and normalized_url is not None
+                    and existing.get("target_url") == normalized_url
+                ):
+                    raise ProjectURLConflictError(UUID(existing["id"]))
+            for idx, p in enumerate(projects):
+                if p["id"] == p_id_str:
+                    project.target_url = normalized_url
+                    projects[idx] = project.model_dump(mode="json")
+                    self._write_raw(raw)
+                    return project
+            return None
 
     def delete_project(self, project_id: UUID, deleted_by: UUID | None = None) -> bool:
         raw = self._read_raw()
@@ -701,6 +742,38 @@ class JSONProjectRepository(ProjectRepository):
                 cleaned.pop("project_id", None)
                 result.append(ExecutionResult.model_validate(cleaned))
         return result
+
+    def delete_execution(self, execution_id: UUID, deleted_by: UUID | None = None) -> bool:
+        raw = self._read_raw()
+        executions = raw.setdefault("execution_results", {})
+        key = str(execution_id)
+        execution = executions.get(key)
+        if not execution or execution.get("is_deleted", False):
+            return False
+        execution["is_deleted"] = True
+        execution["deleted_at"] = datetime.now(timezone.utc).isoformat()
+        execution["deleted_by"] = str(deleted_by) if deleted_by else None
+        self._write_raw(raw)
+        return True
+
+    def delete_failed_executions(self, project_id: UUID, deleted_by: UUID | None = None) -> int:
+        raw = self._read_raw()
+        executions = raw.setdefault("execution_results", {})
+        count = 0
+        now = datetime.now(timezone.utc).isoformat()
+        for execution in executions.values():
+            if (
+                execution.get("project_id") == str(project_id)
+                and execution.get("status") in {"failed", "error"}
+                and not execution.get("is_deleted", False)
+            ):
+                execution["is_deleted"] = True
+                execution["deleted_at"] = now
+                execution["deleted_by"] = str(deleted_by) if deleted_by else None
+                count += 1
+        if count:
+            self._write_raw(raw)
+        return count
 
     def get_execution_result(self, project_id: UUID, execution_id: UUID) -> ExecutionResult | None:
         raw = self._read_raw()

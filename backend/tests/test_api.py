@@ -41,7 +41,7 @@ def test_create_and_list_projects(client):
     assert response.json() == []
 
     # Create a project
-    response = client.post("/api/v1/projects", json={"name": "Test Project", "description": "Desc"})
+    response = client.post("/api/v1/projects", json={"name": "Test Project", "description": "Desc", "framework": "playwright", "target_url": "https://test-project.example.com"})
     assert response.status_code == 201
     proj = response.json()
     assert proj["name"] == "Test Project"
@@ -58,7 +58,7 @@ def test_create_and_list_projects(client):
 
 def test_create_and_get_requirements(client):
     # Create project
-    response = client.post("/api/v1/projects", json={"name": "Test Proj", "description": "A test requirement project"})
+    response = client.post("/api/v1/projects", json={"name": "Test Proj", "description": "A test requirement project", "framework": "playwright", "target_url": "https://requirements.example.com"})
     proj_id = response.json()["id"]
 
     # Create requirement
@@ -124,7 +124,7 @@ def test_get_and_write_settings(client, monkeypatch):
 
 def test_update_and_delete_project(client):
     # Create project
-    response = client.post("/api/v1/projects", json={"name": "Temp Project", "description": "Temporary project description"})
+    response = client.post("/api/v1/projects", json={"name": "Temp Project", "description": "Temporary project description", "framework": "playwright", "target_url": "https://temp.example.com"})
     proj_id = response.json()["id"]
 
     # Update project
@@ -146,7 +146,7 @@ def test_update_and_delete_project(client):
 
 def test_create_and_delete_documents(client):
     # Create project
-    response = client.post("/api/v1/projects", json={"name": "Doc Project", "description": "Doc project description"})
+    response = client.post("/api/v1/projects", json={"name": "Doc Project", "description": "Doc project description", "framework": "playwright", "target_url": "https://docs.example.com"})
     proj_id = response.json()["id"]
 
     # Create document metadata
@@ -183,7 +183,7 @@ def test_create_and_delete_documents(client):
 
 def test_get_activity_traces(client):
     # Create project
-    response = client.post("/api/v1/projects", json={"name": "Trace Proj", "description": "Trace project description"})
+    response = client.post("/api/v1/projects", json={"name": "Trace Proj", "description": "Trace project description", "framework": "playwright", "target_url": "https://trace.example.com"})
     proj_id = response.json()["id"]
 
     # Get traces
@@ -198,7 +198,7 @@ def test_project_with_line_of_business(client):
     # Create project with LOB
     response = client.post(
         "/api/v1/projects", 
-        json={"name": "Finance Platform", "description": "LOB project", "line_of_business": "Banking"}
+        json={"name": "Finance Platform", "description": "LOB project", "line_of_business": "Banking", "framework": "playwright", "target_url": "https://finance.example.com"}
     )
     assert response.status_code == 201
     proj = response.json()
@@ -241,7 +241,7 @@ def test_notes_creation(client):
 
 def test_scenario_replacement_and_rejection_cascades(client):
     # 1. Setup project & requirement
-    response = client.post("/api/v1/projects", json={"name": "Cascade Proj", "description": "Cascade project description"})
+    response = client.post("/api/v1/projects", json={"name": "Cascade Proj", "description": "Cascade project description", "framework": "playwright", "target_url": "https://cascade.example.com"})
     proj_id = response.json()["id"]
 
     response = client.post(
@@ -287,18 +287,19 @@ def test_scenario_replacement_and_rejection_cascades(client):
 
 def test_create_project_empty_description_validation(client):
     # Test project creation with empty description (whitespaces)
-    response = client.post("/api/v1/projects", json={"name": "Empty Desc Proj", "description": "   "})
-    assert response.status_code == 400
-    assert "Project description cannot be empty" in response.json()["detail"]
+    response = client.post("/api/v1/projects", json={"name": "Empty Desc Proj", "description": "   ", "framework": "playwright", "target_url": "https://empty.example.com"})
+    assert response.status_code == 422
+    assert response.json()["invalid_fields"]["description"] == "required"
+    assert response.json()["message"] == "Project description cannot be empty."
 
     # Test project creation with missing description field
-    response = client.post("/api/v1/projects", json={"name": "Missing Desc Proj"})
+    response = client.post("/api/v1/projects", json={"name": "Missing Desc Proj", "framework": "playwright", "target_url": "https://missing.example.com"})
     assert response.status_code == 422
 
 
 def test_postman_ingestion(client):
     # 1. Setup project
-    response = client.post("/api/v1/projects", json={"name": "Postman Proj", "description": "Postman project description"})
+    response = client.post("/api/v1/projects", json={"name": "Postman Proj", "description": "Postman project description", "framework": "playwright", "target_url": "https://postman.example.com"})
     proj_id = response.json()["id"]
 
     # 2. Upload dummy Postman collection JSON
@@ -351,7 +352,7 @@ def test_postman_ingestion(client):
 
 def test_batch_execution_endpoints(client):
     # 1. Setup project
-    response = client.post("/api/v1/projects", json={"name": "Batch API Proj", "description": "Batch API project"})
+    response = client.post("/api/v1/projects", json={"name": "Batch API Proj", "description": "Batch API project", "framework": "playwright", "target_url": "https://batch.example.com"})
     assert response.status_code == 201
     proj_id = response.json()["id"]
 
@@ -394,6 +395,3 @@ def test_batch_execution_endpoints(client):
     response = client.get(f"/api/v1/projects/{proj_id}/batches/{batch_id}/stream")
     assert response.status_code == 200
     assert "Connecting" in response.text
-
-
-

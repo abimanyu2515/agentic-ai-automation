@@ -1,0 +1,116 @@
+{
+  "config": {
+    "argv": [
+      "C:\\nvm4w\\nodejs\\node.exe",
+      "C:\\Users\\devis\\agentic-ai-automation\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "--config",
+      "C:\\Users\\devis\\agentic-ai-automation\\backend\\playwrightt\\artifacts\\340bb3be-e225-4db1-a5b1-9c78fa78b0f9\\playwright.config.ts",
+      "--trace=on"
+    ],
+    "configFile": "C:\\Users\\devis\\agentic-ai-automation\\backend\\playwrightt\\artifacts\\340bb3be-e225-4db1-a5b1-9c78fa78b0f9\\playwright.config.ts",
+    "rootDir": "C:/Users/devis/agentic-ai-automation/backend/playwrightt/artifacts/340bb3be-e225-4db1-a5b1-9c78fa78b0f9",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {},
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/devis/agentic-ai-automation/backend/playwrightt/artifacts/340bb3be-e225-4db1-a5b1-9c78fa78b0f9/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {},
+        "id": "",
+        "name": "",
+        "testDir": "C:/Users/devis/agentic-ai-automation/backend/playwrightt/artifacts/340bb3be-e225-4db1-a5b1-9c78fa78b0f9",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "C:\\Users\\devis\\agentic-ai-automation\\backend\\playwrightt\\artifacts\\340bb3be-e225-4db1-a5b1-9c78fa78b0f9\\test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {},
+        "name": "",
+        "testDir": "C:\\Users\\devis\\agentic-ai-automation\\backend\\playwrightt\\artifacts\\340bb3be-e225-4db1-a5b1-9c78fa78b0f9",
+        "snapshotDir": "C:\\Users\\devis\\agentic-ai-automation\\backend\\playwrightt\\artifacts\\340bb3be-e225-4db1-a5b1-9c78fa78b0f9",
+        "testIgnore": [],
+        "testMatch": "**/*.@(spec|test).?(c|m)[jt]s?(x)",
+        "timeout": 60000,
+        "use": {
+          "browserName": "chromium",
+          "headless": true,
+          "launchOptions": {
+            "slowMo": 1000,
+            "args": [
+              "--disable-blink-features=AutomationControlled"
+            ]
+          },
+          "screenshot": "only-on-failure",
+          "video": "retain-on-failure",
+          "trace": "on"
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": ""
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "line",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "report.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.64.0",
+    "workers": 4,
+    "webServer": null
+  },
+  "suites": [],
+  "errors": [
+    {
+      "message": "SyntaxError: await is only valid in async functions and the top level bodies of modules",
+      "stack": "SyntaxError: await is only valid in async functions and the top level bodies of modules"
+    },
+    {
+      "message": "Error: No tests found",
+      "stack": "Error: No tests found"
+    }
+  ],
+  "stats": {
+    "startTime": "2026-10-13T06:46:59.316Z",
+    "duration": 35.37099999999987,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
