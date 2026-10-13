@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 
 class Project(BaseModel):
     id: UUID = Field(default_factory=uuid4)
+    owner_id: UUID | None = None
+    created_by: UUID | None = None
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="")
     line_of_business: str = Field(default="general")
@@ -23,4 +25,4 @@ class Project(BaseModel):
     target_password_enc: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     requirements: list[UUID] = Field(default_factory=list)
-
+    is_deleted: bool = False

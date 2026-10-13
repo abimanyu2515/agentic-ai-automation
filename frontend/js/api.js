@@ -101,13 +101,18 @@ async function request(url, options = {}) {
 
     if (!response.ok) {
       let errorMsg = `HTTP error! Status: ${response.status}`;
+      let detail = null;
       try {
         const errJson = await response.json();
         if (errJson && errJson.detail) {
-          errorMsg = errJson.detail;
+          detail = errJson.detail;
+          errorMsg = typeof detail === 'string' ? detail : (detail.message || errorMsg);
         }
       } catch (e) {}
-      throw new Error(errorMsg);
+      const error = new Error(errorMsg);
+      error.status = response.status;
+      error.detail = detail;
+      throw error;
     }
 
     if (response.status === 204) {
@@ -133,10 +138,17 @@ export const API = {
     return request(`/projects/${id}`);
   },
 
-  async createProject(name, description, lineOfBusiness, framework = 'playwright', jiraProjectKey = null) {
+  async createProject(name, description, lineOfBusiness, framework, jiraProjectKey = null, targetUrl) {
     return request('/projects', {
       method: 'POST',
-      body: JSON.stringify({ name, description, line_of_business: lineOfBusiness, framework, jira_project_key: jiraProjectKey })
+      body: JSON.stringify({
+        name,
+        description,
+        line_of_business: lineOfBusiness,
+        framework,
+        jira_project_key: jiraProjectKey,
+        target_url: targetUrl
+      })
     });
   },
 

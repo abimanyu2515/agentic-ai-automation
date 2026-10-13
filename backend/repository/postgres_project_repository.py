@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 import logging
 from sqlalchemy.orm import scoped_session
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 
 from backend.models.project import Project
 from backend.models.requirement import Requirement, RequirementSource
@@ -13,6 +14,7 @@ from backend.models.execution_result import ExecutionResult
 from backend.models.release import Release
 from backend.models.test_cycle import TestCycle
 from backend.repository.project_repository import ProjectRepository
+from backend.repository.project_repository import ProjectURLConflictError
 from backend.database.db import SessionLocal
 from backend.database.db_models import (
     ProjectDB, RequirementDB, ScenarioDB, TestCaseDB, 
@@ -82,6 +84,8 @@ class PostgresProjectRepository(ProjectRepository):
         return [
             Project(
                 id=p.id,
+                owner_id=p.owner_id,
+                created_by=p.created_by,
                 name=p.name,
                 description=p.description,
                 line_of_business=p.line_of_business,
@@ -91,7 +95,8 @@ class PostgresProjectRepository(ProjectRepository):
                 target_username=getattr(p, "target_username", None),
                 target_password_enc=getattr(p, "target_password_enc", None),
                 created_at=p.created_at,
-                requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted]
+                requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted],
+                is_deleted=p.is_deleted,
             )
             for p in db_projects
         ]
@@ -106,6 +111,8 @@ class PostgresProjectRepository(ProjectRepository):
             return None
         return Project(
             id=p.id,
+            owner_id=p.owner_id,
+            created_by=p.created_by,
             name=p.name,
             description=p.description,
             line_of_business=p.line_of_business,
@@ -115,37 +122,58 @@ class PostgresProjectRepository(ProjectRepository):
             target_username=getattr(p, "target_username", None),
             target_password_enc=getattr(p, "target_password_enc", None),
             created_at=p.created_at,
-            requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted]
+            requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted],
+            is_deleted=p.is_deleted,
         )
 
-    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = None, target_username: str | None = None, target_password_enc: str | None = None) -> Project:
+    def create_project(self, name: str, description: str, line_of_business: str = "general", framework: str = "playwright", jira_project_key: str | None = None, target_url: str | None = None, target_username: str | None = None, target_password_enc: str | None = None, owner_id: UUID | None = None, created_by: UUID | None = None) -> Project:
         from datetime import datetime, timezone
         from uuid import uuid4
+        from backend.services.project_configuration import normalize_target_url
         session = self.session
         created_at = datetime.now(timezone.utc)
         proj_id = uuid4()
+        normalized_url = normalize_target_url(target_url)
+        if owner_id is not None and normalized_url is not None:
+            conflict = session.scalar(
+                select(ProjectDB.id).where(
+                    ProjectDB.owner_id == owner_id,
+                    ProjectDB.target_url == normalized_url,
+                    ProjectDB.is_deleted.is_(False),
+                )
+            )
+            if conflict:
+                raise ProjectURLConflictError(conflict)
         db_proj = ProjectDB(
             id=proj_id,
+            owner_id=owner_id,
+            created_by=created_by,
             name=name,
             description=description,
             line_of_business=line_of_business,
             framework=framework,
             jira_project_key=jira_project_key,
-            target_url=target_url,
+            target_url=normalized_url,
             target_username=target_username,
             target_password_enc=target_password_enc,
             created_at=created_at
         )
         session.add(db_proj)
-        self._flush_or_commit()
+        try:
+            self._flush_or_commit()
+        except IntegrityError as exc:
+            self.rollback()
+            raise ProjectURLConflictError() from exc
         return Project(
             id=proj_id,
+            owner_id=owner_id,
+            created_by=created_by,
             name=name,
             description=description,
             line_of_business=line_of_business,
             framework=framework,
             jira_project_key=jira_project_key,
-            target_url=target_url,
+            target_url=normalized_url,
             target_username=target_username,
             target_password_enc=target_password_enc,
             created_at=created_at,
@@ -153,6 +181,8 @@ class PostgresProjectRepository(ProjectRepository):
         )
 
     def update_project(self, project: Project) -> Project | None:
+        from backend.services.project_configuration import normalize_target_url
+
         session = self.session
         stmt = select(ProjectDB).where(ProjectDB.id == project.id, ProjectDB.is_deleted.is_(False))
         db_proj = session.scalar(stmt)
@@ -163,10 +193,15 @@ class PostgresProjectRepository(ProjectRepository):
         db_proj.line_of_business = project.line_of_business
         db_proj.framework = project.framework
         db_proj.jira_project_key = project.jira_project_key
+        project.target_url = normalize_target_url(project.target_url)
         db_proj.target_url = project.target_url
         db_proj.target_username = project.target_username
         db_proj.target_password_enc = project.target_password_enc
-        self._flush_or_commit()
+        try:
+            self._flush_or_commit()
+        except IntegrityError as exc:
+            self.rollback()
+            raise ProjectURLConflictError() from exc
         return project
 
     def delete_project(self, project_id: UUID, deleted_by: UUID | None = None) -> bool:
@@ -1247,4 +1282,3 @@ class PostgresProjectRepository(ProjectRepository):
         except Exception as e:
             session.rollback()
             raise e
-

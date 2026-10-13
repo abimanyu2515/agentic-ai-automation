@@ -1013,6 +1013,11 @@
           <div id="new-proj-desc-error" style="color: var(--color-danger); font-size: 0.85rem; margin-top: 4px; display: none;"></div>
         </div>
         <div class="form-group">
+          <label for="new-proj-target-url">Target URL <span style="color: var(--color-danger);">*</span></label>
+          <input type="url" id="new-proj-target-url" class="form-control" placeholder="https://example.com" required aria-describedby="new-proj-target-url-error" />
+          <div id="new-proj-target-url-error" style="color: var(--color-danger); font-size: 0.85rem; margin-top: 4px; display: none;" role="alert"></div>
+        </div>
+        <div class="form-group">
           <label for="new-proj-lob">Line of Business <span style="color: var(--color-danger);">*</span></label>
           <div class="searchable-select-container" id="new-proj-lob-container">
             <div class="searchable-select-trigger" id="new-proj-lob-trigger">

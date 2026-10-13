@@ -90,13 +90,16 @@ from uuid import UUID
 import json
 import asyncio
 import io
+import logging
 import zipfile
 import xml.etree.ElementTree as ET
 import pandas as pd
 from datetime import datetime, timezone
 import fitz
-from fastapi import FastAPI, HTTPException, Body, status, BackgroundTasks, UploadFile, File, Depends
+from fastapi import FastAPI, HTTPException, Body, status, BackgroundTasks, UploadFile, File, Depends, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -105,6 +108,14 @@ from backend.config.settings import get_settings
 from backend.services.project_service import ProjectService
 from backend.services.workflow_service import WorkflowService
 from backend.schemas.project_dto import ProjectCreate, ProjectResponse
+from backend.repository.project_repository import ProjectURLConflictError
+from backend.services.project_configuration import (
+    ProjectConfigurationError,
+    SUPPORTED_FRAMEWORKS,
+    normalize_framework,
+    normalize_target_url,
+    readiness_for_project,
+)
 from backend.schemas.requirement_dto import RequirementCreate, RequirementResponse
 from backend.schemas.scenario_dto import ScenarioUpdate, ScenarioResponse
 from backend.schemas.testcase_dto import TestCaseUpdate, TestCaseResponse, ScriptUpdatePayload
@@ -119,6 +130,8 @@ from backend.services.audit_service import log_audit
 from backend.utils.crypto import encrypt_value
 from backend.database.db_models import UserDB, RoleDB, PermissionDB, RolePermissionDB, ProjectUserDB, RefreshTokenDB, AuditLogDB
 
+logger = logging.getLogger("backend.project_creation")
+
 # Windows Python installations may not register the JavaScript MIME type.
 # Register it explicitly so browser module scripts are executed by StaticFiles.
 mimetypes.add_type("application/javascript", ".js")
@@ -132,6 +145,32 @@ app = FastAPI(
     description="Enterprise API backing the AI Test Automation Platform.",
     version="1.0.0"
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def project_create_validation_handler(request: Request, exc: RequestValidationError):
+    if request.method == "POST" and request.url.path == "/api/v1/projects":
+        missing_fields: list[str] = []
+        invalid_fields: dict[str, str] = {}
+        for error in exc.errors():
+            location = error.get("loc", ())
+            field = str(location[-1]) if location else "request"
+            if error.get("type") == "missing":
+                missing_fields.append(field)
+            elif error.get("type") == "extra_forbidden":
+                invalid_fields[field] = "field_not_permitted"
+            else:
+                invalid_fields[field] = "invalid_value"
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content=ProjectConfigurationError(
+                "PROJECT_INVALID_CONFIGURATION",
+                "Project creation input is invalid.",
+                missing_fields=missing_fields,
+                invalid_fields=invalid_fields,
+            ).as_detail(),
+        )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 # Enable CORS for development
 app.add_middleware(
@@ -225,6 +264,11 @@ def resolve_project_response(p) -> ProjectResponse:
     from backend.services.vault_service import VaultService
     vs = VaultService()
     username, _ = vs.get_credentials(str(p.id))
+    owner_projects = [
+        candidate
+        for candidate in project_service.list_projects()
+        if getattr(candidate, "owner_id", None) == getattr(p, "owner_id", None)
+    ]
     return ProjectResponse(
         id=p.id,
         name=p.name,
@@ -235,7 +279,8 @@ def resolve_project_response(p) -> ProjectResponse:
         requirements=p.requirements,
         jira_project_key=getattr(p, "jira_project_key", None),
         target_url=getattr(p, "target_url", None),
-        target_username=username if username else (getattr(p, "target_username", None) if getattr(p, "target_username", None) != "vault_secured" else None)
+        target_username=username if username else (getattr(p, "target_username", None) if getattr(p, "target_username", None) != "vault_secured" else None),
+        readiness=readiness_for_project(p, owner_projects),
     )
 
 def migrate_credentials_to_vault():
@@ -294,26 +339,67 @@ def list_projects():
 
 
 @app.post("/api/v1/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
-def create_project(data: ProjectCreate):
+def create_project(
+    data: ProjectCreate,
+    user: UserDB = Depends(get_current_user),
+    authorized: bool = Depends(has_permission("Projects", "create")),
+):
     if not data.name.strip():
-        raise HTTPException(status_code=400, detail="Project name cannot be empty")
+        return JSONResponse(
+            status_code=422,
+            content=ProjectConfigurationError(
+                "PROJECT_INVALID_CONFIGURATION",
+                "Project name cannot be empty.",
+                invalid_fields={"name": "required"},
+            ).as_detail(),
+        )
     if not data.description.strip():
-        raise HTTPException(status_code=400, detail="Project description cannot be empty")
-    
-    p = project_service.create_project(
-        name=data.name,
-        description=data.description,
-        line_of_business=data.line_of_business,
-        framework=data.framework,
-        jira_project_key=data.jira_project_key,
-        target_url=data.target_url,
-        target_username="vault_secured",
-        target_password_enc="vault_secured"
-    )
-    
-    from backend.services.vault_service import VaultService
-    VaultService().set_credentials(str(p.id), data.target_username, data.target_password)
-    
+        return JSONResponse(
+            status_code=422,
+            content=ProjectConfigurationError(
+                "PROJECT_INVALID_CONFIGURATION",
+                "Project description cannot be empty.",
+                invalid_fields={"description": "required"},
+            ).as_detail(),
+        )
+    if not getattr(user, "id", None):
+        raise HTTPException(status_code=401, detail="Authenticated user has no valid owner identity.")
+    framework = normalize_framework(data.framework)
+    if framework not in SUPPORTED_FRAMEWORKS:
+        return JSONResponse(
+            status_code=422,
+            content=ProjectConfigurationError(
+                "PROJECT_INVALID_CONFIGURATION",
+                "Project framework is not supported.",
+                invalid_fields={"framework": "unsupported_framework"},
+            ).as_detail(),
+        )
+    try:
+        target_url = normalize_target_url(data.target_url)
+        p = project_service.create_project(
+            name=data.name,
+            description=data.description,
+            line_of_business=data.line_of_business,
+            framework=framework,
+            jira_project_key=data.jira_project_key,
+            target_url=target_url,
+            owner_id=user.id,
+            created_by=user.id,
+        )
+        logger.info("Project created: project_id=%s owner_id=%s target_url=%s", p.id, user.id, target_url)
+    except ProjectConfigurationError as exc:
+        logger.warning("Project creation validation failed: code=%s fields=%s", exc.code, list(exc.invalid_fields))
+        return JSONResponse(status_code=exc.status_code, content=exc.as_detail())
+    except ProjectURLConflictError as exc:
+        logger.warning("Project creation URL conflict: owner_id=%s", user.id)
+        detail = {
+            "code": "PROJECT_URL_CONFLICT",
+            "message": str(exc),
+            "invalid_fields": {"target_url": "duplicate_url"},
+        }
+        if exc.conflicting_project_id is not None:
+            detail["conflicting_project_id"] = str(exc.conflicting_project_id)
+        return JSONResponse(status_code=409, content=detail)
     return resolve_project_response(p)
 
 
@@ -346,7 +432,19 @@ def update_project_settings(project_id: UUID, data: ProjectUpdate):
     p.target_username = "vault_secured"
     p.target_password_enc = "vault_secured"
     
-    updated = project_service.repo.update_project(p)
+    try:
+        updated = project_service.repo.update_project(p)
+    except ProjectConfigurationError as exc:
+        return JSONResponse(status_code=exc.status_code, content=exc.as_detail())
+    except ProjectURLConflictError as exc:
+        detail = {
+            "code": "PROJECT_URL_CONFLICT",
+            "message": str(exc),
+            "invalid_fields": {"target_url": "duplicate_url"},
+        }
+        if exc.conflicting_project_id is not None:
+            detail["conflicting_project_id"] = str(exc.conflicting_project_id)
+        return JSONResponse(status_code=409, content=detail)
     return resolve_project_response(updated)
 
 
@@ -1622,7 +1720,9 @@ def update_project(project_id: UUID, data: ProjectCreate):
         framework=getattr(updated, "framework", "playwright"),
         created_at=updated.created_at,
         requirements=updated.requirements,
-        jira_project_key=getattr(updated, "jira_project_key", None)
+        jira_project_key=getattr(updated, "jira_project_key", None),
+        target_url=getattr(updated, "target_url", None),
+        readiness=readiness_for_project(updated, project_service.list_projects()),
     )
 
 

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import Column, String, Text, Float, Boolean, DateTime, ForeignKey, Integer, JSON, UniqueConstraint
+from sqlalchemy import Column, String, Text, Float, Boolean, DateTime, ForeignKey, Integer, JSON, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from backend.database.db import Base
@@ -44,6 +44,14 @@ class ProjectDB(Base):
 
     __table_args__ = (
         UniqueConstraint("owner_id", "name", name="uq_projects_owner_name"),
+        Index(
+            "uq_projects_owner_target_url",
+            "owner_id",
+            "target_url",
+            unique=True,
+            postgresql_where="owner_id IS NOT NULL AND target_url IS NOT NULL AND is_deleted = false",
+            sqlite_where="owner_id IS NOT NULL AND target_url IS NOT NULL AND is_deleted = 0",
+        ),
     )
 
     owner = relationship("UserDB", back_populates="projects", foreign_keys=[owner_id])

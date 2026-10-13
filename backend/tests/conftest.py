@@ -75,16 +75,19 @@ def canned_scenario_batch() -> _GeneratedScenarioBatch:
                 scenario_name="Valid Login",
                 description="User logs in with correct username and password",
                 priority="high",
+                path_type="happy_path",
             ),
             _GeneratedScenario(
                 scenario_name="Invalid Login",
                 description="User attempts login with an incorrect password",
                 priority="medium",
+                path_type="negative",
             ),
             _GeneratedScenario(
                 scenario_name="Empty Password",
                 description="User submits the login form with an empty password field",
                 priority="low",
+                path_type="edge_case",
             ),
         ]
     )
