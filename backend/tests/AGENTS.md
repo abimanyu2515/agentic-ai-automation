@@ -11,6 +11,8 @@ This area contains pytest coverage for API routes, workflow agents, repositories
 | `backend/tests/conftest.py` | Shared LLM and Playwright test doubles |
 | `backend/tests/test_api.py` | API and project configuration behavior |
 | `backend/tests/test_project_configuration_snapshot.py` | JSON execution snapshot persistence |
+| `backend/tests/test_graph.py` | Workflow graph routing and injection |
+| `backend/tests/test_project_creation_target_url.py` | Target URL validation, readiness, and conflict behavior |
 
 ## Conventions
 

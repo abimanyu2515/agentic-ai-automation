@@ -30,6 +30,8 @@ _PROVIDER_PREFIXES: dict[str, str] = {
     "ollama": "ollama/",
     "groq": "groq/",
     "nvidia": "openai/",
+    "anthropic": "anthropic/",
+    "gemini": "gemini/",
 }
 
 # How each provider is told "respond with JSON". These are NOT
@@ -50,6 +52,13 @@ DEFAULT_STRUCTURED_SYSTEM_PROMPT = (
     "You respond with a single valid JSON object and nothing else - "
     "no markdown fences, no commentary before or after it."
 )
+
+# Bounds a single LLM HTTP call so a misconfigured provider/key cannot hang
+# the API worker (and the UI spinner) forever. Callers may override per call.
+DEFAULT_LLM_TIMEOUT = 60
+
+# Cloud providers that require an API key. Ollama is local and needs api_base instead.
+_CLOUD_PROVIDERS_REQUIRING_KEY = {"openai", "groq", "nvidia", "anthropic", "gemini"}
 
 
 class LLMServiceError(Exception):
@@ -112,14 +121,30 @@ class LLMService:
 
         return kwargs
 
-    def generate(self, *, system: str, user: str, **kwargs) -> str:
+    def _require_valid_config(self) -> None:
+        """Fail fast on misconfigured provider instead of hanging in litellm retries."""
+        provider = (self.config.provider or "").lower()
+        if provider in _CLOUD_PROVIDERS_REQUIRING_KEY and not self.config.api_key:
+            raise LLMServiceError(
+                f"LLM misconfigured ({provider}/{self.config.model}): missing API key. "
+                "Set LLM_API_KEY or configure it in Master Settings > General Settings."
+            )
+        if provider == "ollama" and not self.config.api_base:
+            raise LLMServiceError(
+                "LLM misconfigured (ollama): missing api_base. "
+                "Set LLM_API_BASE (e.g. http://localhost:11434) or switch provider."
+            )
+
+    def generate(self, *, system: str, user: str, timeout: int = 30, **kwargs) -> str:
         """Plain text completion. Returns the raw response content."""
+        self._require_valid_config()
         try:
             response = completion(
                 model=self._model_string(),
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                 api_base=self.config.api_base,
                 api_key=self.config.api_key,
+                timeout=timeout,
                 **kwargs,
             )
         except Exception as exc:
@@ -134,6 +159,7 @@ class LLMService:
         response_model: type[T],
         system: str = DEFAULT_STRUCTURED_SYSTEM_PROMPT,
         max_retries: int = 3,
+        timeout: int = 30,
         **kwargs,
     ) -> T:
         """Completion constrained to JSON, validated into response_model.
@@ -144,6 +170,8 @@ class LLMService:
         """
         import json
         import time
+
+        self._require_valid_config()
         
         last_exception = None
         last_content = ""
@@ -159,6 +187,7 @@ class LLMService:
                         messages=[{"role": "system", "content": system}, {"role": "user", "content": user_prompt}],
                         api_base=self.config.api_base,
                         api_key=self.config.api_key,
+                        timeout=timeout,
                         **self._json_mode_kwargs(),
                         **kwargs,
                     )

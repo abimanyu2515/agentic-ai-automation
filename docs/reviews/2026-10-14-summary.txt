@@ -1,0 +1,17 @@
+REVIEWED_BY: Muse Spark inline (author on Muse Spark, cross-model review degraded - no contrasting reviewer in this setup)
+SCOPE: 2 files, uncommitted (backend/services/llm.py, frontend/js/api.js)
+FINDINGS_FILE: docs/reviews/2026-10-14-main.md
+VERDICT: Changes requested
+
+BLOCKERS:
+- frontend/js/api.js:124 · timeout check expects AbortError but AbortSignal.timeout() rejects as TimeoutError, so the friendly LLM-settings note never appears on real timeout
+- backend/services/llm.py:160 with frontend/js/api.js:255 · backend worst case ~180s (3 retries × 60s) exceeds the 120s frontend abort, so a slow success can appear as a failure and invite a duplicating retry
+- backend/services/llm.py:122 · new fail fast branches have no test cover, and a silent regression reintroduces the hang
+
+MAJOR: (same 3 as blockers listed above; in this format majors and blockers are the same category)
+
+MINOR_COUNT: 4
+NIT_COUNT: 2
+STRENGTHS: validation runs before retries so bad config fails in ms, timeout is an overridable named param so test pass through still works, frontend reuses the existing alert and render path so the spinner always clears
+
+TEST_COVERAGE: none-yet (no test-preferences.json; project has pytest coverage but no formal preferences config; new validation logic has zero cover)

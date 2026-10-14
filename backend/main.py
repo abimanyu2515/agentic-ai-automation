@@ -1378,6 +1378,8 @@ def generate_scenarios(project_id: UUID, requirement_id: UUID, payload: dict = B
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Scenario generation failed: {exc}")
 
 
@@ -1688,6 +1690,9 @@ def get_project_credentials(project_id: UUID):
 def save_settings(payload: dict = Body(...)):
     override_path = Path(__file__).parent / "config" / "override.yaml"
     try:
+        llm_payload = payload.get("llm", {}) if isinstance(payload, dict) else {}
+        if "provider" in llm_payload and not (llm_payload.get("provider") or "").strip():
+            raise HTTPException(status_code=422, detail="LLM provider cannot be blank. Pick OpenAI, Groq, Nvidia, Gemini, Ollama, or Anthropic.")
         overrides = {}
         for section in ["llm", "workflow", "browser", "rag", "generation", "evaluation", "playwright", "jira"]:
             if section in payload:
@@ -1699,6 +1704,8 @@ def save_settings(payload: dict = Body(...)):
         get_settings.cache_clear()
         
         return {"status": "success", "settings": read_settings()}
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save settings: {exc}")
 

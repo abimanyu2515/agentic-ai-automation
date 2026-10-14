@@ -12,6 +12,7 @@ The backend exposes the FastAPI application and coordinates the requirement to e
 | `backend/graph/workflow.py` | LangGraph state machine construction and agent routing |
 | `backend/services/workflow_service.py` | Service entry points for generation, script creation, and execution |
 | `backend/agents/` | Agents that read and update their assigned `WorkflowState` fields |
+| `backend/prompts/agents/` | Prompt text for each agent, one folder per agent |
 | `backend/repository/` | JSON and PostgreSQL persistence through one repository interface |
 | `backend/services/playwright_runner.py` | The only direct Playwright subprocess integration |
 | `backend/services/vault_service.py` | Encrypted project credential storage |
