@@ -155,9 +155,14 @@ class ScenarioAgent(BaseAgent):
             count=str(self.scenario_count),
         )
 
+        # Nvidia NIM serving large MoE models (e.g. DeepSeek V4.1-Flash) is
+        # slow to first token: 30s per attempt times out even on healthy keys.
+        # 60s x 2 attempts fits inside the frontend's 300s abort window.
         batch = self.llm_service.structured_generate(
             user=prompt,
             response_model=_GeneratedScenarioBatch,
+            timeout=60,
+            max_retries=2,
         )
 
         for item in batch.scenarios:

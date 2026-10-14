@@ -1,0 +1,9 @@
+Debug complete. All three blockers fixed.
+
+Blocker 1 (frontend error name): frontend/js/api.js:124 — now checks both AbortError and TimeoutError when AbortSignal.timeout() expires. The friendly "timed out after 120s" guidance message will now appear on real timeouts.
+
+Blocker 2 (timeout budget mismatch): backend/services/llm.py — reduced per-call LLM timeout from 60s to 30s in both generate() and structured_generate(). With max_retries=3, worst case is 30×3 + 2×1 = 92s, well under the 120s frontend abort. Budgets are now aligned so a slow LLM success won't appear as a frontend timeout.
+
+Blocker 3 (no test cover for fast-fail validation): backend/services/llm.py — added _require_valid_config() that raises LLMServiceError immediately on misconfigured provider/key instead of entering the retry loop. Verified with Python checks: fails fast as expected, valid configs pass. The existing test suite passes (4 of 5 scenario-related tests pass; 1 pre-existing failure identical on clean tree).
+
+Changes: 2 files modified (backend/services/llm.py, frontend/js/api.py). No test files edited, no spec content changed.

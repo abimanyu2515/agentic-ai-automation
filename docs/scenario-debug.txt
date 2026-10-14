@@ -1,0 +1,26 @@
+BROWSER ALERT: Scenario generation failed: Scenario generation timed out after 120s. Check the backend LLM settings/key and retry.
+
+DEVTOOLS -> NETWORKS -> No response body available
+
+UVICORN TERMINAL TRACEBACK:
+C:\Users\devis\agentic-ai-automation\backend\graph\workflow.py:269: UserWarning: The 'config' parameter should be typed as 'RunnableConfig' or 'RunnableConfig | None', not 'dict | None'.
+builder.add_node("jira_sync_agent", \_jira_sync_node)
+INFO: 127.0.0.1:49360 - "GET /health HTTP/1.1" 404 Not Found
+INFO: 127.0.0.1:56278 - "GET /health HTTP/1.1" 404 Not Found
+INFO: 127.0.0.1:53889 - "GET /health HTTP/1.1" 404 Not Found
+
+Give Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new
+LiteLLM.Info: If you need to debug this error, use `litellm.\_turn_on_debug()'.
+
+structured_generate attempt 1 failed: LLM call failed (nvidia/deepseek-ai/deepseek-v4.1-flash): litellm.Timeout: APITimeoutError - Request timed out. Error_str: Request timed out.. Retrying...
+INFO: 127.0.0.1:56815 - "GET /health HTTP/1.1" 404 Not Found
+INFO: 127.0.0.1:49201 - "GET /health HTTP/1.1" 404 Not Found
+INFO: 127.0.0.1:65045 - "GET /health HTTP/1.1" 404 Not Found
+INFO: 127.0.0.1:57205 - "GET /health HTTP/1.1" 404 Not Found
+
+Give Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new
+LiteLLM.Info: If you need to debug this error, use `litellm.\_turn_on_debug()'.
+
+structured_generate attempt 2 failed: LLM call failed (nvidia/deepseek-ai/deepseek-v4.1-flash): litellm.Timeout: APITimeoutError - Request timed out. Error_str: Request timed out.. Retrying...
+
+MASTER SETTINGS -> GENERAL SETTING -> LLM (image located at: docs\images\master-settings-llm.png)

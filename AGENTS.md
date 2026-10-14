@@ -6,10 +6,11 @@
 * **Framework**: FastAPI, LangGraph, vanilla HTML, CSS, and JavaScript
 * **Key dependencies**: LiteLLM, LangGraph, SQLAlchemy, Playwright, pytest
 * **Package manager**: pip for Python, pnpm for the Playwright workspace
+* **Execution workspace**: Next.js 16, React 19, TypeScript, Playwright
 
 ## Build approach
 
-<TBD, set by /scope>
+Tracer Bullet (carry one working flow through the user interface, API, validation, and persistence).
 
 ## Commands
 
@@ -57,5 +58,7 @@ Declined: vercel React best practices, Next.js best practices, web design guidel
 * [backend/database/AGENTS.md](backend/database/AGENTS.md): Database providers, sessions, and migrations
 * [backend/repository/AGENTS.md](backend/repository/AGENTS.md): Repository transactions and persistence mappings
 * [backend/tests/AGENTS.md](backend/tests/AGENTS.md): Backend test doubles and project configuration fixtures
+* [backend/agents/AGENTS.md](backend/agents/AGENTS.md): Workflow agents, prompts, and state contract
+* [backend/playwrightt/AGENTS.md](backend/playwrightt/AGENTS.md): Next.js and Playwright execution workspace conventions
 
 _Drafted by /audit from the repo, worth a quick human pass. Edit freely: once a line stops matching this draft, later runs treat it as curated and will flag rather than overwrite it._

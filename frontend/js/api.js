@@ -121,6 +121,9 @@ async function request(url, options = {}) {
 
     return response.json();
   } catch (error) {
+    if (error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+      throw new Error("Scenario generation timed out after 300s. The backend keeps retrying a slow model — check the uvicorn terminal for 'structured_generate attempt N failed', verify the model ID in Master Settings > General Settings, and retry.");
+    }
     if (error.message.includes("Session expired") || error.message.includes("Not authenticated")) {
       handleAuthFailure();
     }
@@ -249,7 +252,10 @@ export const API = {
   async generateScenarios(projectId, requirementId, count, mode = 'append') {
     return request(`/projects/${projectId}/requirements/${requirementId}/generate-scenarios`, {
       method: 'POST',
-      body: JSON.stringify({ count, mode })
+      body: JSON.stringify({ count, mode }),
+      // Large MoE models via Nvidia NIM can take minutes to first token.
+      // Keep this above the backend's worst case (60s x 2 attempts + overhead).
+      signal: AbortSignal.timeout(300000)
     });
   },
 
