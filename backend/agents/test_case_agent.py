@@ -51,6 +51,8 @@ Design Decision:
     LLM generates only content: title, preconditions, steps, expected_result, test_data.
 """
 
+from concurrent.futures import ThreadPoolExecutor
+
 from pydantic import BaseModel, Field
 
 from backend.agents.base import BaseAgent
@@ -59,6 +61,9 @@ from backend.models.state import WorkflowState
 from backend.models.test_case import TestCase
 from backend.services.llm import LLMService, LLMServiceError
 from backend.utils.prompts import load_prompt
+
+
+_MAX_SCENARIOS_PER_LLM_CALL = 5
 
 
 # ==========================================================
@@ -121,7 +126,7 @@ class TestCaseAgent(BaseAgent):
     
     name = "TestCase Agent"
 
-    def __init__(self, llm_service: LLMService | None = None):
+    def __init__(self, llm_service: LLMService | None = None, max_workers: int = 1):
         """
         Initialize test case agent with LLM service.
         
@@ -129,6 +134,9 @@ class TestCaseAgent(BaseAgent):
             llm_service: LLM service instance (injected for testing)
         """
         self.llm_service = llm_service or LLMService()
+        if max_workers < 1:
+            raise ValueError("max_workers must be at least 1")
+        self.max_workers = max_workers
 
     def run(self, state: WorkflowState) -> WorkflowState:
         """
@@ -164,40 +172,70 @@ class TestCaseAgent(BaseAgent):
 
         state.add_log(f"{self.name} started")
 
-        prompt = load_prompt(
-            "test_case_prompt.txt",
-            title=state.requirement.title,
-            description=state.requirement.description,
-            scenarios=_format_scenarios_block(state.generated_scenarios),
-            count=str(len(state.generated_scenarios)),
-        )
+        scenarios = state.generated_scenarios
+        scenario_batches = [
+            scenarios[start : start + _MAX_SCENARIOS_PER_LLM_CALL]
+            for start in range(0, len(scenarios), _MAX_SCENARIOS_PER_LLM_CALL)
+        ]
 
-        batch = self.llm_service.structured_generate(
-            user=prompt,
-            response_model=TestCaseListResponse,
-        )
-
-        expected_numbers = set(range(1, len(state.generated_scenarios) + 1))
-        returned_numbers = {item.scenario_number for item in batch.test_cases}
-        if returned_numbers != expected_numbers:
-            raise LLMServiceError(
-                f"{self.name}: LLM returned test cases for scenario numbers {sorted(returned_numbers)}, "
-                f"expected exactly {sorted(expected_numbers)}"
+        def generate_batch(scenario_batch: list[Scenario]) -> list[TestCase]:
+            prompt = load_prompt(
+                "test_case_prompt.txt",
+                title=state.requirement.title,
+                description=state.requirement.description,
+                scenarios=_format_scenarios_block(scenario_batch),
+                count=str(len(scenario_batch)),
             )
 
-        for item in batch.test_cases:
-            scenario = state.generated_scenarios[item.scenario_number - 1]
-            state.generated_test_cases.append(
-                TestCase(
-                    scenario_id=scenario.id,
-                    title=item.title,
-                    preconditions=item.preconditions,
-                    steps=item.steps,
-                    expected_result=item.expected_result,
-                    priority=scenario.priority,
-                    test_data=item.test_data,
+            batch = self.llm_service.structured_generate(
+                user=prompt,
+                response_model=TestCaseListResponse,
+                timeout=30,
+                max_retries=2,
+            )
+
+            expected_numbers = list(range(1, len(scenario_batch) + 1))
+            returned_numbers = [item.scenario_number for item in batch.test_cases]
+            if sorted(returned_numbers) != expected_numbers:
+                raise LLMServiceError(
+                    f"{self.name}: LLM returned test cases for scenario numbers {sorted(returned_numbers)}, "
+                    f"expected exactly {expected_numbers}"
                 )
-            )
 
+            generated_batch = []
+            for item in batch.test_cases:
+                scenario = scenario_batch[item.scenario_number - 1]
+                generated_batch.append(
+                    TestCase(
+                        scenario_id=scenario.id,
+                        title=item.title,
+                        preconditions=item.preconditions,
+                        steps=item.steps,
+                        expected_result=item.expected_result,
+                        priority=scenario.priority,
+                        test_data=item.test_data,
+                    )
+                )
+            return generated_batch
+
+        if self.max_workers == 1 or len(scenario_batches) == 1:
+            generated_batches = map(generate_batch, scenario_batches)
+            generated_test_cases = [
+                test_case
+                for generated_batch in generated_batches
+                for test_case in generated_batch
+            ]
+        else:
+            with ThreadPoolExecutor(
+                max_workers=min(self.max_workers, len(scenario_batches))
+            ) as executor:
+                generated_batches = executor.map(generate_batch, scenario_batches)
+                generated_test_cases = [
+                    test_case
+                    for generated_batch in generated_batches
+                    for test_case in generated_batch
+                ]
+
+        state.generated_test_cases.extend(generated_test_cases)
         state.add_log(f"{self.name} generated {len(state.generated_test_cases)} test cases")
         return state

@@ -222,27 +222,48 @@ class LLMService:
                 except json.JSONDecodeError:
                     pass  # let model_validate_json handle the error
                 else:
-                    if "test_cases" in parsed and isinstance(parsed["test_cases"], list):
-                        for tc in parsed["test_cases"]:
-                            if isinstance(tc.get("steps"), str):
-                                tc["steps"] = [tc["steps"]]
-                            elif "steps" not in tc:
-                                tc["steps"] = ["Execute test case"]
-                            if "expected_result" not in tc:
-                                tc["expected_result"] = "Test completed as expected"
-                            if "preconditions" not in tc:
-                                tc["preconditions"] = []
-                            if "test_data" not in tc:
-                                tc["test_data"] = {}
-                    if "scenarios" in parsed and isinstance(parsed["scenarios"], list):
-                        priority_map = {"critical": "high", "crit": "high", "critical high": "high", "highest": "high",
-                                        "lowest": "low", "lowest priority": "low"}
-                        for sc in parsed["scenarios"]:
-                            p = sc.get("priority")
-                            if isinstance(p, str) and p.lower().strip() in priority_map:
-                                sc["priority"] = priority_map[p.lower().strip()]
-                            if "tags" not in sc:
-                                sc["tags"] = []
+                    if isinstance(parsed, dict):
+                        if isinstance(parsed.get("test_cases"), list):
+                            normalized_test_cases = []
+                            for tc in parsed["test_cases"]:
+                                if isinstance(tc, str):
+                                    for _ in range(3):
+                                        try:
+                                            decoded_tc = json.loads(tc)
+                                        except json.JSONDecodeError:
+                                            break
+                                        if isinstance(decoded_tc, dict):
+                                            tc = decoded_tc
+                                            break
+                                        if not isinstance(decoded_tc, str):
+                                            break
+                                        tc = decoded_tc
+
+                                if isinstance(tc, dict):
+                                    if isinstance(tc.get("steps"), str):
+                                        tc["steps"] = [tc["steps"]]
+                                    elif "steps" not in tc:
+                                        tc["steps"] = ["Execute test case"]
+                                    if "expected_result" not in tc:
+                                        tc["expected_result"] = "Test completed as expected"
+                                    if "preconditions" not in tc:
+                                        tc["preconditions"] = []
+                                    if "test_data" not in tc:
+                                        tc["test_data"] = {}
+                                normalized_test_cases.append(tc)
+                            parsed["test_cases"] = normalized_test_cases
+
+                        if isinstance(parsed.get("scenarios"), list):
+                            priority_map = {"critical": "high", "crit": "high", "critical high": "high", "highest": "high",
+                                            "lowest": "low", "lowest priority": "low"}
+                            for sc in parsed["scenarios"]:
+                                if not isinstance(sc, dict):
+                                    continue
+                                p = sc.get("priority")
+                                if isinstance(p, str) and p.lower().strip() in priority_map:
+                                    sc["priority"] = priority_map[p.lower().strip()]
+                                if "tags" not in sc:
+                                    sc["tags"] = []
                     content = json.dumps(parsed)
 
                 return response_model.model_validate_json(content)

@@ -122,7 +122,7 @@ async function request(url, options = {}) {
     return response.json();
   } catch (error) {
     if (error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
-      throw new Error("Scenario generation timed out after 300s. The backend keeps retrying a slow model — check the uvicorn terminal for 'structured_generate attempt N failed', verify the model ID in Master Settings > General Settings, and retry.");
+      throw new Error("The request timed out while the backend was processing it. Check the backend logs before retrying, as the operation may still be running.");
     }
     if (error.message.includes("Session expired") || error.message.includes("Not authenticated")) {
       handleAuthFailure();
@@ -301,7 +301,22 @@ export const API = {
 
   async generateTestCases(projectId, requirementId) {
     return request(`/projects/${projectId}/requirements/${requirementId}/generate-testcases`, {
-      method: 'POST'
+      method: 'POST',
+      signal: AbortSignal.timeout(300000)
+    });
+  },
+
+  async generateTestDataTests(projectId, requirementId) {
+    return request(`/projects/${projectId}/requirements/${requirementId}/generate-testdata-tests`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(300000)
+    });
+  },
+
+  async generateTestDataCases(projectId, requirementId) {
+    return request(`/projects/${projectId}/requirements/${requirementId}/generate-testdata-tests?generate_scripts=false`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(300000)
     });
   },
 
@@ -345,7 +360,8 @@ export const API = {
   // Playwright Code Generation
   async generatePlaywrightScript(projectId, testCaseId, framework) {
     const options = {
-      method: 'POST'
+      method: 'POST',
+      signal: AbortSignal.timeout(150000)
     };
     if (framework) {
       options.body = JSON.stringify({ framework });

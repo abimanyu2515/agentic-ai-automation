@@ -1,0 +1,142 @@
+{
+  "metadata": {
+    "executionId": "c7c82f1e-5c0e-4291-a66e-554203205c29",
+    "projectId": "46ed48f2-487f-4f22-971a-b919aab21a1a",
+    "testCaseIds": [
+      "3c6a27b0-d4af-4884-8606-ec81ea38ea52"
+    ],
+    "testCycleId": "eabda565-df2b-4dbe-948c-1b0cc3323eeb",
+    "browser": "chromium",
+    "status": "failed",
+    "started": "2026-10-21T07:38:24.570Z",
+    "finished": "2026-10-21T07:38:30.548Z",
+    "duration": 5.978
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\ntest('Test data TD-009: boundary', async ({ page }) => {\n  // [Timeline] Navigate: base_url\n  console.log(\"[Timeline] Navigate: base_url\");\n  // Navigate to base URL\n  await page.goto('https://www.saucedemo.com');\n\n  // [Timeline] Assert: accepted_on_boundary\n  console.log(\"[Timeline] Assert: accepted_on_boundary\");\n  // Assert accepted_on_boundary\n  await expect(page).toContainText('accepted_on_boundary');\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-10-21T07:38:24.570Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:24.580Z",
+      "time": 0.01,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:24.712Z",
+      "time": 0.142,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:24.723Z",
+      "time": 0.153,
+      "event": "Running: Test data TD-009: boundary",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:25.719Z",
+      "time": 1.149,
+      "event": "Status: stopped",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:28.365Z",
+      "time": 3.795,
+      "event": "Failure detected: \"page.goto: net::ERR_ABORTED; maybe frame was detached?\nCall log:\n\u001b[2m  - navigating to \"https://www.saucedemo.com/\", waiting until \"load\"\u001b[22m\n\". Recovery action: retry",
+      "type": "warning"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:28.436Z",
+      "time": 3.866,
+      "event": "Retrying execution (Attempt 1)...",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:28.500Z",
+      "time": 3.93,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:28.509Z",
+      "time": 3.939,
+      "event": "Running: Test data TD-009: boundary",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:30.374Z",
+      "time": 5.804,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:30.377Z",
+      "time": 5.807,
+      "event": "Navigate: https://www.saucedemo.com",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:30.439Z",
+      "time": 5.869,
+      "event": "Screenshot Captured",
+      "details": "error-2026-10-21T07-38-30.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:30.442Z",
+      "time": 5.872,
+      "event": "Screenshot captured on error: error-2026-10-21T07-38-30.png",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:30.480Z",
+      "time": 5.91,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:30.536Z",
+      "time": 5.966,
+      "event": "video Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:30.542Z",
+      "time": 5.972,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:30.545Z",
+      "time": 5.975,
+      "event": "Error Occurred",
+      "details": "page.textContent: selector: expected string, got undefined",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T07:38:30.549Z",
+      "time": 5.978,
+      "event": "Status: failed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_www_saucedemo_com.png",
+      "error-2026-10-21T07-38-30.png"
+    ],
+    "logs": [],
+    "console": [],
+    "trace": "trace.zip",
+    "video": "page@04fea684a79dfbfb7499428b335878a3.webm",
+    "htmlReport": "report.html"
+  },
+  "error": "page.textContent: selector: expected string, got undefined"
+}

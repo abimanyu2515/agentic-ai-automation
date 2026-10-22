@@ -59,9 +59,13 @@ Critical Rules (target-agnostic):
     - Resolve credentials only from the project's vault / environment variables
 
 Design Decision:
-    One LLM call per test case (not batched) to isolate errors.
-    A mistake in one script doesn't contaminate others.
+    One LLM call per test case (not batched) isolates errors. Callers may
+    opt into bounded parallel generation when creating larger test suites.
 """
+
+from concurrent.futures import ThreadPoolExecutor
+import json
+from uuid import UUID
 
 from backend.agents.base import BaseAgent
 from backend.models.state import WorkflowState
@@ -70,14 +74,13 @@ from backend.config.settings import get_settings
 from backend.services.llm import LLMService
 from backend.utils.prompts import load_prompt
 
-from uuid import UUID
-
 _SYSTEM_PROMPT = (
     "You are a senior QA automation engineer who writes clean, idiomatic Playwright TypeScript tests. "
     "You output ONLY code - no explanation, no markdown code fences, nothing before or after it.\n\n"
     "CRITICAL rules (apply to ANY target web application):\n"
-    "1. The test case inputs (title, preconditions, steps, expected result) plus the project's "
-    "target base URL are the ONLY source of truth. Never rely on prior knowledge of any specific "
+    "1. The test case inputs (title, preconditions, steps, expected result, and test_data) plus the "
+    "project's target base URL are the ONLY source of truth. Use supplied test_data values for inputs; "
+    "never invent test data or rely on prior knowledge of any specific "
     "demo site, and never hardcode selectors, URLs, or credentials from memory.\n"
     "2. Derive every locator from the steps: prefer accessible locators (getByRole, getByLabel, "
     "getByPlaceholder, getByText) with unambiguous names; fall back to stable CSS/ID selectors only "
@@ -150,9 +153,19 @@ def _format_steps(steps: list[str]) -> str:
 class PlaywrightAgent(BaseAgent):
     name = "Playwright Agent"
 
-    def __init__(self, llm_service: LLMService | None = None, repo = None):
+    def __init__(
+        self,
+        llm_service: LLMService | None = None,
+        repo=None,
+        max_workers: int = 1,
+        test_data_template: bool = False,
+    ):
         self.llm_service = llm_service or LLMService()
         self.repo = repo
+        if max_workers < 1:
+            raise ValueError("max_workers must be at least 1")
+        self.max_workers = max_workers
+        self.test_data_template = test_data_template
 
     def run(self, state: WorkflowState) -> WorkflowState:
         if state.requirement is None:
@@ -212,15 +225,166 @@ class PlaywrightAgent(BaseAgent):
                         "scripts will use placeholder credentials."
                     )
 
-        for test_case in approved:
-            test_case.playwright_script = self._generate_script(test_case, framework, target_url, target_username, target_password)
+        if self.test_data_template:
+            if framework != "playwright":
+                raise ValueError(
+                    "Test-data script templates are supported only for Playwright."
+                )
+
+            state.add_log(
+                f"{self.name}: generating one reusable template for "
+                f"{len(approved)} test-data cases"
+            )
+            template_case, markers = self._test_data_template_case(approved[0])
+            template_script = self._generate_script(
+                template_case,
+                framework,
+                target_url,
+                target_username,
+                target_password,
+                test_data_template=True,
+            )
+            missing_markers = [
+                marker for marker in markers.values()
+                if marker not in template_script
+            ]
+            if missing_markers:
+                state.add_log(
+                    f"{self.name}: template omitted {len(missing_markers)} "
+                    "required data marker(s); retrying template generation once"
+                )
+                template_script = self._generate_script(
+                    template_case,
+                    framework,
+                    target_url,
+                    target_username,
+                    target_password,
+                    test_data_template=True,
+                    template_feedback=(
+                        "Your previous script template was rejected because it omitted "
+                        "these exact required markers: "
+                        f"{', '.join(missing_markers)}. Regenerate the complete script "
+                        "and preserve every required marker exactly as provided in the "
+                        "test_data, title, and expected result. Do not omit fields."
+                    ),
+                )
+                missing_markers = [
+                    marker for marker in markers.values()
+                    if marker not in template_script
+                ]
+            if missing_markers:
+                raise ValueError(
+                    f"{self.name}: generated test-data template omitted required "
+                    f"data markers: {', '.join(missing_markers)}"
+                )
+
+            expected_fields = set(approved[0].test_data)
+            for test_case in approved:
+                if set(test_case.test_data) != expected_fields:
+                    raise ValueError(
+                        f"{self.name}: test-data fields differ for '{test_case.title}'"
+                    )
+                scenario = (
+                    self.repo.get_scenario(test_case.scenario_id)
+                    if self.repo else None
+                )
+                data_id = next(
+                    (
+                        tag for tag in (scenario.tags if scenario else [])
+                        if tag.startswith("TD-")
+                    ),
+                    None,
+                )
+                if data_id is None:
+                    raise ValueError(
+                        f"{self.name}: scenario for '{test_case.title}' has no test-data ID"
+                    )
+
+                replacements = {
+                    "__TEST_DATA_ID__": data_id,
+                    "__TEST_TYPE__": scenario.path_type,
+                    "__EXPECTED_RESULT__": json.dumps(
+                        test_case.expected_result,
+                        ensure_ascii=False,
+                    )[1:-1],
+                }
+                replacements.update({
+                    markers[key]: json.dumps(str(value), ensure_ascii=False)[1:-1]
+                    for key, value in test_case.test_data.items()
+                })
+                test_case.playwright_script = self._apply_template_values(
+                    template_script,
+                    replacements,
+                )
+
+            state.add_log(
+                f"{self.name} finished: generated one reusable Playwright "
+                f"template for {len(approved)} test-data case(s)"
+            )
+            return state
+
+        def generate_script(test_case: TestCase) -> str:
+            return self._generate_script(
+                test_case,
+                framework,
+                target_url,
+                target_username,
+                target_password,
+            )
+
+        if self.max_workers == 1 or len(approved) == 1:
+            scripts = map(generate_script, approved)
+            for test_case, script in zip(approved, scripts):
+                test_case.playwright_script = script
+        else:
+            with ThreadPoolExecutor(max_workers=min(self.max_workers, len(approved))) as executor:
+                for test_case, script in zip(approved, executor.map(generate_script, approved)):
+                    test_case.playwright_script = script
 
         state.add_log(f"{self.name} finished: generated {len(approved)} {framework.capitalize()} script(s)")
         return state
 
-    def _generate_script(self, test_case: TestCase, framework: str = "playwright", target_url: str | None = None, target_username: str | None = None, target_password: str | None = None) -> str:
+    @staticmethod
+    def _test_data_template_case(test_case: TestCase) -> tuple[TestCase, dict[str, str]]:
+        markers = {
+            key: f"__TEST_DATA_{index:02d}__"
+            for index, key in enumerate(test_case.test_data, start=1)
+        }
+        template_case = test_case.model_copy(update={
+            "title": "Test data __TEST_DATA_ID__: __TEST_TYPE__",
+            "steps": [
+                "Complete the requirement workflow using the supplied test_data values.",
+                "Verify the expected_result for the supplied test_data values.",
+            ],
+            "expected_result": "__EXPECTED_RESULT__",
+            "test_data": {
+                key: markers[key] for key in test_case.test_data
+            },
+        })
+        markers.update({
+            "__TEST_DATA_ID__": "__TEST_DATA_ID__",
+            "__TEST_TYPE__": "__TEST_TYPE__",
+            "__EXPECTED_RESULT__": "__EXPECTED_RESULT__",
+        })
+        return template_case, markers
+
+    @staticmethod
+    def _apply_template_values(script: str, replacements: dict[str, str]) -> str:
+        for marker, value in replacements.items():
+            script = script.replace(marker, value)
+        return script
+
+    def _generate_script(
+        self,
+        test_case: TestCase,
+        framework: str = "playwright",
+        target_url: str | None = None,
+        target_username: str | None = None,
+        target_password: str | None = None,
+        test_data_template: bool = False,
+        template_feedback: str | None = None,
+    ) -> str:
         import os
-        import json
         settings = get_settings()
         base_url = target_url or settings.playwright.base_url or ""
 
@@ -266,6 +430,7 @@ class PlaywrightAgent(BaseAgent):
                 preconditions=_format_preconditions(test_case.preconditions),
                 steps=_format_steps(test_case.steps),
                 expected_result=test_case.expected_result,
+                test_data=json.dumps(test_case.test_data, ensure_ascii=False),
                 base_url=base_url,
                 framework_context=framework_context_str,
                 target_username=target_username or "default_username",
@@ -304,6 +469,7 @@ class PlaywrightAgent(BaseAgent):
                 preconditions=_format_preconditions(test_case.preconditions),
                 steps=_format_steps(test_case.steps),
                 expected_result=test_case.expected_result,
+                test_data=json.dumps(test_case.test_data, ensure_ascii=False),
                 base_url=base_url,
                 framework_context=framework_context_str,
                 target_username=target_username or "default_username",
@@ -330,6 +496,7 @@ class PlaywrightAgent(BaseAgent):
                 preconditions=_format_preconditions(test_case.preconditions),
                 steps=_format_steps(test_case.steps),
                 expected_result=test_case.expected_result,
+                test_data=json.dumps(test_case.test_data, ensure_ascii=False),
                 base_url=base_url,
                 framework_context=framework_context_str,
                 target_username=target_username or "default_username",
@@ -354,7 +521,24 @@ class PlaywrightAgent(BaseAgent):
                         f"Navigate to BASE_URL. Type USERNAME into the username field, PASSWORD into the password field, click login, and wait for the post-login landing to load (e.g. wait for a URL change or for a dashboard element named in the steps to become visible) before executing subsequent steps."
                     )
 
-        raw_output = self.llm_service.generate(system=system_prompt, user=prompt)
+        if test_data_template:
+            prompt += (
+                "\n\nThis is a reusable data-driven script template. Keep these exact "
+                "markers as literal values in the generated script, including in the "
+                "test title, input values, and expected-result assertion: "
+                "__TEST_DATA_ID__, __TEST_TYPE__, __EXPECTED_RESULT__, and every "
+                "__TEST_DATA_NN__ marker provided in test_data. Do not replace markers "
+                "with examples or TODO values. The application workflow must use the "
+                "provided requirement and steps; only the marked values vary by case."
+            )
+        if template_feedback:
+            prompt += f"\n\n{template_feedback}"
+
+        raw_output = self.llm_service.generate(
+            system=system_prompt,
+            user=prompt,
+            timeout=120,
+        )
         code = _strip_code_fences(raw_output)
 
         # Post-process generated code to guarantee required environment variables are defined

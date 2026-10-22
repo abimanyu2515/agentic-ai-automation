@@ -36,13 +36,19 @@ def log_sync_event(scenario_id: str, issue_key: str, operation: str, status: str
     logger.info(" ".join(parts))
 
 
-async def run_with_background_tasks(background_tasks, sync_func, *args, **kwargs):
+def run_with_background_tasks(background_tasks, sync_func, *args, **kwargs):
     """Schedules a JIRA sync function via FastAPI BackgroundTasks immediately."""
     if background_tasks:
         background_tasks.add_task(sync_func, *args, **kwargs)
+        return
+
+    coroutine = sync_func(*args, **kwargs)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(coroutine)
     else:
-        # Fallback to run async task directly if no background tasks provided
-        asyncio.create_task(sync_func(*args, **kwargs))
+        loop.create_task(coroutine)
 
 
 def build_jira_description(scenario, latest_execution: ExecutionResult = None, open_bugs: list = None) -> str:

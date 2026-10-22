@@ -14,6 +14,7 @@ than no test, because it burns triage time or hides real regressions.
   <preconditions>$preconditions</preconditions>
   <steps>$steps</steps>
   <expected_result>$expected_result</expected_result>
+  <test_data>$test_data</test_data>
 </inputs>
 
 <source_of_truth>

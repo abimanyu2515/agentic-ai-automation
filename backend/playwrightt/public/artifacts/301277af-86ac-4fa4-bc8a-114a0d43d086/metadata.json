@@ -1,0 +1,92 @@
+{
+  "metadata": {
+    "executionId": "301277af-86ac-4fa4-bc8a-114a0d43d086",
+    "projectId": "46ed48f2-487f-4f22-971a-b919aab21a1a",
+    "testCaseIds": [
+      "5556e11c-341e-4eba-afe9-011f65472348"
+    ],
+    "testCycleId": "7a7d1431-1cfa-41c8-8b23-0972546d2cff",
+    "browser": "chromium",
+    "status": "failed",
+    "started": "2026-10-21T07:01:56.195Z",
+    "finished": "2026-10-21T07:01:56.277Z",
+    "duration": 0.082
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\ntest('Test data TD-019: workflow', async ({ page }) => {\n  console.log('[Timeline] Navigate to base URL');\n  await page.goto('https://www.saucedemo.com');\n\n  console.log('[Timeline] Exercise requirement with input data');\n  // TODO: locate and fill 'Full name' field with 'Sam Lewis'\n  // TODO: locate and fill 'Email' field with 'sam@example.com'\n  // TODO: locate and fill 'Password' field with 'RainBow!3'\n  // TODO: locate and fill 'Confirm Password' field with 'RainBow!3'\n  // TODO: locate and tick 'Accept terms' checkbox\n  // TODO: locate and click the form submit button\n\n  // TODO: assert that the 'rejected_duplicate_or_workflow_error' message is displayed\n  // await expect(page.locator('TODO')).toContainText('rejected_duplicate_or_workflow_error');\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-10-21T07:01:56.195Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:01:56.200Z",
+      "time": 0.005,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:01:56.212Z",
+      "time": 0.017,
+      "event": "Launching browser",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:01:56.231Z",
+      "time": 0.036,
+      "event": "Browser launch failed: browserType.launch: Executable doesn't exist at C:\\Users\\Sridhar D\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T07:01:56.240Z",
+      "time": 0.045,
+      "event": "Failure detected: \"browserType.launch: Executable doesn't exist at C:\\Users\\Sridhar D\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝\". Recovery action: retry",
+      "type": "warning"
+    },
+    {
+      "timestamp": "2026-10-21T07:01:56.243Z",
+      "time": 0.048,
+      "event": "Retrying execution (Attempt 1)...",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:01:56.247Z",
+      "time": 0.052,
+      "event": "Launching browser",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:01:56.261Z",
+      "time": 0.066,
+      "event": "Browser launch failed: browserType.launch: Executable doesn't exist at C:\\Users\\Sridhar D\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T07:01:56.270Z",
+      "time": 0.075,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:01:56.273Z",
+      "time": 0.078,
+      "event": "Error Occurred",
+      "details": "browserType.launch: Executable doesn't exist at C:\\Users\\Sridhar D\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T07:01:56.277Z",
+      "time": 0.082,
+      "event": "Status: failed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [],
+    "logs": [],
+    "console": [],
+    "htmlReport": "report.html"
+  },
+  "error": "browserType.launch: Executable doesn't exist at C:\\Users\\Sridhar D\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝"
+}

@@ -1,0 +1,92 @@
+{
+  "metadata": {
+    "executionId": "b4f96a08-b2dc-4dbb-a6cc-c4ef0637494e",
+    "projectId": "46ed48f2-487f-4f22-971a-b919aab21a1a",
+    "testCaseIds": [
+      "ecce1ac3-e84b-47df-90e0-4de8c46588b9"
+    ],
+    "testCycleId": "4a883786-bae6-40cf-ad80-f9686802f283",
+    "browser": "chromium",
+    "status": "failed",
+    "started": "2026-10-21T06:46:02.438Z",
+    "finished": "2026-10-21T06:46:02.531Z",
+    "duration": 0.093
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\ntest('Test data TD-020: workflow', async ({ page }) => {\n  console.log('[Timeline] Navigate to base URL');\n  await page.goto('https://www.saucedemo.com');\n\n  console.log('[Timeline] Exercise the requirement with the generated input data');\n  // TODO: interact with registration or workflow form using provided test data\n  // full_name: Tina Young, email: tina@example.com, password: Lakeside#1, confirm_password: Lakeside#1, accept_terms: true\n\n  console.log('[Timeline] Verify rejected duplicate or workflow error');\n  await expect(page.locator('text=rejected_duplicate_or_workflow_error')).toBeVisible();\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-10-21T06:46:02.438Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T06:46:02.447Z",
+      "time": 0.009,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T06:46:02.463Z",
+      "time": 0.025,
+      "event": "Launching browser",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T06:46:02.481Z",
+      "time": 0.043,
+      "event": "Browser launch failed: browserType.launch: Executable doesn't exist at C:\\Users\\Sridhar D\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T06:46:02.490Z",
+      "time": 0.052,
+      "event": "Failure detected: \"browserType.launch: Executable doesn't exist at C:\\Users\\Sridhar D\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝\". Recovery action: retry",
+      "type": "warning"
+    },
+    {
+      "timestamp": "2026-10-21T06:46:02.494Z",
+      "time": 0.056,
+      "event": "Retrying execution (Attempt 1)...",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T06:46:02.496Z",
+      "time": 0.058,
+      "event": "Launching browser",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T06:46:02.510Z",
+      "time": 0.072,
+      "event": "Browser launch failed: browserType.launch: Executable doesn't exist at C:\\Users\\Sridhar D\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T06:46:02.524Z",
+      "time": 0.086,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T06:46:02.528Z",
+      "time": 0.09,
+      "event": "Error Occurred",
+      "details": "browserType.launch: Executable doesn't exist at C:\\Users\\Sridhar D\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T06:46:02.531Z",
+      "time": 0.093,
+      "event": "Status: failed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [],
+    "logs": [],
+    "console": [],
+    "htmlReport": "report.html"
+  },
+  "error": "browserType.launch: Executable doesn't exist at C:\\Users\\Sridhar D\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝"
+}

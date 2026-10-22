@@ -31,6 +31,8 @@ def load_prompt(filename: str, **variables: str) -> str:
             path = PROMPTS_DIR / "agents" / "execution_analysis" / "roles_and_responsibilities.md"
         elif filename == "defect_agent_prompt.txt":
             path = PROMPTS_DIR / "agents" / "defect_agent" / "roles_and_responsibilities.md"
+        elif filename == "test_data_agent_prompt.txt":
+            path = PROMPTS_DIR / "agents" / "test_data_agent" / "roles_and_responsibilities.md"
 
     if not path.exists():
         raise FileNotFoundError(f"Prompt file not found: {path}")

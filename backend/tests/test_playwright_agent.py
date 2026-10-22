@@ -11,6 +11,8 @@ Two layers, same approach as every other agent:
 """
 
 from uuid import uuid4
+from threading import Lock
+import time
 
 import pytest
 
@@ -73,6 +75,207 @@ def test_strips_code_fences_from_output(stub_llm_service):
     assert not script.startswith("```")
     assert "test(" in script
     assert "import" in script
+
+
+def test_playwright_script_generation_uses_extended_llm_timeout():
+    class TimeoutCaptureLLMService:
+        timeout = None
+
+        def generate(self, *, system, user, **kwargs):
+            self.timeout = kwargs.get("timeout")
+            return "import { test, expect } from '@playwright/test';\ntest('smoke', async () => {});"
+
+    llm_service = TimeoutCaptureLLMService()
+    state = _state_with_mixed_test_cases()
+
+    PlaywrightAgent(llm_service=llm_service).run(state)
+
+    assert llm_service.timeout == 120
+
+
+def test_script_generation_respects_configured_worker_limit():
+    class ConcurrentLLMService:
+        def __init__(self):
+            self.lock = Lock()
+            self.active_calls = 0
+            self.max_active_calls = 0
+
+        def generate(self, *, system, user, **kwargs):
+            with self.lock:
+                self.active_calls += 1
+                self.max_active_calls = max(self.max_active_calls, self.active_calls)
+            time.sleep(0.02)
+            with self.lock:
+                self.active_calls -= 1
+            return "import { test, expect } from '@playwright/test';\ntest('smoke', async () => {});"
+
+    state = _state_with_mixed_test_cases()
+    approved = next(tc for tc in state.generated_test_cases if tc.title == "Approved case")
+    state.generated_test_cases.extend(
+        TestCase(
+            scenario_id=approved.scenario_id,
+            title=f"Approved case {index}",
+            steps=["a"],
+            expected_result="e",
+            evaluation_status=EvaluationStatus.APPROVED,
+        )
+        for index in range(5)
+    )
+    llm_service = ConcurrentLLMService()
+
+    PlaywrightAgent(llm_service=llm_service, max_workers=3).run(state)
+
+    assert llm_service.max_active_calls == 3
+    assert all(
+        test_case.playwright_script
+        for test_case in state.generated_test_cases
+        if test_case.evaluation_status == EvaluationStatus.APPROVED
+    )
+
+
+def test_test_data_template_generates_one_script_and_substitutes_each_case():
+    requirement = Requirement(
+        title="Registration",
+        description="Register a user using the supplied email address.",
+    )
+    scenarios = [
+        Scenario(
+            requirement_id=requirement.id,
+            scenario_name=f"Test data TD-{index:03d}: {path_type}",
+            description="Submit the registration form.",
+            path_type=path_type,
+            tags=["test_data_agent", f"TD-{index:03d}"],
+        )
+        for index, path_type in ((1, "positive"), (2, "boundary"))
+    ]
+    test_cases = [
+        TestCase(
+            scenario_id=scenarios[0].id,
+            title=scenarios[0].scenario_name,
+            steps=["Use the email address to register."],
+            expected_result="accepted",
+            test_data={"email": "first@example.com"},
+            evaluation_status=EvaluationStatus.APPROVED,
+        ),
+        TestCase(
+            scenario_id=scenarios[1].id,
+            title=scenarios[1].scenario_name,
+            steps=["Use the email address to register."],
+            expected_result="rejected at boundary",
+            test_data={"email": "boundary@example.com"},
+            evaluation_status=EvaluationStatus.APPROVED,
+        ),
+    ]
+
+    class TemplateLLMService:
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, *, system, user, **kwargs):
+            self.calls += 1
+            assert "__TEST_DATA_01__" in user
+            return (
+                "import { test, expect } from '@playwright/test';\n"
+                "test('Test data __TEST_DATA_ID__: __TEST_TYPE__', async ({ page }) => {\n"
+                "  await page.fill('#email', '__TEST_DATA_01__');\n"
+                "  await expect(page.getByText('__EXPECTED_RESULT__')).toBeVisible();\n"
+                "});"
+            )
+
+    class TemplateRepository:
+        def list_projects(self):
+            return []
+
+        def get_scenario(self, scenario_id):
+            return next(scenario for scenario in scenarios if scenario.id == scenario_id)
+
+    llm_service = TemplateLLMService()
+    state = WorkflowState(
+        requirement=requirement,
+        generated_scenarios=scenarios,
+        generated_test_cases=test_cases,
+    )
+
+    result = PlaywrightAgent(
+        llm_service=llm_service,
+        repo=TemplateRepository(),
+        test_data_template=True,
+    ).run(state)
+
+    assert llm_service.calls == 1
+    scripts = [case.playwright_script for case in result.generated_test_cases]
+    assert "Test data TD-001: positive" in scripts[0]
+    assert "first@example.com" in scripts[0]
+    assert "accepted" in scripts[0]
+    assert "Test data TD-002: boundary" in scripts[1]
+    assert "boundary@example.com" in scripts[1]
+    assert "rejected at boundary" in scripts[1]
+    assert all("__TEST_DATA_" not in script for script in scripts)
+    assert all("__EXPECTED_RESULT__" not in script for script in scripts)
+
+
+def test_test_data_template_retries_once_when_model_omits_a_data_marker():
+    requirement = Requirement(title="Registration", description="Register a user.")
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Test data TD-001: positive",
+        description="Submit the registration form.",
+        path_type="positive",
+        tags=["test_data_agent", "TD-001"],
+    )
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title=scenario.scenario_name,
+        steps=["Use the supplied name and email to register."],
+        expected_result="accepted",
+        test_data={"full_name": "Alice Johnson", "email": "alice@example.com"},
+        evaluation_status=EvaluationStatus.APPROVED,
+    )
+
+    class RetryingTemplateLLMService:
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, *, system, user, **kwargs):
+            self.calls += 1
+            data_marker = (
+                "  await page.fill('#email', '__TEST_DATA_02__');\n"
+                if self.calls > 1 else ""
+            )
+            return (
+                "import { test, expect } from '@playwright/test';\n"
+                "test('Test data __TEST_DATA_ID__: __TEST_TYPE__', async ({ page }) => {\n"
+                "  await page.fill('#name', '__TEST_DATA_01__');\n"
+                f"{data_marker}"
+                "  await expect(page.getByText('__EXPECTED_RESULT__')).toBeVisible();\n"
+                "});"
+            )
+
+    class TemplateRepository:
+        def list_projects(self):
+            return []
+
+        def get_scenario(self, scenario_id):
+            assert scenario_id == scenario.id
+            return scenario
+
+    llm_service = RetryingTemplateLLMService()
+    state = WorkflowState(
+        requirement=requirement,
+        generated_scenarios=[scenario],
+        generated_test_cases=[test_case],
+    )
+
+    result = PlaywrightAgent(
+        llm_service=llm_service,
+        repo=TemplateRepository(),
+        test_data_template=True,
+    ).run(state)
+
+    assert llm_service.calls == 2
+    assert "Alice Johnson" in result.generated_test_cases[0].playwright_script
+    assert "alice@example.com" in result.generated_test_cases[0].playwright_script
+    assert any("retrying template generation once" in log for log in result.logs)
 
 
 def test_no_approved_test_cases_is_not_an_error():

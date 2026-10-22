@@ -122,10 +122,16 @@ npx playwright install chromium
 
 # 6. Run the server
 uvicorn backend.main:app --reload --port 8000
-
 ```
 
-The application will be available at `http://localhost:8000`. The frontend is served as static files at the root.
+The application will be available at `http://localhost:8000`. The frontend is served as static files at the root. To use **Run Selected Batch** or **Generate Test Data & Run Tests**, start the separate Playwright workspace in another terminal:
+
+```bash
+pnpm --dir backend/playwrightt install
+pnpm --dir backend/playwrightt dev
+```
+
+The workspace is available at `http://localhost:3000` by default. The UI reports when this server is unavailable.
 
 ### Quick Start
 
