@@ -68,10 +68,14 @@ Tolerance:
     Gracefully handles empty collections and computes correct zero values.
 """
 
+import logging
+
 from backend.agents.base import BaseAgent
 from backend.models.execution_report import ExecutionReport, TestCaseReportEntry
 from backend.models.state import WorkflowState
 from backend.models.test_case import EvaluationStatus, TestCase, TestCaseStatus
+
+logger = logging.getLogger(__name__)
 
 
 class ReportAgent(BaseAgent):
@@ -168,7 +172,7 @@ Generate a concise, keyword-focused executive summary that:
             return summary_text
             
         except Exception as e:
-            self.logger.warning(f"Failed to generate AI executive summary: {e}")
+            logger.warning(f"Failed to generate AI executive summary: {e}")
             # Fallback to basic summary
             return f"""## Executive Summary
 

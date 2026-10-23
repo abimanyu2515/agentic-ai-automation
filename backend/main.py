@@ -93,7 +93,6 @@ import io
 import logging
 import zipfile
 import xml.etree.ElementTree as ET
-import pandas as pd
 from datetime import datetime, timezone
 import fitz
 from fastapi import FastAPI, HTTPException, Body, status, BackgroundTasks, UploadFile, File, Depends, Request
@@ -145,6 +144,14 @@ app = FastAPI(
     description="Enterprise API backing the AI Test Automation Platform.",
     version="1.0.0"
 )
+
+
+@app.middleware("http")
+async def disable_frontend_asset_caching(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path in {"/", "/index.html"} or request.url.path.startswith("/js/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.exception_handler(RequestValidationError)
@@ -1478,6 +1485,32 @@ def generate_test_cases(project_id: UUID, requirement_id: UUID):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Test case generation failed: {exc}")
+
+
+@app.post("/api/v1/projects/{project_id}/requirements/{requirement_id}/generate-testdata-tests")
+def generate_test_data_tests(
+    project_id: UUID,
+    requirement_id: UUID,
+    generate_scripts: bool = True,
+):
+    try:
+        report, test_cases = workflow_service.generate_test_data_test_cases(
+            project_id, requirement_id, generate_scripts=generate_scripts
+        )
+        return {
+            "test_data_report": report,
+            "test_case_ids": [str(test_case.id) for test_case in test_cases],
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Test-data test generation failed: {exc}",
+        )
+
 
 @app.get("/api/v1/projects/{project_id}/testcases", response_model=list[TestCaseResponse])
 def get_test_cases(project_id: UUID):

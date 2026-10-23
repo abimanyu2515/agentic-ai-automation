@@ -41,6 +41,8 @@ $preconditions
 - Steps:
 $steps
 - Expected Result: $expected_result
+- Test Data (use these supplied values; do not invent input data):
+$test_data
 - Imported Framework Context (if any):
 $framework_context
 
@@ -68,4 +70,3 @@ Produce ONLY the raw TypeScript code. Do not output any markdown code fences (li
 - For standard text/password input fields named in the steps, use `fill` or `type` on the text control. Do NOT use `selectOption` on text inputs.
 - Use the element tags given in the steps; never assume a specific tag (e.g. `<input>` vs `<button>`) for the target application.
 - Do NOT perform pre-login actions (like logging in with valid credentials) unless explicitly specified in the Preconditions or Steps. Start directly by navigating to the base URL and then execute the steps in order.
-

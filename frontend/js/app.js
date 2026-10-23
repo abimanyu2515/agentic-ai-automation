@@ -1,4 +1,4 @@
-import { API } from './api.js';
+import { API } from './api.js?v=15';
 import { Components, escapeHTML } from './components.js?v=2';
 
 class App {
@@ -23,6 +23,7 @@ class App {
     this.activePlaywrightTestCaseId = null;
     this.activeExecutionStream = null;
     this.dashboardScope = 'project';
+    this.testDataAgentRunning = false;
   }
 
   async init() {
@@ -41,6 +42,24 @@ class App {
         if (view) this.navigateTo(view);
       });
     });
+
+    const testDataAgentSelect = document.getElementById('testdata-agent-req-select');
+    if (testDataAgentSelect) {
+      testDataAgentSelect.addEventListener('change', (e) => {
+        this.selectedRequirementId = e.target.value || null;
+        this.renderTestDataAgent();
+      });
+    }
+
+    const testDataAgentButton = document.getElementById('btn-run-testdata-agent');
+    if (testDataAgentButton) {
+      testDataAgentButton.addEventListener('click', () => {
+        this.runTestDataAgent(
+          document.getElementById('testdata-agent-run-status'),
+          false
+        );
+      });
+    }
 
     // Exit Project Button
     const exitBtn = document.getElementById('btn-exit-project');
@@ -1132,6 +1151,8 @@ class App {
       safeCall('renderScenarios', () => this.renderScenarios());
       safeCall('renderScenarioApproval', () => this.renderScenarioApproval());
       safeCall('renderTestCases', () => this.renderTestCases());
+      safeCall('renderJiraTraceability', () => this.renderJiraTraceability());
+      safeCall('renderTestDataAgent', () => this.renderTestDataAgent());
       safeCall('renderTestCaseApproval', () => this.renderTestCaseApproval());
       safeCall('renderDocuments', () => this.renderDocuments());
       safeCall('renderExecutions', () => this.renderExecutions());
@@ -1179,6 +1200,8 @@ class App {
     });
 
     if (viewName === 'playwright') this.renderPlaywrightWorkspace();
+    if (viewName === 'testdatagent') this.renderTestDataAgent();
+    if (viewName === 'jira-traceability') this.renderJiraTraceability();
     if (viewName === 'reports') this.renderReports();
     if (viewName === 'project') this.renderProjectPage();
 
@@ -2005,6 +2028,11 @@ class App {
 
     select.onchange = (e) => {
       this.selectedRequirementId = e.target.value;
+      const testDataStatus = document.getElementById('testdata-agent-testcases-status');
+      if (testDataStatus) {
+        testDataStatus.style.display = 'none';
+        testDataStatus.innerHTML = '';
+      }
       this.renderTestCases();
       this.renderScenariosRequirementDropdown();
     };
@@ -2015,90 +2043,124 @@ class App {
     });
   }
 
+  renderTestDataAgent() {
+    const select = document.getElementById('testdata-agent-req-select');
+    const button = document.getElementById('btn-run-testdata-agent');
+    if (!select || !button) return;
+
+    const requirements = this.requirements;
+    const selectedRequirement = requirements.find(r => r.id === this.selectedRequirementId)
+      || requirements[0]
+      || null;
+    this.selectedRequirementId = selectedRequirement ? selectedRequirement.id : null;
+    select.innerHTML = `
+      <option value="" disabled ${selectedRequirement ? '' : 'selected'}>
+        ${requirements.length ? 'Choose Requirement' : 'No requirements found for this project'}
+      </option>
+      ${requirements.map(r => `<option value="${r.id}">${escapeHTML(this.formatRequirementLabel(r))}</option>`).join('')}
+    `;
+    select.value = selectedRequirement ? selectedRequirement.id : '';
+    button.disabled = this.testDataAgentRunning || !this.currentProject || !select.value;
+  }
+
+  renderJiraTraceability() {
+    const select = document.getElementById('jira-trace-req-select');
+    const container = document.getElementById('jira-traceability-container');
+    if (!select || !container) return;
+
+    select.innerHTML = `
+      <option value="">Choose Requirement</option>
+      ${this.filteredRequirements.map(r => `<option value="${r.id}">${escapeHTML(this.formatRequirementLabel(r))}</option>`).join('')}
+    `;
+    select.value = this.selectedRequirementId || '';
+    select.onchange = (event) => {
+      this.selectedRequirementId = event.target.value || null;
+      this.renderJiraTraceability();
+    };
+
+    if (!this.selectedRequirementId) {
+      container.innerHTML = Components.EmptyState(
+        'Select Requirement',
+        'Choose a requirement to view its Jira traceability and status.'
+      );
+      return;
+    }
+
+    const requirementScenarios = this.scenarios.filter(
+      scenario => scenario.requirement_id === this.selectedRequirementId
+    );
+    if (requirementScenarios.length === 0) {
+      container.innerHTML = Components.EmptyState(
+        'No Scenarios Found',
+        'This requirement has no scenarios to show Jira traceability for.'
+      );
+      return;
+    }
+
+    let html = `
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">
+    `;
+
+    requirementScenarios.forEach(sc => {
+      let statusText = sc.last_jira_sync_status || sc.jira_sync_status || "Pending";
+      let badgeBg = "rgba(156, 163, 175, 0.15)";
+      let badgeColor = "#9ca3af";
+      let badgeBorder = "rgba(156, 163, 175, 0.3)";
+
+      const sLower = statusText.toLowerCase();
+      if (sLower === "success" || sLower === "done" || sLower === "passed") {
+        badgeBg = "rgba(34, 197, 94, 0.15)";
+        badgeColor = "#4ade80";
+        badgeBorder = "rgba(34, 197, 94, 0.3)";
+        statusText = "Done";
+      } else if (sLower === "in progress" || sLower === "in_progress") {
+        badgeBg = "rgba(59, 130, 246, 0.15)";
+        badgeColor = "#60a5fa";
+        badgeBorder = "rgba(59, 130, 246, 0.3)";
+        statusText = "In Progress";
+      } else if (sLower === "sync_pending" || sLower === "sync pending" || sLower === "pending") {
+        badgeBg = "rgba(234, 179, 8, 0.15)";
+        badgeColor = "#facc15";
+        badgeBorder = "rgba(234, 179, 8, 0.3)";
+        statusText = sLower.includes("pending") && !sLower.includes("sync") ? "Pending" : "Sync Pending";
+      } else if (sLower === "sync_failed" || sLower === "sync failed" || sLower === "failed" || sLower === "error") {
+        badgeBg = "rgba(239, 68, 68, 0.15)";
+        badgeColor = "#f87171";
+        badgeBorder = "rgba(239, 68, 68, 0.3)";
+        statusText = sLower.includes("sync") ? "Sync Failed" : "Failed";
+      }
+
+      const jiraLink = sc.jira_issue_key
+        ? `<a href="${sc.jira_issue_url}" target="_blank" rel="noopener noreferrer" style="color: var(--accent-primary); text-decoration: underline; font-weight: 500;">${escapeHTML(sc.jira_issue_key)}</a>`
+        : 'Not Linkable';
+
+      html += `
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); padding: 12px; border-radius: var(--border-radius-sm); display: flex; flex-direction: column; gap: 6px;">
+          <div style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap;"><strong style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; margin-right: 4px;">Scenario:</strong> <span style="font-weight: 500;" title="${escapeHTML(sc.scenario_name)}">${escapeHTML(sc.scenario_name)}</span></div>
+          <div><strong style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; margin-right: 4px;">Jira:</strong> ${jiraLink}</div>
+          <div style="display: flex; align-items: center; gap: 8px;"><strong style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; margin-right: 4px;">Jira Status:</strong>
+            <span style="background: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeBorder}; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">${escapeHTML(statusText)}</span>
+          </div>
+        </div>
+      `;
+    });
+
+    container.innerHTML = `${html}</div>`;
+  }
+
   async renderTestCases() {
     this.renderTestCasesRequirementDropdown();
     const container = document.getElementById('testcases-list-container');
-    const jiraContainer = document.getElementById('testcases-jira-trace-container');
     
     if (!this.selectedRequirementId) {
       container.innerHTML = Components.EmptyState("Select Requirement", "Choose a requirement from the dropdown list to view or generate test cases.");
       document.getElementById('testcases-actions-toolbar').style.display = 'none';
-      if (jiraContainer) jiraContainer.style.display = 'none';
       return;
     }
 
     document.getElementById('testcases-actions-toolbar').style.display = 'flex';
     
     const requirementScenarios = this.scenarios.filter(s => s.requirement_id === this.selectedRequirementId);
-    
-    if (jiraContainer) {
-      if (requirementScenarios.length > 0) {
-        jiraContainer.style.display = 'block';
-        let html = `
-          <div style="display: flex; flex-direction: column; gap: 12px;">
-            <h3 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin: 0 0 4px 0; display: flex; align-items: center; gap: 6px;">
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px; color: var(--accent-primary);">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-              </svg>
-              Jira Traceability & Status
-            </h3>
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">
-        `;
-        
-        requirementScenarios.forEach(sc => {
-          let statusText = sc.last_jira_sync_status || sc.jira_sync_status || "Pending";
-          let badgeBg = "rgba(156, 163, 175, 0.15)";
-          let badgeColor = "#9ca3af";
-          let badgeBorder = "rgba(156, 163, 175, 0.3)";
-          
-          const sLower = statusText.toLowerCase();
-          if (sLower === "success" || sLower === "done" || sLower === "passed") {
-            badgeBg = "rgba(34, 197, 94, 0.15)";
-            badgeColor = "#4ade80";
-            badgeBorder = "rgba(34, 197, 94, 0.3)";
-            statusText = "Done";
-          } else if (sLower === "in progress" || sLower === "in_progress") {
-            badgeBg = "rgba(59, 130, 246, 0.15)";
-            badgeColor = "#60a5fa";
-            badgeBorder = "rgba(59, 130, 246, 0.3)";
-            statusText = "In Progress";
-          } else if (sLower === "sync_pending" || sLower === "sync pending" || sLower === "pending") {
-            badgeBg = "rgba(234, 179, 8, 0.15)";
-            badgeColor = "#facc15";
-            badgeBorder = "rgba(234, 179, 8, 0.3)";
-            statusText = sLower.includes("pending") && !sLower.includes("sync") ? "Pending" : "Sync Pending";
-          } else if (sLower === "sync_failed" || sLower === "sync failed" || sLower === "failed" || sLower === "error") {
-            badgeBg = "rgba(239, 68, 68, 0.15)";
-            badgeColor = "#f87171";
-            badgeBorder = "rgba(239, 68, 68, 0.3)";
-            statusText = sLower.includes("sync") ? "Sync Failed" : "Failed";
-          }
-          
-          let jiraLink = "Not Linkable";
-          if (sc.jira_issue_key) {
-            jiraLink = `<a href="${sc.jira_issue_url}" target="_blank" style="color: var(--accent-primary); text-decoration: underline; font-weight: 500;">${sc.jira_issue_key}</a>`;
-          }
-          
-          html += `
-            <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); padding: 12px; border-radius: var(--border-radius-sm); display: flex; flex-direction: column; gap: 6px;">
-              <div style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap;"><strong style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; margin-right: 4px;">Scenario:</strong> <span style="font-weight: 500;" title="${sc.scenario_name}">${sc.scenario_name}</span></div>
-              <div><strong style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; margin-right: 4px;">Jira:</strong> ${jiraLink}</div>
-              <div style="display: flex; align-items: center; gap: 8px;"><strong style="color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; margin-right: 4px;">Jira Status:</strong> 
-                <span style="background: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeBorder}; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">${statusText}</span>
-              </div>
-            </div>
-          `;
-        });
-        
-        html += `
-            </div>
-          </div>
-        `;
-        jiraContainer.innerHTML = html;
-      } else {
-        jiraContainer.style.display = 'none';
-      }
-    }
     const approvedScenarios = requirementScenarios.filter(s => s.approved);
     
     const genBtn = document.getElementById('btn-generate-testcases');
@@ -2115,7 +2177,7 @@ class App {
     }
 
     genBtn.onclick = async () => {
-      container.innerHTML = Components.Spinner("AI Agents are generating and evaluating test cases...");
+      container.innerHTML = Components.Spinner("Generating and evaluating test cases. This may take a few minutes...");
       genBtn.disabled = true;
       try {
         await API.generateTestCases(this.currentProject.id, this.selectedRequirementId);
@@ -2123,11 +2185,24 @@ class App {
         await this.refreshProjectData();
       } catch (err) {
         alert(`Test case generation failed: ${err.message}`);
-        this.renderTestCases();
       } finally {
         genBtn.disabled = false;
+        this.renderTestCases();
       }
     };
+
+    const testDataRunBtn = document.getElementById('btn-generate-testdata-run');
+    const testDataStatus = document.getElementById('testdata-run-status');
+    if (testDataRunBtn) {
+      testDataRunBtn.onclick = () => this.runTestDataAgent(testDataStatus, true);
+    }
+
+    const testDataAgentTestCasesBtn = document.getElementById('btn-run-testdata-agent-testcases');
+    const testDataAgentTestCasesStatus = document.getElementById('testdata-agent-testcases-status');
+    if (testDataAgentTestCasesBtn) {
+      testDataAgentTestCasesBtn.disabled = this.testDataAgentRunning || !this.currentProject;
+      testDataAgentTestCasesBtn.onclick = () => this.runTestDataAgent(testDataAgentTestCasesStatus);
+    }
 
     const approvedScenarioIds = new Set(approvedScenarios.map(s => s.id));
     const requirementTestCases = this.testCases.filter(tc => approvedScenarioIds.has(tc.scenario_id));
@@ -2253,24 +2328,63 @@ class App {
           runBatchBtn.onclick = async () => {
             const ids = this.getSelectedTestCases();
             if (ids.length === 0) return alert("Please select at least one test case to execute.");
-            
+
+            const wsUrl = this.settings?.playwright?.workspace_url || 'http://localhost:3000';
+            const workspace = window.open('about:blank', '_blank');
+            if (!workspace) {
+              alert('The Playwright workspace popup was blocked. Allow popups and try again.');
+              return;
+            }
+            workspace.document.title = 'Preparing Playwright workspace';
+            workspace.document.body.textContent = 'Preparing selected test cases and generating missing scripts. This may take a few minutes...';
             runBatchBtn.disabled = true;
-            
+
+            try {
+              await this.ensurePlaywrightWorkspaceAvailable(wsUrl);
+            } catch (err) {
+              if (!workspace.closed) workspace.document.body.textContent = err.message;
+              alert(err.message);
+              runBatchBtn.disabled = false;
+              runBatchBtn.innerText = "Run Selected Batch";
+              return;
+            }
+
             const scriptless = ids.filter(id => {
               const tc = this.testCases.find(t => t.id === id);
               return tc && !tc.playwright_script;
             });
             
             if (scriptless.length > 0) {
-              runBatchBtn.innerText = `Auto-generating ${scriptless.length} script(s)...`;
+              let generated = 0;
               try {
-                for (const tcId of scriptless) {
-                  await API.generatePlaywrightScript(this.currentProject.id, tcId, this.currentProject.framework);
+                for (let index = 0; index < scriptless.length; index += 5) {
+                  const batch = scriptless.slice(index, index + 5);
+                  const updateProgress = () => {
+                    const progress = `Generating scripts ${generated}/${scriptless.length}...`;
+                    runBatchBtn.innerText = progress;
+                    if (!workspace.closed) {
+                      workspace.document.body.textContent = `Generating missing scripts (${generated}/${scriptless.length} complete). This may take a few minutes...`;
+                    }
+                  };
+                  updateProgress();
+                  const results = await Promise.allSettled(batch.map(tcId =>
+                    API.generatePlaywrightScript(this.currentProject.id, tcId, this.currentProject.framework)
+                      .then(result => {
+                        generated += 1;
+                        updateProgress();
+                        return result;
+                      })
+                  ));
+                  const failedResult = results.find(result => result.status === 'rejected');
+                  if (failedResult) throw failedResult.reason;
                 }
                 this.addLog(`Auto-generated scripts for ${scriptless.length} selected test cases.`);
                 await this.refreshProjectData();
                 this.renderTestCases();
               } catch (err) {
+                if (!workspace.closed) {
+                  workspace.document.body.textContent = `Script generation failed: ${err.message}`;
+                }
                 alert(`Failed to auto-generate scripts: ${err.message}`);
                 runBatchBtn.disabled = false;
                 runBatchBtn.innerText = "Run Selected Batch";
@@ -2280,12 +2394,12 @@ class App {
 
             runBatchBtn.innerText = "Redirecting to Playwright Workspace...";
             try {
-              const wsUrl = this.settings?.playwright?.workspace_url || 'http://localhost:3000';
               const testCycleId = this.currentTestCycle ? this.currentTestCycle.id : '';
               const url = `${wsUrl}/?project_id=${this.currentProject.id}&test_case_ids=${ids.join(',')}&test_cycle_id=${testCycleId}`;
-              window.open(url, '_blank');
+              workspace.location.href = url;
               this.addLog(`Opened batch workspace for ${ids.length} selected test cases.`);
             } catch (err) {
+              if (!workspace.closed) workspace.close();
               alert(`Failed to redirect to Playwright Workspace: ${err.message}`);
             } finally {
               runBatchBtn.disabled = false;
@@ -2305,6 +2419,232 @@ class App {
       checked.push(cb.getAttribute('data-id'));
     });
     return checked;
+  }
+
+  async ensurePlaywrightWorkspaceAvailable(workspaceUrl) {
+    try {
+      await fetch(workspaceUrl, {
+        mode: 'no-cors',
+        signal: AbortSignal.timeout(3000)
+      });
+    } catch (err) {
+      throw new Error(
+        `Playwright workspace is unavailable at ${workspaceUrl}. Start it with "pnpm --dir backend/playwrightt dev", then try again.`
+      );
+    }
+  }
+
+  async runTestDataAgent(status, runTests = false) {
+    if (this.testDataAgentRunning) return;
+    if (!this.currentProject || !this.selectedRequirementId) {
+      alert('Select a project and requirement before running TestDataAgent.');
+      return;
+    }
+
+    const projectId = this.currentProject.id;
+    const projectName = this.currentProject.name;
+    const requirementId = this.selectedRequirementId;
+    const testCycleId = this.currentTestCycle ? this.currentTestCycle.id : '';
+    const wsUrl = this.settings?.playwright?.workspace_url || 'http://localhost:3000';
+    const workspace = runTests ? window.open('about:blank', '_blank') : null;
+    if (runTests && !workspace) {
+      alert('The Playwright workspace popup was blocked. Allow popups and try again.');
+      return;
+    }
+    if (workspace) {
+      workspace.document.title = 'Preparing Playwright workspace';
+      workspace.document.body.textContent = 'Checking Playwright workspace availability...';
+      try {
+        await this.ensurePlaywrightWorkspaceAvailable(wsUrl);
+      } catch (err) {
+        if (!workspace.closed) workspace.document.body.textContent = err.message;
+        alert(err.message);
+        return;
+      }
+      workspace.document.body.textContent = 'Generating 20 requirement-based test-data records, test cases, and Playwright scripts...';
+    }
+    const testCaseButton = document.getElementById('btn-generate-testdata-run');
+    const testDataAgentButton = document.getElementById('btn-run-testdata-agent');
+    const testDataAgentTestCasesButton = document.getElementById('btn-run-testdata-agent-testcases');
+    const generatingLabel = runTests
+      ? 'Generating Test Data, Cases & Scripts...'
+      : 'Generating Test Data & Cases...';
+    let outputRendered = false;
+    let projectDataRefreshed = false;
+    this.testDataAgentRunning = true;
+    if (testCaseButton) {
+      testCaseButton.disabled = true;
+      testCaseButton.innerText = generatingLabel;
+    }
+    if (testDataAgentButton) {
+      testDataAgentButton.disabled = true;
+      testDataAgentButton.innerText = generatingLabel;
+    }
+    if (testDataAgentTestCasesButton) {
+      testDataAgentTestCasesButton.disabled = true;
+      testDataAgentTestCasesButton.innerText = generatingLabel;
+    }
+    if (status) {
+      status.style.display = 'block';
+      status.innerHTML = Components.Spinner(
+        runTests
+          ? 'TestDataAgent is creating 20 data-driven tests. The generated records will appear here before Playwright script generation finishes.'
+          : 'TestDataAgent is generating and saving 20 test-data rows and approved test cases...'
+      );
+    }
+
+    try {
+      const dataResult = await API.generateTestDataCases(projectId, requirementId);
+      const generatedCaseIds = dataResult.test_case_ids || [];
+      const testCaseIds = generatedCaseIds;
+      if (testCaseIds.length !== 20) {
+        throw new Error(`Expected 20 generated test cases, received ${testCaseIds.length}.`);
+      }
+
+      const dataset = dataResult.test_data_report?.sample_dataset || {};
+      const rows = Array.isArray(dataset.rows) ? dataset.rows : [];
+      if (rows.length !== 20) {
+        throw new Error(`Expected 20 generated test-data records, received ${rows.length}.`);
+      }
+      const columns = Array.isArray(dataset.header) && dataset.header.length
+        ? dataset.header
+        : Object.keys(rows[0] || {});
+      const csv = dataset.csv_text || '';
+      const coverage = dataResult.test_data_report?.coverage_summary || {};
+      const assumptions = dataResult.test_data_report?.context_understood?.assumptions_and_questions || [];
+      const downloadUrl = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+      const recordsTable = `
+        <div class="table-container" style="max-height: 360px; overflow: auto; margin-top: 12px;">
+          <table class="custom-table">
+            <thead><tr>${columns.map(column => `<th>${escapeHTML(String(column))}</th>`).join('')}</tr></thead>
+            <tbody>${rows.map(row => `
+              <tr>${columns.map(column => `<td>${escapeHTML(String(row[column] ?? ''))}</td>`).join('')}</tr>
+            `).join('')}</tbody>
+          </table>
+        </div>
+      `;
+
+      if (status) {
+        status.innerHTML = `
+          <div style="padding: 16px; border: 1px solid var(--border-color); border-radius: var(--border-radius-md); background: var(--bg-secondary);">
+            <strong data-generation-status style="color: var(--color-success);">${runTests
+              ? 'Generated and saved 20 test-data rows and approved test cases. Generating the Playwright script...'
+              : 'Generated and saved 20 test-data rows and approved test cases.'}</strong>
+            <span style="margin-left: 8px; color: var(--text-secondary);">
+              Positive: ${Number(coverage.positive_cases) || 0},
+              negative: ${Number(coverage.negative_cases) || 0},
+              boundary: ${Number(coverage.boundary_cases) || 0}
+            </span>
+            ${assumptions.length ? `<p style="margin: 8px 0 0; color: var(--text-secondary);">${escapeHTML(assumptions.join(' '))}</p>` : ''}
+            <a href="${downloadUrl}" download="test-data-${requirementId}.csv" style="display: inline-block; margin-top: 8px;">Download generated CSV</a>
+            ${recordsTable}
+          </div>
+        `;
+        outputRendered = true;
+      }
+
+      if (workspace && runTests && !workspace.closed) {
+        workspace.document.title = 'Test data generated - preparing tests';
+        workspace.document.body.innerHTML = `
+          <main style="font-family: system-ui, sans-serif; max-width: 1200px; margin: 32px auto; padding: 0 20px; color: #1f2937;">
+            <h1>Test data generated</h1>
+            <p data-generation-status>20 records and approved test cases are saved. Generating the reusable Playwright script before launching the tests...</p>
+            <p>Positive: ${Number(coverage.positive_cases) || 0},
+              negative: ${Number(coverage.negative_cases) || 0},
+              boundary: ${Number(coverage.boundary_cases) || 0}</p>
+            ${assumptions.length ? `<p>${escapeHTML(assumptions.join(' '))}</p>` : ''}
+            <a href="${downloadUrl}" download="test-data-${requirementId}.csv">Download generated CSV</a>
+            <div style="overflow: auto; max-height: 65vh; margin-top: 16px;">
+              <table style="border-collapse: collapse; width: 100%;">
+                <thead><tr>${columns.map(column => `<th style="position: sticky; top: 0; background: #f3f4f6; text-align: left; padding: 8px; border: 1px solid #d1d5db;">${escapeHTML(String(column))}</th>`).join('')}</tr></thead>
+                <tbody>${rows.map(row => `
+                  <tr>${columns.map(column => `<td style="padding: 8px; border: 1px solid #d1d5db;">${escapeHTML(String(row[column] ?? ''))}</td>`).join('')}</tr>
+                `).join('')}</tbody>
+              </table>
+            </div>
+          </main>
+        `;
+      }
+
+      await this.refreshProjectData();
+      projectDataRefreshed = true;
+
+      if (runTests) {
+        const scriptResult = await API.generateTestDataTests(projectId, requirementId);
+        const scriptedCaseIds = scriptResult.test_case_ids || [];
+        if (
+          scriptedCaseIds.length !== 20
+          || scriptedCaseIds.some((id, index) => id !== generatedCaseIds[index])
+        ) {
+          throw new Error('Script generation did not return the same 20 saved test cases.');
+        }
+        if (status) {
+          const progress = status.querySelector('[data-generation-status]');
+          if (progress) {
+            progress.textContent = 'Generated and auto-approved 20 test cases and scripts; launching execution.';
+          }
+        }
+        if (workspace && !workspace.closed) {
+          const progress = workspace.document.querySelector('[data-generation-status]');
+          if (progress) {
+            progress.textContent = 'Playwright script generated. Opening the test execution workspace...';
+          }
+        }
+      }
+
+      this.addLog(
+        `Generated 20 TestDataAgent cases${runTests ? ' and scripts' : ''} for ${projectName}`
+      );
+      if (runTests) {
+        workspace.location.href = `${wsUrl}/?project_id=${projectId}&test_case_ids=${testCaseIds.join(',')}&test_cycle_id=${testCycleId}&auto_run=1`;
+      }
+    } catch (err) {
+      if (workspace && !workspace.closed) {
+        const progress = workspace.document.querySelector('[data-generation-status]');
+        if (progress) {
+          progress.textContent = `Test-data generation failed: ${err.message}`;
+          progress.style.color = '#b91c1c';
+        } else {
+          workspace.document.body.textContent = `Test-data generation failed: ${err.message}`;
+        }
+      }
+      if (status) {
+        const message = runTests
+          ? `Automatic test-data run failed: ${err.message}`
+          : `TestDataAgent failed: ${err.message}`;
+        if (outputRendered) {
+          const errorMessage = document.createElement('div');
+          errorMessage.style.color = 'var(--color-danger)';
+          errorMessage.style.marginTop = '12px';
+          errorMessage.textContent = message;
+          status.appendChild(errorMessage);
+        } else {
+          status.innerHTML = `<div style="color: var(--color-danger);">${escapeHTML(message)}</div>`;
+        }
+      }
+      if (!projectDataRefreshed) {
+        await this.refreshProjectData();
+      }
+      alert(
+        runTests
+          ? `Automatic test-data run failed: ${err.message}`
+          : `TestDataAgent failed: ${err.message}`
+      );
+    } finally {
+      this.testDataAgentRunning = false;
+      if (testCaseButton) {
+        testCaseButton.disabled = false;
+        testCaseButton.innerText = 'Generate Test Data & Run Tests';
+      }
+      if (testDataAgentButton) {
+        testDataAgentButton.innerText = 'Run TestDataAgent';
+      }
+      if (testDataAgentTestCasesButton) {
+        testDataAgentTestCasesButton.disabled = !this.currentProject || !this.selectedRequirementId;
+        testDataAgentTestCasesButton.innerText = 'Run Test Data Agent';
+      }
+      this.renderTestDataAgent();
+    }
   }
 
   renderScenarioApprovalRequirementDropdown() {
@@ -2613,7 +2953,7 @@ class App {
       return;
     }
 
-    if (['dashboard', 'requirements', 'scenarios', 'testcases', 'playwright', 'executions', 'reports', 'langsmith', 'settings', 'execution-workspace', 'project-start', 'project'].includes(view)) {
+    if (['dashboard', 'requirements', 'scenarios', 'testcases', 'jira-traceability', 'testdatagent', 'playwright', 'executions', 'reports', 'langsmith', 'settings', 'execution-workspace', 'project-start', 'project'].includes(view)) {
       if (view !== 'project' && this.currentProject) {
         await this.refreshProjectData().catch(e => console.error("Router refresh error:", e));
       }
@@ -3801,6 +4141,7 @@ class App {
       let moduleName = view.charAt(0).toUpperCase() + view.slice(1);
       if (view === 'playwright') moduleName = 'Playwright';
       if (view === 'executions') moduleName = 'Execution';
+      if (view === 'jira-traceability') moduleName = 'TestCases';
       if (view === 'reports') moduleName = 'Reports';
       if (view === 'settings') moduleName = 'Settings';
       

@@ -1,0 +1,115 @@
+{
+  "metadata": {
+    "executionId": "7d72d48c-de07-4ad7-acfa-a932d86ea567",
+    "projectId": "46ed48f2-487f-4f22-971a-b919aab21a1a",
+    "testCaseIds": [
+      "5b10aec7-5bbd-43d9-b62d-4f84794de1f4"
+    ],
+    "testCycleId": "7d886c23-41a8-4863-b1a8-b45762c81452",
+    "browser": "chromium",
+    "status": "failed",
+    "started": "2026-10-22T06:47:48.502Z",
+    "finished": "2026-10-22T06:47:56.094Z",
+    "duration": 7.592
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\ntest('Test data TD-007: positive', async ({ page }) => {\n  console.log('[Timeline] Navigation: Go to base URL');\n  await page.goto('https://www.saucedemo.com');\n\n  console.log('[Timeline] Step 1: Perform requirement workflow using the supplied test_data values');\n  // TODO: use the supplied test_data values to interact with the application\n  // TODO: locator not specified in inputs — confirm against live DOM\n  // Example interactions (fabricated for illustration; replace with real selectors):\n  // const fullNameField = page.locator(''); // TODO: locator\n  // await fullNameField.fill('Grace Patel');\n  // const emailField = page.locator(''); // TODO: locator\n  // await emailField.fill('grace@example.com');\n  // const passwordField = page.locator(''); // TODO: locator\n  // await passwordField.fill('ValidPass!7');\n  // const confirmPasswordField = page.locator(''); // TODO: locator\n  // await confirmPasswordField.fill('ValidPass!7');\n  // const acceptTermsCheckbox = page.locator(''); // TODO: locator\n  // if ('true' === 'true') {\n  //   await acceptTermsCheckbox.check();\n  // }\n\n  console.log('[Timeline] Step 2: Verify expected result');\n  // Assert that the expected result text appears somewhere on the page\n  await expect(page.locator('body')).toContainText('accepted');\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-10-22T06:47:48.502Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T06:47:48.540Z",
+      "time": 0.038,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T06:47:48.659Z",
+      "time": 0.157,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T06:47:48.671Z",
+      "time": 0.169,
+      "event": "Running: Test data TD-007: positive",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T06:47:50.774Z",
+      "time": 2.272,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T06:47:50.788Z",
+      "time": 2.286,
+      "event": "Navigate: https://www.saucedemo.com",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T06:47:55.880Z",
+      "time": 7.378,
+      "event": "Screenshot Captured",
+      "details": "error-2026-10-22T06-47-55.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T06:47:55.883Z",
+      "time": 7.381,
+      "event": "Screenshot captured on error: error-2026-10-22T06-47-55.png",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-22T06:47:55.982Z",
+      "time": 7.48,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T06:47:56.053Z",
+      "time": 7.551,
+      "event": "video Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T06:47:56.081Z",
+      "time": 7.579,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T06:47:56.087Z",
+      "time": 7.585,
+      "event": "Error Occurred",
+      "details": "Expected element to contain text \"accepted\", but got \"\n  You need to enable JavaScript to run this app.\n  Swag LabsAccepted usernames are:standard_userlocked_out_userproblem_userperformance_glitch_usererror_uservisual_userPassword for all users:secret_sauce\n\n\n\n\" (timed out after 5000ms)",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-22T06:47:56.094Z",
+      "time": 7.592,
+      "event": "Status: failed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_www_saucedemo_com.png",
+      "error-2026-10-22T06-47-55.png"
+    ],
+    "logs": [],
+    "console": [
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    ],
+    "trace": "trace.zip",
+    "video": "page@3838cd40cd9dfcf7a68a17c08345a400.webm",
+    "htmlReport": "report.html"
+  },
+  "error": "Expected element to contain text \"accepted\", but got \"\n  You need to enable JavaScript to run this app.\n  Swag LabsAccepted usernames are:standard_userlocked_out_userproblem_userperformance_glitch_usererror_uservisual_userPassword for all users:secret_sauce\n\n\n\n\" (timed out after 5000ms)"
+}

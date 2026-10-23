@@ -1,0 +1,122 @@
+{
+  "metadata": {
+    "executionId": "cf6a1813-c1a3-4a14-8688-2d14fcab0d78",
+    "projectId": "46ed48f2-487f-4f22-971a-b919aab21a1a",
+    "testCaseIds": [
+      "3c6a27b0-d4af-4884-8606-ec81ea38ea52"
+    ],
+    "testCycleId": "32b1deb2-ab74-490f-9541-dd5cb61f9e2c",
+    "browser": "chromium",
+    "status": "failed",
+    "started": "2026-10-21T07:08:45.176Z",
+    "browserVersion": "149.0.7827.55",
+    "finished": "2026-10-21T07:08:52.195Z",
+    "duration": 7.019
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\ntest('Test data TD-009: boundary', async ({ page }) => {\n  // [Timeline] Navigate: base_url\n  console.log(\"[Timeline] Navigate: base_url\");\n  // Navigate to base URL\n  await page.goto('https://www.saucedemo.com');\n\n  // [Timeline] Assert: accepted_on_boundary\n  console.log(\"[Timeline] Assert: accepted_on_boundary\");\n  // Assert accepted_on_boundary\n  await expect(page).toContainText('accepted_on_boundary');\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-10-21T07:08:45.176Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:08:45.180Z",
+      "time": 0.004,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:08:45.194Z",
+      "time": 0.018,
+      "event": "Launching browser",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:08:45.865Z",
+      "time": 0.689,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:08:45.872Z",
+      "time": 0.696,
+      "event": "Running: Test data TD-009: boundary",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T07:08:51.808Z",
+      "time": 6.632,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:08:51.811Z",
+      "time": 6.635,
+      "event": "Navigate: https://www.saucedemo.com",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:08:52.075Z",
+      "time": 6.899,
+      "event": "Screenshot Captured",
+      "details": "error-2026-10-21T07-08-51.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:08:52.077Z",
+      "time": 6.901,
+      "event": "Screenshot captured on error: error-2026-10-21T07-08-51.png",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T07:08:52.140Z",
+      "time": 6.964,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:08:52.186Z",
+      "time": 7.01,
+      "event": "video Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:08:52.190Z",
+      "time": 7.014,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T07:08:52.193Z",
+      "time": 7.017,
+      "event": "Error Occurred",
+      "details": "page.textContent: selector: expected string, got undefined",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T07:08:52.195Z",
+      "time": 7.019,
+      "event": "Status: failed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_www_saucedemo_com.png",
+      "error-2026-10-21T07-08-51.png"
+    ],
+    "logs": [],
+    "console": [
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    ],
+    "trace": "trace.zip",
+    "video": "page@bfe87114c63bb1c251ac150ef6eeb7b7.webm",
+    "htmlReport": "report.html"
+  },
+  "error": "page.textContent: selector: expected string, got undefined"
+}

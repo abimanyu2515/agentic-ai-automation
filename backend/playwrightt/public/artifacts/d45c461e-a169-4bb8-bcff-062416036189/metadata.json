@@ -1,0 +1,115 @@
+{
+  "metadata": {
+    "executionId": "d45c461e-a169-4bb8-bcff-062416036189",
+    "projectId": "46ed48f2-487f-4f22-971a-b919aab21a1a",
+    "testCaseIds": [
+      "8ca08ace-7ae5-4ff5-a27a-d5a1dd7171b7"
+    ],
+    "testCycleId": "a73cd1a9-e9b4-4c17-abef-495a6d277bb8",
+    "browser": "chromium",
+    "status": "failed",
+    "started": "2026-10-21T10:11:10.540Z",
+    "finished": "2026-10-21T10:11:17.998Z",
+    "duration": 7.458
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\ntest('Test data TD-014: invalid', async ({ page }) => {\n  console.log('[Timeline] Navigate: base URL');\n\n  await page.goto('https://www.saucedemo.com');\n\n  console.log('[Timeline] Step 1: Complete the requirement workflow using the supplied test_data values');\n  // TODO: Implement requirement workflow using supplied test_data values\n  // Example placeholder values:\n  // const fullName = 'Noah White';\n  // const email = 'noah@example.com';\n  // const password = 'GreenTea!8';\n  // const confirmPassword = 'GreenTea!8';\n  // const acceptTerms = 'true';\n\n  console.log('[Timeline] Step 2: Verify the expected_result for the supplied test_data values');\n  await expect(page.locator('body')).toContainText('rejected_validation_error');\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-10-21T10:11:10.540Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T10:11:10.548Z",
+      "time": 0.008,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T10:11:10.684Z",
+      "time": 0.144,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:11:10.694Z",
+      "time": 0.154,
+      "event": "Running: Test data TD-014: invalid",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T10:11:12.631Z",
+      "time": 2.091,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:11:12.635Z",
+      "time": 2.095,
+      "event": "Navigate: https://www.saucedemo.com",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:11:17.801Z",
+      "time": 7.261,
+      "event": "Screenshot Captured",
+      "details": "error-2026-10-21T10-11-17.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:11:17.805Z",
+      "time": 7.265,
+      "event": "Screenshot captured on error: error-2026-10-21T10-11-17.png",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T10:11:17.917Z",
+      "time": 7.377,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:11:17.987Z",
+      "time": 7.447,
+      "event": "video Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:11:17.991Z",
+      "time": 7.451,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:11:17.995Z",
+      "time": 7.455,
+      "event": "Error Occurred",
+      "details": "Expected element to contain text \"rejected_validation_error\", but got \"\n  You need to enable JavaScript to run this app.\n  Swag LabsAccepted usernames are:standard_userlocked_out_userproblem_userperformance_glitch_usererror_uservisual_userPassword for all users:secret_sauce\n\n\n\n\" (timed out after 5000ms)",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T10:11:17.999Z",
+      "time": 7.459,
+      "event": "Status: failed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_www_saucedemo_com.png",
+      "error-2026-10-21T10-11-17.png"
+    ],
+    "logs": [],
+    "console": [
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    ],
+    "trace": "trace.zip",
+    "video": "page@5d1ead8d6c50eb583893d8bcb497d6a7.webm",
+    "htmlReport": "report.html"
+  },
+  "error": "Expected element to contain text \"rejected_validation_error\", but got \"\n  You need to enable JavaScript to run this app.\n  Swag LabsAccepted usernames are:standard_userlocked_out_userproblem_userperformance_glitch_usererror_uservisual_userPassword for all users:secret_sauce\n\n\n\n\" (timed out after 5000ms)"
+}

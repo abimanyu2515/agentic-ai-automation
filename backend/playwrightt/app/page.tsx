@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, Suspense } from 'react';
+import { useState, useCallback, useEffect, useRef, Suspense } from 'react';
 import Editor from '@monaco-editor/react';
 import { Button } from '@/components/ui/button';
 import { ExecutionList } from '@/components/execution-list';
@@ -106,6 +106,8 @@ function PlaywrightWorkspaceContent() {
   const [currentBatchIndex, setCurrentBatchIndex] = useState<number | null>(null);
   const [isBatchRunning, setIsBatchRunning] = useState(false);
   const [testCycleId, setTestCycleId] = useState<string | null>(null);
+  const [autoRunBatch, setAutoRunBatch] = useState(false);
+  const autoRunStarted = useRef(false);
 
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
@@ -195,6 +197,7 @@ function PlaywrightWorkspaceContent() {
       let tcId = params.get('test_case_id');
       let tcIdsParam = params.get('test_case_ids');
       let cycleId = params.get('test_cycle_id');
+      setAutoRunBatch(params.get('auto_run') === '1');
       
       // Fallback to localStorage if parameters are not present in URL
       if (!pId) {
@@ -500,6 +503,13 @@ function PlaywrightWorkspaceContent() {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (autoRunBatch && batchTestCases.length > 0 && !autoRunStarted.current) {
+      autoRunStarted.current = true;
+      void handleExecute();
+    }
+  }, [autoRunBatch, batchTestCases, handleExecute]);
 
   // Handle status change
   const handleStatusChange = async (executionId: string, action: string) => {

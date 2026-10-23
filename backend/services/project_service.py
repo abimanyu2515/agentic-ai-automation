@@ -390,7 +390,6 @@ class ProjectService:
         import re
         import io
         import zipfile
-        import pandas as pd
         import fitz
         from pathlib import Path
         import xml.etree.ElementTree as ET
@@ -408,6 +407,8 @@ class ProjectService:
                 text = file_bytes.decode("utf-8", errors="ignore")
                 parsed_blocks = self._parse_requirements_from_text(text, filename)
         elif ext in [".xlsx", ".xls"]:
+            import pandas as pd
+
             df = pd.read_excel(io.BytesIO(file_bytes))
             cols = {col.lower().replace(" ", "").replace("_", ""): col for col in df.columns}
             

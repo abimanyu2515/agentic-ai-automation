@@ -15,6 +15,10 @@ a real live run when a model paraphrased a name instead of copying it
 exactly. Numbers don't get paraphrased the same way.
 """
 
+import json
+from threading import Lock
+import time
+
 import pytest
 
 from backend.agents.test_case_agent import TestCaseAgent, TestCaseListResponse
@@ -44,6 +48,131 @@ def test_llm_service_structured_generate_parses_test_case_mock_response():
 
     assert len(result.test_cases) == 1
     assert result.test_cases[0].scenario_number == 1
+
+
+def test_llm_service_parses_stringified_test_case_entries():
+    service = LLMService(config=_TEST_LLM_CONFIG)
+    second_case = {
+        "scenario_number": 2,
+        "title": "Verify registration with valid data",
+        "preconditions": ["Registration page is open"],
+        "steps": ["Submit valid registration details"],
+        "expected_result": "The registration succeeds",
+        "test_data": {"email": "user@example.com"},
+    }
+
+    result = service.structured_generate(
+        user="irrelevant - mock_response short-circuits the call",
+        response_model=TestCaseListResponse,
+        mock_response=json.dumps(
+            {
+                "test_cases": [
+                    {
+                        "scenario_number": 1,
+                        "title": "Verify login",
+                        "preconditions": ["App running"],
+                        "steps": ["Go to login", "Enter credentials"],
+                        "expected_result": "User is logged in",
+                        "test_data": {},
+                    },
+                    json.dumps(json.dumps(second_case)),
+                ]
+            }
+        ),
+    )
+
+    assert [case.scenario_number for case in result.test_cases] == [1, 2]
+    assert result.test_cases[1].title == second_case["title"]
+    assert result.test_cases[1].test_data == second_case["test_data"]
+
+
+def test_test_case_agent_batches_large_scenario_sets():
+    class BatchLLMService:
+        def __init__(self):
+            self.calls = []
+
+        def structured_generate(self, *, user, response_model, **kwargs):
+            self.calls.append((user, kwargs))
+            scenario_count = min(5, 7 - (len(self.calls) - 1) * 5)
+            return response_model(
+                test_cases=[
+                    {
+                        "scenario_number": number,
+                        "title": f"Generated case {number}",
+                        "steps": ["Complete the scenario"],
+                        "expected_result": "The scenario completes successfully",
+                    }
+                    for number in range(1, scenario_count + 1)
+                ]
+            )
+
+    llm_service = BatchLLMService()
+    state = _state_with_scenarios()
+    state.generated_scenarios.extend(
+        Scenario(
+            requirement_id=state.requirement.id,
+            scenario_name=f"Additional scenario {number}",
+            description="Additional scenario description",
+            priority="medium",
+        )
+        for number in range(4, 8)
+    )
+
+    result = TestCaseAgent(llm_service=llm_service).run(state)
+
+    assert len(llm_service.calls) == 2
+    assert [case.scenario_id for case in result.generated_test_cases] == [
+        scenario.id for scenario in state.generated_scenarios
+    ]
+    assert all(kwargs == {"timeout": 30, "max_retries": 2} for _, kwargs in llm_service.calls)
+
+
+def test_test_case_agent_respects_configured_worker_limit():
+    class ConcurrentBatchLLMService:
+        def __init__(self):
+            self.lock = Lock()
+            self.active_calls = 0
+            self.max_active_calls = 0
+
+        def structured_generate(self, *, user, response_model, **kwargs):
+            with self.lock:
+                self.active_calls += 1
+                self.max_active_calls = max(self.max_active_calls, self.active_calls)
+            time.sleep(0.02)
+            count = user.count("(priority:")
+            result = response_model(
+                test_cases=[
+                    {
+                        "scenario_number": number,
+                        "title": f"Generated case {number}",
+                        "steps": ["Complete the scenario"],
+                        "expected_result": "The scenario completes successfully",
+                    }
+                    for number in range(1, count + 1)
+                ]
+            )
+            with self.lock:
+                self.active_calls -= 1
+            return result
+
+    state = _state_with_scenarios()
+    state.generated_scenarios.extend(
+        Scenario(
+            requirement_id=state.requirement.id,
+            scenario_name=f"Additional scenario {number}",
+            description="Additional scenario description",
+            priority="medium",
+        )
+        for number in range(4, 8)
+    )
+    llm_service = ConcurrentBatchLLMService()
+
+    result = TestCaseAgent(llm_service=llm_service, max_workers=2).run(state)
+
+    assert llm_service.max_active_calls == 2
+    assert [case.scenario_id for case in result.generated_test_cases] == [
+        scenario.id for scenario in state.generated_scenarios
+    ]
 
 
 def _state_with_scenarios() -> WorkflowState:

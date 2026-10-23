@@ -289,8 +289,6 @@ Open **Test Cases** (`data-view="testcases"` → `#testcases-view`).
 
 Layout:
 
-- JIRA traceability banner (`#testcases-jira-trace-container`): per-scenario JIRA key + sync status
-  (`Done` / `In Progress` / `Sync Pending` / `Sync Failed` / `Pending`)
 - Search (`#tc-req-search`) + **Select Active Requirement** (`#tc-req-select`)
 - Toolbar (`#testcases-actions-toolbar`): **Bulk Approve**, **Bulk Reject**,
   **Generate & Evaluate Test Cases** (`#btn-generate-testcases`)
@@ -302,18 +300,29 @@ Layout:
 Important: the Test Cases list shows **only test cases whose parent scenario is approved**.
 Unapproved scenarios' cases are hidden by design.
 
+### Jira traceability
+
+Open **Jira Traceability & Status** from the project sidebar
+(`data-view="jira-traceability"` → `#jira-traceability-view`) to view the
+selected requirement's per-scenario Jira key and sync status
+(`Done` / `In Progress` / `Sync Pending` / `Sync Failed` / `Pending`).
+Choose a requirement with `#jira-trace-req-select`.
+
 ### 3.1 Generate test cases
 
-1. Select the same active requirement (e.g. REQ-001).
-2. Confirm the JIRA banner lists its approved scenarios.
+1. Select the active requirement (e.g. REQ-001).
+2. Confirm at least one scenario is approved in **Scenarios**.
 3. Click **Generate & Evaluate Test Cases**.
-4. You see `AI Agents are generating and evaluating test cases...`.
+4. You see a loading indicator while test cases are generated and evaluated.
    Backend: `POST .../requirements/{id}/generate-testcases` →
    `TestCaseAgent → EvaluationAgent → HumanApprovalAgent (Gate 2)`.
    `EvaluationAgent` does Jaccard duplicate detection and relevance scoring and sets
    `evaluation_status` / `evaluation_reason`.
 5. Table refreshes. Each test case has title, preconditions, steps, expected result,
    priority, confidence, evaluation status, execution type.
+
+The browser stops waiting after five minutes and restores the test-case view. A timeout
+does not guarantee the backend operation was cancelled; check backend logs before retrying.
 
 If the button is disabled, go back to **Scenarios** and approve at least one scenario.
 
@@ -386,9 +395,10 @@ Use this to run multiple CricScore cases together.
    Start with 2–3 homepage cases to validate the pipeline.
 2. Click **Run Selected Batch** (`#btn-run-selected-batch`, green).
 3. The app:
-   - Finds selected cases with no `playwright_script` and auto-generates them first
-     (button shows `Auto-generating N script(s)...`).
-   - Then shows `Redirecting to Playwright Workspace...` and opens a new tab:
+   - Checks that the Playwright workspace is running and opens a progress tab.
+   - Finds selected cases with no `playwright_script` and generates them in groups,
+     showing progress as scripts finish.
+   - Then navigates the progress tab to the workspace:
      ```text
      {workspace_url}/?project_id={CricScore_id}&test_case_ids={id1,id2,...}&test_cycle_id={cycle_id_or_empty}
      ```
@@ -483,7 +493,7 @@ The workspace queue is process-local, one active execution at a time
 | `Generate Test Cases` disabled                                   | No approved scenario for the active requirement. Go to **Scenarios** → approve ≥1.                                                                        |
 | `Generate Playwright Scripts...` button hidden                   | No approved test case for the active requirement. Approve TCs first.                                                                                      |
 | `Run Selected Batch` says `Please select at least one test case` | No `.tc-checkbox` ticked. Tick rows first.                                                                                                                |
-| Workspace opens blank / 404                                      | `backend/playwrightt dev` not running, or wrong `playwright.workspace_url` in settings. Start dev server on `:3000`.                                      |
+| Workspace is reported unavailable / browser says connection refused | `backend/playwrightt dev` is not running, or `playwright.workspace_url` is incorrect. Start it with `pnpm --dir backend/playwrightt dev` or correct the URL in settings. |
 | Script navigates to wrong site                                   | Project Settings target URL is wrong. Set to `https://cricscore-wheat.vercel.app/` and regenerate scripts.                                                |
 | No executions in Reports                                         | Nothing executed yet, or Release/Cycle scope filter hides them. Clear filters / switch dashboard scope to Project Overview.                               |
 | Screenshots/video missing                                        | Run produced no artifacts (fast pass, headless config, or runner error). Check observer terminal logs; re-run headed once via browser settings if needed. |

@@ -1,0 +1,115 @@
+{
+  "metadata": {
+    "executionId": "0486e015-e7e7-4814-b264-e7319f1f666e",
+    "projectId": "46ed48f2-487f-4f22-971a-b919aab21a1a",
+    "testCaseIds": [
+      "7f6cc8e4-920a-4b23-8458-9e3026c78365"
+    ],
+    "testCycleId": "a73cd1a9-e9b4-4c17-abef-495a6d277bb8",
+    "browser": "chromium",
+    "status": "failed",
+    "started": "2026-10-21T10:08:10.517Z",
+    "finished": "2026-10-21T10:08:17.841Z",
+    "duration": 7.324
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\ntest('Test data TD-011: boundary', async ({ page }) => {\n  console.log('[Timeline] Navigate: base URL');\n\n  await page.goto('https://www.saucedemo.com');\n\n  console.log('[Timeline] Step 1: Complete the requirement workflow using the supplied test_data values');\n  // TODO: Implement requirement workflow using supplied test_data values\n  // Example placeholder values:\n  // const fullName = 'Karen Wang';\n  // const email = 'karen@example.com';\n  // const password = 'C0mplex!9';\n  // const confirmPassword = 'C0mplex!9';\n  // const acceptTerms = 'true';\n\n  console.log('[Timeline] Step 2: Verify the expected_result for the supplied test_data values');\n  await expect(page.locator('body')).toContainText('accepted_on_boundary');\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-10-21T10:08:10.517Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T10:08:10.522Z",
+      "time": 0.005,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T10:08:10.645Z",
+      "time": 0.128,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:08:10.654Z",
+      "time": 0.137,
+      "event": "Running: Test data TD-011: boundary",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-21T10:08:12.533Z",
+      "time": 2.016,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:08:12.537Z",
+      "time": 2.02,
+      "event": "Navigate: https://www.saucedemo.com",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:08:17.623Z",
+      "time": 7.106,
+      "event": "Screenshot Captured",
+      "details": "error-2026-10-21T10-08-17.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:08:17.628Z",
+      "time": 7.111,
+      "event": "Screenshot captured on error: error-2026-10-21T10-08-17.png",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T10:08:17.760Z",
+      "time": 7.243,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:08:17.830Z",
+      "time": 7.313,
+      "event": "video Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:08:17.834Z",
+      "time": 7.317,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-21T10:08:17.838Z",
+      "time": 7.321,
+      "event": "Error Occurred",
+      "details": "Expected element to contain text \"accepted_on_boundary\", but got \"\n  You need to enable JavaScript to run this app.\n  Swag LabsAccepted usernames are:standard_userlocked_out_userproblem_userperformance_glitch_usererror_uservisual_userPassword for all users:secret_sauce\n\n\n\n\" (timed out after 5000ms)",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-21T10:08:17.841Z",
+      "time": 7.324,
+      "event": "Status: failed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_www_saucedemo_com.png",
+      "error-2026-10-21T10-08-17.png"
+    ],
+    "logs": [],
+    "console": [
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    ],
+    "trace": "trace.zip",
+    "video": "page@bf31d7a667ec7a2746b12f695ec17688.webm",
+    "htmlReport": "report.html"
+  },
+  "error": "Expected element to contain text \"accepted_on_boundary\", but got \"\n  You need to enable JavaScript to run this app.\n  Swag LabsAccepted usernames are:standard_userlocked_out_userproblem_userperformance_glitch_usererror_uservisual_userPassword for all users:secret_sauce\n\n\n\n\" (timed out after 5000ms)"
+}

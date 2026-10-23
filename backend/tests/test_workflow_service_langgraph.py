@@ -7,7 +7,11 @@ from uuid import uuid4
 from backend.models.requirement import Requirement
 from backend.models.scenario import Scenario
 from backend.models.test_case import TestCase, EvaluationStatus, TestCaseStatus
-from backend.services.workflow_service import WorkflowService, run_execution_and_stream
+from backend.services.workflow_service import (
+    WorkflowService,
+    active_execution_events,
+    run_execution_and_stream,
+)
 from backend.repository.project_repository import JSONProjectRepository
 import backend.repository.project_repository as repo_module
 from backend.services.llm import LLMService
@@ -64,7 +68,28 @@ def test_generate_test_cases_via_langgraph(mock_llm_service):
     assert len(stored) == 3
 
 
-def test_generate_playwright_script_via_langgraph(mock_llm_service):
+def test_generate_test_cases_preserves_existing_cases_when_generation_fails(mock_llm_service):
+    ws = WorkflowService()
+    project = ws.repo.create_project("LangGraph Project", "Testing LangGraph integration")
+    req = ws.repo.create_requirement(project.id, "Req Title", "Req Description", "high", "finance")
+    scenario = Scenario(requirement_id=req.id, scenario_name="Valid Login", description="desc", approved=True)
+    ws.repo.save_scenarios([scenario])
+    existing_case = TestCase(
+        scenario_id=scenario.id,
+        title="Existing login test",
+        steps=["Submit valid credentials"],
+        expected_result="The user is logged in",
+    )
+    ws.repo.save_test_cases([existing_case])
+
+    with mock.patch("backend.graph.workflow.build_graph", side_effect=RuntimeError("LLM unavailable")):
+        with pytest.raises(RuntimeError, match="LLM unavailable"):
+            ws.generate_test_cases(project.id, req.id)
+
+    assert ws.repo.get_test_cases(scenario.id) == [existing_case]
+
+
+def test_generate_playwright_script_uses_approved_test_case_agent(mock_llm_service):
     ws = WorkflowService()
     project = ws.repo.create_project("LangGraph Project", "Testing LangGraph integration")
     req = ws.repo.create_requirement(project.id, "Req Title", "Req Description", "high", "finance")
@@ -85,6 +110,7 @@ def test_generate_playwright_script_via_langgraph(mock_llm_service):
     updated_tc = ws.generate_playwright_script(project.id, tc.id)
     assert updated_tc.playwright_script is not None
     assert "test(" in updated_tc.playwright_script
+    assert updated_tc.execution_type == "UI Automation"
 
 
 def test_run_execution_and_stream_via_langgraph(mock_llm_service, fake_playwright_runner):
@@ -112,5 +138,5 @@ def test_run_execution_and_stream_via_langgraph(mock_llm_service, fake_playwrigh
 
     # Check execution results stored in database
     results = ws.repo.get_execution_results(project.id)
-    assert len(results) == 1
+    assert len(results) == 1, active_execution_events[str(tc.id)][-1]
     assert results[0].status.value == "passed"
