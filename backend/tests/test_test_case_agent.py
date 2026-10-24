@@ -124,7 +124,7 @@ def test_test_case_agent_batches_large_scenario_sets():
     assert [case.scenario_id for case in result.generated_test_cases] == [
         scenario.id for scenario in state.generated_scenarios
     ]
-    assert all(kwargs == {"timeout": 30, "max_retries": 2} for _, kwargs in llm_service.calls)
+    assert all(kwargs == {"timeout": 120, "max_retries": 2} for _, kwargs in llm_service.calls)
 
 
 def test_test_case_agent_respects_configured_worker_limit():

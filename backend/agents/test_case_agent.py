@@ -64,6 +64,7 @@ from backend.utils.prompts import load_prompt
 
 
 _MAX_SCENARIOS_PER_LLM_CALL = 5
+_LLM_REQUEST_TIMEOUT_SECONDS = 120
 
 
 # ==========================================================
@@ -190,7 +191,7 @@ class TestCaseAgent(BaseAgent):
             batch = self.llm_service.structured_generate(
                 user=prompt,
                 response_model=TestCaseListResponse,
-                timeout=30,
+                timeout=_LLM_REQUEST_TIMEOUT_SECONDS,
                 max_retries=2,
             )
 

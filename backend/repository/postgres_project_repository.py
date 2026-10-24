@@ -626,7 +626,9 @@ class PostgresProjectRepository(ProjectRepository):
                     jira_issue_key=tc.jira_issue_key,
                     jira_issue_url=tc.jira_issue_url,
                     jira_sync_status=tc.jira_sync_status,
-                    jira_last_synced_at=tc.jira_last_synced_at
+                    jira_last_synced_at=tc.jira_last_synced_at,
+                    test_data=tc.test_data,
+                    test_data_sets=tc.test_data_sets,
                 )
                 session.add(db_tc)
             else:
@@ -648,6 +650,8 @@ class PostgresProjectRepository(ProjectRepository):
                 db_tc.jira_issue_url = tc.jira_issue_url
                 db_tc.jira_sync_status = tc.jira_sync_status
                 db_tc.jira_last_synced_at = tc.jira_last_synced_at
+                db_tc.test_data = tc.test_data
+                db_tc.test_data_sets = tc.test_data_sets
                 db_tc.is_deleted = False
         self._flush_or_commit()
 
@@ -675,6 +679,8 @@ class PostgresProjectRepository(ProjectRepository):
         db_tc.jira_issue_url = test_case.jira_issue_url
         db_tc.jira_sync_status = test_case.jira_sync_status
         db_tc.jira_last_synced_at = test_case.jira_last_synced_at
+        db_tc.test_data = test_case.test_data
+        db_tc.test_data_sets = test_case.test_data_sets
         self._flush_or_commit()
         return test_case
 

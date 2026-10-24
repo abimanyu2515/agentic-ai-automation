@@ -284,6 +284,48 @@ class PlaywrightAgent(BaseAgent):
                     raise ValueError(
                         f"{self.name}: test-data fields differ for '{test_case.title}'"
                     )
+                if test_case.test_data_sets:
+                    if len(approved) != 1:
+                        raise ValueError(
+                            f"{self.name}: a multi-dataset test case must be generated on its own"
+                        )
+                    if any(
+                        set(dataset) != expected_fields
+                        for dataset in test_case.test_data_sets
+                    ):
+                        raise ValueError(
+                            f"{self.name}: test-data fields differ within "
+                            f"'{test_case.title}'"
+                        )
+                    scenario = (
+                        self.repo.get_scenario(test_case.scenario_id)
+                        if self.repo else None
+                    )
+                    if scenario is None:
+                        raise ValueError(
+                            f"{self.name}: scenario for '{test_case.title}' was not found"
+                        )
+                    scripts = []
+                    for index, dataset in enumerate(test_case.test_data_sets, start=1):
+                        replacements = {
+                            "__TEST_DATA_ID__": (
+                                f"TD-{test_case.id.hex[:8].upper()}-{index:02d}"
+                            ),
+                            "__TEST_TYPE__": scenario.path_type,
+                            "__EXPECTED_RESULT__": self._escape_js_string_content(
+                                test_case.expected_result
+                            ),
+                        }
+                        replacements.update({
+                            markers[key]: self._escape_js_string_content(str(value))
+                            for key, value in dataset.items()
+                        })
+                        scripts.append(
+                            self._apply_template_values(template_script, replacements)
+                        )
+                    test_case.playwright_script = self._join_data_driven_scripts(scripts)
+                    continue
+
                 scenario = (
                     self.repo.get_scenario(test_case.scenario_id)
                     if self.repo else None
@@ -303,13 +345,12 @@ class PlaywrightAgent(BaseAgent):
                 replacements = {
                     "__TEST_DATA_ID__": data_id,
                     "__TEST_TYPE__": scenario.path_type,
-                    "__EXPECTED_RESULT__": json.dumps(
-                        test_case.expected_result,
-                        ensure_ascii=False,
-                    )[1:-1],
+                    "__EXPECTED_RESULT__": self._escape_js_string_content(
+                        test_case.expected_result
+                    ),
                 }
                 replacements.update({
-                    markers[key]: json.dumps(str(value), ensure_ascii=False)[1:-1]
+                    markers[key]: self._escape_js_string_content(str(value))
                     for key, value in test_case.test_data.items()
                 })
                 test_case.playwright_script = self._apply_template_values(
@@ -345,6 +386,23 @@ class PlaywrightAgent(BaseAgent):
         return state
 
     @staticmethod
+    def _join_data_driven_scripts(scripts: list[str]) -> str:
+        imports: set[str] = set()
+        test_bodies = []
+        for script in scripts:
+            body_lines = []
+            for line in script.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("import "):
+                    if stripped in imports:
+                        continue
+                    imports.add(stripped)
+                    continue
+                body_lines.append(line)
+            test_bodies.append("\n".join(body_lines))
+        return "\n".join([*sorted(imports), *test_bodies])
+
+    @staticmethod
     def _test_data_template_case(test_case: TestCase) -> tuple[TestCase, dict[str, str]]:
         markers = {
             key: f"__TEST_DATA_{index:02d}__"
@@ -373,6 +431,15 @@ class PlaywrightAgent(BaseAgent):
         for marker, value in replacements.items():
             script = script.replace(marker, value)
         return script
+
+    @staticmethod
+    def _escape_js_string_content(value: str) -> str:
+        return (
+            json.dumps(value, ensure_ascii=False)[1:-1]
+            .replace("'", "\\'")
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029")
+        )
 
     def _generate_script(
         self,

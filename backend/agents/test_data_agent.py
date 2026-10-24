@@ -10,8 +10,8 @@ Responsibilities:
       workflow state.
     - Identify the fields and behaviors that should be exercised.
     - Produce a representative combination matrix.
-    - Generate a CSV-ready 20-row dataset with positive, boundary, invalid, and
-      workflow coverage.
+    - Generate a CSV-ready 20-row requirement dataset or one validation-targeted
+      dataset for a selected test case.
     - Record assumptions when the real validation rules are not supplied.
 
 This agent intentionally follows the repository's state-based conventions and
@@ -22,17 +22,23 @@ separate concern.
 
 from __future__ import annotations
 
+import ast
 import csv
+import hashlib
 import io
+import json
 import re
-from typing import Any
+from uuid import uuid4
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from backend.agents.base import BaseAgent
 from backend.models.requirement import Requirement
 from backend.models.state import WorkflowState
-from backend.services.llm import LLMService
+from backend.models.scenario import Scenario
+from backend.models.test_case import TestCase
+from backend.services.llm import LLMService, LLMServiceError
 from backend.utils.prompts import load_prompt
 
 
@@ -56,8 +62,29 @@ class TestDataReport(BaseModel):
     coverage_summary: dict[str, Any] = Field(default_factory=dict)
 
 
+class TestCaseDataResponse(BaseModel):
+    """One data set tailored to a single test case's validation behavior."""
+
+    test_data: dict[str, str] = Field(min_length=1)
+    targeted_validation_rule: str = Field(min_length=1)
+    test_type: Literal[
+        "positive",
+        "invalid",
+        "boundary",
+        "missing_required",
+        "workflow",
+    ]
+    assumptions: list[str] = Field(default_factory=list)
+
+
+class TestCaseDataBatchResponse(BaseModel):
+    """Exactly 20 distinct datasets for the same selected test case."""
+
+    datasets: list[TestCaseDataResponse] = Field(min_length=20, max_length=20)
+
+
 class TestDataAgent(BaseAgent):
-    """Generates a QA-ready test-data plan and CSV dataset for a feature."""
+    """Generates requirement-level data plans and unique per-case test data."""
 
     name = "TestData Agent"
 
@@ -70,11 +97,8 @@ class TestDataAgent(BaseAgent):
 
         state.add_log(f"{self.name} started")
 
-        prompt = load_prompt(
-            "test_data_agent_prompt.txt",
-            title=state.requirement.title,
-            description=state.requirement.description,
-        )
+        if len(state.generated_test_cases) == 1:
+            return self._run_for_test_case(state)
 
         report = self._generate_report(state.requirement)
         state.test_data_report = report.model_dump(mode="python")
@@ -83,6 +107,498 @@ class TestDataAgent(BaseAgent):
 
         state.add_log(f"{self.name} created a test-data plan with {len(state.generated_test_data)} rows")
         return state
+
+    def _run_for_test_case(self, state: WorkflowState) -> WorkflowState:
+        requirement = state.requirement
+        test_case = state.generated_test_cases[0]
+        scenario = next(
+            (
+                item for item in state.generated_scenarios
+                if item.id == test_case.scenario_id
+            ),
+            None,
+        )
+        if scenario is None:
+            raise ValueError(
+                f"{self.name} requires the selected test case's scenario"
+            )
+
+        context = state.testing_context or {}
+        reserved_datasets = context.get("reserved_test_data", [])
+        if not isinstance(reserved_datasets, list):
+            raise ValueError(f"{self.name} received invalid reserved test-data context")
+        reserved_fingerprints = {
+            self._dataset_fingerprint(dataset)
+            for dataset in reserved_datasets
+            if isinstance(dataset, dict) and dataset
+        }
+        validation_rules = [
+            *requirement.functional_requirements,
+            *requirement.business_rules,
+            *requirement.acceptance_criteria,
+        ]
+        source_test_data = self._scenario_test_data(scenario)
+        generated_datasets = self._generate_deterministic_case_data(
+            requirement=requirement,
+            scenario=scenario,
+            test_case=test_case,
+            source_test_data=source_test_data,
+            validation_rules=validation_rules,
+            reserved_fingerprints=reserved_fingerprints,
+        )
+        collision_fingerprints: set[str] = set()
+        for _ in (range(3) if generated_datasets is None else []):
+            application_context = context.get("application_context", {})
+            if not isinstance(application_context, dict):
+                raise ValueError(f"{self.name} received invalid application context")
+            user_prompt = load_prompt(
+                "test_case_data_prompt.txt",
+                requirement_title=requirement.title,
+                requirement_description=requirement.description,
+                application_context=json.dumps(
+                    application_context,
+                    ensure_ascii=False,
+                ),
+                validation_rules=json.dumps(validation_rules, ensure_ascii=False),
+                scenario=json.dumps(
+                    {
+                        "name": scenario.scenario_name,
+                        "description": scenario.description,
+                    },
+                    ensure_ascii=False,
+                ),
+                test_case=json.dumps(
+                    {
+                        "id": str(test_case.id),
+                        "title": test_case.title,
+                        "preconditions": test_case.preconditions,
+                        "steps": test_case.steps,
+                        "expected_result": test_case.expected_result,
+                    },
+                    ensure_ascii=False,
+                ),
+                reserved_dataset_fingerprints=json.dumps(
+                    sorted(reserved_fingerprints | collision_fingerprints)
+                ),
+                uniqueness_nonce=uuid4().hex,
+            )
+            try:
+                candidate = self.llm_service.structured_generate(
+                    user=user_prompt,
+                    response_model=TestCaseDataBatchResponse,
+                    max_retries=1,
+                    timeout=240,
+                )
+            except LLMServiceError:
+                generated_datasets = self._generate_deterministic_case_data(
+                    requirement=requirement,
+                    scenario=scenario,
+                    test_case=test_case,
+                    source_test_data=source_test_data,
+                    validation_rules=validation_rules,
+                    reserved_fingerprints=reserved_fingerprints,
+                )
+                if generated_datasets is None:
+                    raise
+                break
+            candidate_fingerprints = [
+                self._dataset_fingerprint(dataset.test_data)
+                for dataset in candidate.datasets
+            ]
+            if any(
+                not dataset.test_data
+                or any(not key.strip() for key in dataset.test_data)
+                for dataset in candidate.datasets
+            ):
+                raise ValueError(
+                    f"{self.name} returned a dataset without usable input fields"
+                )
+            field_names = set(candidate.datasets[0].test_data)
+            if any(set(dataset.test_data) != field_names for dataset in candidate.datasets):
+                raise ValueError(
+                    f"{self.name} returned inconsistent fields across the 20 datasets"
+                )
+            if (
+                len(set(candidate_fingerprints)) == 20
+                and not reserved_fingerprints.intersection(candidate_fingerprints)
+            ):
+                generated_datasets = candidate.datasets
+                break
+            collision_fingerprints.update(candidate_fingerprints)
+
+        if generated_datasets is None:
+            raise ValueError(
+                f"{self.name} could not generate 20 unique datasets for "
+                f"'{test_case.title}' after three attempts"
+            )
+
+        input_datasets = [dataset.test_data for dataset in generated_datasets]
+        data_ids = [
+            f"TD-{test_case.id.hex[:8].upper()}-{index:02d}"
+            for index in range(1, len(input_datasets) + 1)
+        ]
+        rows = [
+            {
+                "test_data_id": data_id,
+                **dataset.test_data,
+                "targeted_validation_rule": dataset.targeted_validation_rule,
+                "expected_result": test_case.expected_result,
+                "test_type": dataset.test_type,
+            }
+            for data_id, dataset in zip(data_ids, generated_datasets)
+        ]
+        header = list(rows[0])
+        csv_buffer = io.StringIO()
+        writer = csv.DictWriter(csv_buffer, fieldnames=header)
+        writer.writeheader()
+        writer.writerows(rows)
+
+        report = TestDataReport(
+            context_understood={
+                "requirement": {
+                    "id": str(requirement.id),
+                    "title": requirement.title,
+                },
+                "test_case": {
+                    "id": str(test_case.id),
+                    "title": test_case.title,
+                },
+                "test_data_ids": data_ids,
+                "important_rules_and_constraints": validation_rules,
+                "targeted_validation_rule": generated_datasets[0].targeted_validation_rule,
+                "expected_result": test_case.expected_result,
+                "assumptions_and_questions": sorted({
+                    assumption
+                    for dataset in generated_datasets
+                    for assumption in dataset.assumptions
+                }),
+                "unique_for_test_case": True,
+                "number_of_datasets": len(input_datasets),
+            },
+            testable_combinations=[],
+            sample_dataset={
+                "header": header,
+                "rows": rows,
+                "csv_text": csv_buffer.getvalue(),
+            },
+            coverage_summary={
+                "number_of_data_rows": len(rows),
+                "positive_cases": sum(dataset.test_type == "positive" for dataset in generated_datasets),
+                "negative_cases": sum(dataset.test_type in {
+                    "invalid", "missing_required", "workflow"
+                } for dataset in generated_datasets),
+                "boundary_cases": sum(dataset.test_type == "boundary" for dataset in generated_datasets),
+                "unique_dataset": True,
+            },
+        )
+        state.test_data_report = report.model_dump(mode="python")
+        state.test_data_combinations = []
+        state.generated_test_data = rows
+        test_case.test_data = input_datasets[0]
+        test_case.test_data_sets = input_datasets
+        state.add_log(
+            f"{self.name} generated {len(input_datasets)} unique datasets "
+            f"for test case '{test_case.title}'"
+        )
+        return state
+
+    @classmethod
+    def _generate_deterministic_case_data(
+        cls,
+        *,
+        requirement: Requirement,
+        scenario: Scenario,
+        test_case: TestCase,
+        source_test_data: dict[str, str],
+        validation_rules: list[str],
+        reserved_fingerprints: set[str],
+    ) -> list[TestCaseDataResponse] | None:
+        metadata_fields = {
+            "test_data_id",
+            "targeted_validation_rule",
+            "expected_result",
+            "test_type",
+        }
+        base_data = {
+            key: value
+            for key, value in (test_case.test_data or source_test_data).items()
+            if key not in metadata_fields
+        }
+        narrative = " ".join(
+            [
+                requirement.title,
+                requirement.description,
+                scenario.scenario_name,
+                scenario.description,
+                test_case.title,
+                test_case.expected_result,
+                *test_case.preconditions,
+                *test_case.steps,
+                *[str(key) for key in source_test_data],
+                *[str(value) for value in source_test_data.values()],
+                *[str(key) for key in test_case.test_data],
+                *[str(value) for value in test_case.test_data.values()],
+                *validation_rules,
+            ]
+        ).lower()
+        case_focus = " ".join(
+            [
+                scenario.scenario_name,
+                test_case.title,
+                test_case.expected_result,
+                *test_case.preconditions,
+                str(test_case.test_data.get("targeted_validation_rule", "")),
+                str(source_test_data.get("targeted_validation_rule", "")),
+            ]
+        ).lower()
+        login_focus = " ".join([case_focus, *test_case.steps]).lower()
+        login_datasets = cls._generate_deterministic_login_data(
+            case_focus=login_focus,
+            base_data=base_data,
+            reserved_fingerprints=reserved_fingerprints,
+        )
+        if login_datasets is not None:
+            return login_datasets
+
+        invalid_context = any(
+            marker in narrative
+            for marker in ("invalid", "reject", "fail", "only numeric", "digits only")
+        )
+        if not invalid_context:
+            return None
+
+        target_field = None
+        target_rule = None
+        value_factory = None
+        password_field = next(
+            (field for field in base_data if "password" in field.lower()),
+            None,
+        )
+        email_field = next(
+            (field for field in base_data if "email" in field.lower()),
+            None,
+        )
+        email_focus = "email" in case_focus and any(
+            marker in case_focus
+            for marker in ("invalid", "malformed", "reject", "incorrect")
+        )
+        numeric_password = (
+            "password" in narrative
+            and any(
+                marker in narrative
+                for marker in ("numeric-only", "only numeric", "digits only", "numbers only")
+            )
+        ) or (
+            password_field is not None
+            and bool(re.fullmatch(r"\d+", base_data[password_field]))
+        ) or (
+            password_field is not None
+            and invalid_context
+            and not email_focus
+            and not any(
+                term in case_focus
+                for term in ("login", "log in", "sign in", "signin")
+            )
+        )
+        if numeric_password:
+            target_field = password_field or "password"
+            target_rule = (
+                source_test_data.get("targeted_validation_rule")
+                or "Password contains only numeric characters."
+            )
+
+            def value_factory(index: int) -> str:
+                return f"{index:08d}"
+
+        elif "email" in narrative and (
+            "invalid" in narrative
+            or "malformed" in narrative
+            or (email_field is not None and "@" not in base_data[email_field])
+        ):
+            target_field = email_field or "email"
+            target_rule = "Email address is malformed and must be rejected."
+
+            def value_factory(index: int) -> str:
+                return f"invalid-email-{index:02d}"
+
+        if target_field is None or target_rule is None or value_factory is None:
+            return None
+
+        datasets = []
+        fingerprints = set(reserved_fingerprints)
+        for index in range(1, 1001):
+            candidate = {**base_data, target_field: value_factory(index)}
+            if numeric_password and "confirm_password" in candidate:
+                candidate["confirm_password"] = candidate[target_field]
+            fingerprint = cls._dataset_fingerprint(candidate)
+            if fingerprint in fingerprints:
+                continue
+            fingerprints.add(fingerprint)
+            datasets.append(
+                TestCaseDataResponse(
+                    test_data=candidate,
+                    targeted_validation_rule=target_rule,
+                    test_type="invalid",
+                    assumptions=[
+                        "Generated locally because the configured LLM did not return a valid dataset batch."
+                    ],
+                )
+            )
+            if len(datasets) == 20:
+                return datasets
+        return None
+
+    @classmethod
+    def _generate_deterministic_login_data(
+        cls,
+        *,
+        case_focus: str,
+        base_data: dict[str, str],
+        reserved_fingerprints: set[str],
+    ) -> list[TestCaseDataResponse] | None:
+        if not any(term in case_focus for term in ("login", "log in", "sign in", "signin")):
+            return None
+
+        username_field = next(
+            (
+                field for field in base_data
+                if field.lower().replace("-", "_") in {"username", "user_name", "user"}
+            ),
+            "username",
+        )
+        password_field = next(
+            (field for field in base_data if "password" in field.lower()),
+            "password",
+        )
+        username_empty_markers = (
+            "empty username", "username empty", "blank username", "username blank",
+            "missing username", "username is required", "username required",
+            "leave username blank", "leave username empty",
+        )
+        password_empty_markers = (
+            "empty password", "password empty", "blank password", "password blank",
+            "missing password", "password is required", "password required",
+            "leave password blank", "leave password empty",
+        )
+        username_invalid_markers = (
+            "invalid username", "incorrect username", "wrong username",
+            "unknown username", "unrecognized username", "username is invalid",
+            "username is incorrect", "username is wrong",
+        )
+        password_invalid_markers = (
+            "invalid password", "incorrect password", "wrong password",
+            "password is invalid", "password is incorrect", "password is wrong",
+        )
+
+        username_empty = (
+            username_field in base_data and not base_data[username_field].strip()
+        ) or (
+            any(marker in case_focus for marker in username_empty_markers)
+        )
+        password_empty = (
+            password_field in base_data and not base_data[password_field].strip()
+        ) or (
+            any(marker in case_focus for marker in password_empty_markers)
+        )
+        invalid_username = any(
+            marker in case_focus for marker in username_invalid_markers
+        )
+        invalid_password = any(
+            marker in case_focus for marker in password_invalid_markers
+        )
+
+        if username_empty:
+            target_field = username_field
+            target_rule = "Username is required and cannot be empty."
+            value_factory = lambda index: ""
+            varied_field = password_field
+            varied_factory = lambda index: f"synthetic-password-{index:03d}"
+            test_type = "missing_required"
+        elif password_empty:
+            target_field = password_field
+            target_rule = "Password is required and cannot be empty."
+            value_factory = lambda index: ""
+            varied_field = username_field
+            varied_factory = lambda index: f"synthetic-user-{index:03d}"
+            test_type = "missing_required"
+        elif invalid_username:
+            target_field = username_field
+            target_rule = "Unknown usernames must be rejected."
+            value_factory = lambda index: f"invalid-user-{index:03d}"
+            varied_field = None
+            varied_factory = None
+            test_type = "invalid"
+        elif invalid_password:
+            target_field = password_field
+            target_rule = "Incorrect passwords must be rejected."
+            value_factory = lambda index: f"invalid-password-{index:03d}"
+            varied_field = None
+            varied_factory = None
+            test_type = "invalid"
+        else:
+            return None
+
+        datasets: list[TestCaseDataResponse] = []
+        fingerprints = set(reserved_fingerprints)
+        login_data = dict(base_data)
+        login_data[username_field] = "synthetic-user"
+        login_data[password_field] = "synthetic-password"
+        for index in range(1, 1001):
+            candidate = dict(login_data)
+            if varied_field is not None and varied_factory is not None:
+                candidate[varied_field] = varied_factory(index)
+            candidate[target_field] = value_factory(index)
+            fingerprint = cls._dataset_fingerprint(candidate)
+            if fingerprint in fingerprints:
+                continue
+            fingerprints.add(fingerprint)
+            datasets.append(
+                TestCaseDataResponse(
+                    test_data=candidate,
+                    targeted_validation_rule=target_rule,
+                    test_type=test_type,
+                    assumptions=[
+                        "Generated synthetic login inputs for the selected test case; no account credentials were used."
+                    ],
+                )
+            )
+            if len(datasets) == 20:
+                return datasets
+        return None
+
+    @staticmethod
+    def _scenario_test_data(scenario: Scenario) -> dict[str, str]:
+        marker = "generated input data "
+        start = scenario.description.find(marker)
+        if start < 0:
+            return {}
+        literal_start = scenario.description.find(": ", start)
+        literal_end = scenario.description.find(". Expected result:", literal_start)
+        if literal_start < 0 or literal_end < 0:
+            return {}
+        try:
+            data = ast.literal_eval(
+                scenario.description[literal_start + 2:literal_end]
+            )
+        except (SyntaxError, ValueError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {
+            str(key): str(value)
+            for key, value in data.items()
+            if isinstance(value, (str, int, float, bool))
+        }
+
+    @staticmethod
+    def _dataset_fingerprint(dataset: dict[str, str]) -> str:
+        normalized = json.dumps(
+            dataset,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
     def _generate_report(self, requirement: Requirement) -> TestDataReport:
         fields = self._detect_fields(requirement)

@@ -1,0 +1,168 @@
+{
+  "metadata": {
+    "executionId": "2f603fd4-fcc3-4b88-b39f-293d6fbc9e6c",
+    "projectId": "46ed48f2-487f-4f22-971a-b919aab21a1a",
+    "testCaseIds": [
+      "38af91f2-1c1b-4424-ac17-769cca36d27a"
+    ],
+    "testCycleId": "637f3abe-9f18-4952-a658-eb13bbcacdb1",
+    "browser": "chromium",
+    "status": "failed",
+    "started": "2026-10-22T11:33:06.491Z",
+    "finished": "2026-10-22T11:33:21.297Z",
+    "duration": 14.806
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\nconst test_data = {\n  full_name: \"Olivia Brown\",\n  email: \"olivia@example.com\",\n  password: \"Orange38$\",\n  confirm_password: \"Orange38$\",\n  accept_terms: \"true\"\n};\n\ntest('Test data TD-015: invalid', async ({ page }) => {\n  console.log(\"[Timeline] Navigation: goto https://www.saucedemo.com\");\n  await page.goto(\"https://www.saucedemo.com\");\n\n  // Step 1: Complete the requirement workflow using the supplied test_data values.\n\n  // TODO: locate and fill full name field\n  console.log(\"[Timeline] Fill: Full Name\");\n  // await page.locator('TODO_SELECTOR').fill(test_data.full_name);\n\n  // TODO: locate and fill email field\n  console.log(\"[Timeline] Fill: Email\");\n  // await page.locator('TODO_SELECTOR').fill(test_data.email);\n\n  // TODO: locate and fill password field\n  console.log(\"[Timeline] Fill: Password\");\n  // await page.locator('TODO_SELECTOR').fill(test_data.password);\n\n  // TODO: locate and fill confirm password field\n  console.log(\"[Timeline] Fill: Confirm Password\");\n  // await page.locator('TODO_SELECTOR').fill(test_data.confirm_password);\n\n  // TODO: locate and set accept terms checkbox\n  console.log(\"[Timeline] Set: Accept Terms\");\n  // await page.locator('TODO_SELECTOR').check();\n\n  // Step 2: Verify the expected_result for the supplied test_data values.\n  console.log(\"[Timeline] Verify expected result\");\n  await expect(page.getByText('rejected_validation_error')).toBeVisible();\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-10-22T11:33:06.491Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:06.503Z",
+      "time": 0.012,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:06.550Z",
+      "time": 0.059,
+      "event": "Session restored from storage state",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:06.696Z",
+      "time": 0.205,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:06.709Z",
+      "time": 0.218,
+      "event": "Running: Test data TD-015: invalid",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:08.731Z",
+      "time": 2.24,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:08.734Z",
+      "time": 2.243,
+      "event": "Navigate: https://www.saucedemo.com",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:13.762Z",
+      "time": 7.271,
+      "event": "Failure detected: \"locator.waitFor: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('rejected_validation_error') to be visible\u001b[22m\n\". Recovery action: retry",
+      "type": "warning"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:13.814Z",
+      "time": 7.323,
+      "event": "Retrying execution (Attempt 1)...",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:13.818Z",
+      "time": 7.327,
+      "event": "Session restored from storage state",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:13.948Z",
+      "time": 7.457,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:13.966Z",
+      "time": 7.475,
+      "event": "Running: Test data TD-015: invalid",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:15.993Z",
+      "time": 9.502,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:16.000Z",
+      "time": 9.509,
+      "event": "Navigate: https://www.saucedemo.com",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:21.099Z",
+      "time": 14.608,
+      "event": "Screenshot Captured",
+      "details": "error-2026-10-22T11-33-21.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:21.103Z",
+      "time": 14.612,
+      "event": "Screenshot captured on error: error-2026-10-22T11-33-21.png",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:21.212Z",
+      "time": 14.721,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:21.279Z",
+      "time": 14.788,
+      "event": "video Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:21.291Z",
+      "time": 14.8,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:21.295Z",
+      "time": 14.804,
+      "event": "Error Occurred",
+      "details": "locator.waitFor: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('rejected_validation_error') to be visible\u001b[22m\n",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-22T11:33:21.297Z",
+      "time": 14.806,
+      "event": "Status: failed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_www_saucedemo_com.png",
+      "step-01-navigate_https_www_saucedemo_com.png",
+      "error-2026-10-22T11-33-21.png"
+    ],
+    "logs": [],
+    "console": [
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    ],
+    "trace": "trace.zip",
+    "video": "page@808c2646910faeff2cfa5bfb234c3233.webm",
+    "htmlReport": "report.html"
+  },
+  "error": "locator.waitFor: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('rejected_validation_error') to be visible\u001b[22m\n"
+}

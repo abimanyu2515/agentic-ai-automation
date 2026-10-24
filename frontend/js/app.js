@@ -1,5 +1,5 @@
-import { API } from './api.js?v=15';
-import { Components, escapeHTML } from './components.js?v=2';
+import { API } from './api.js?v=16';
+import { Components, escapeHTML } from './components.js?v=3';
 
 class App {
   constructor() {
@@ -24,6 +24,8 @@ class App {
     this.activeExecutionStream = null;
     this.dashboardScope = 'project';
     this.testDataAgentRunning = false;
+    this.generatingTestDataCaseIds = new Set();
+    this.expandedTestCaseIds = new Set();
   }
 
   async init() {
@@ -1867,17 +1869,54 @@ class App {
     genBtn.onclick = async () => {
       const countInput = document.getElementById('sc-generation-count');
       const count = countInput ? parseInt(countInput.value, 10) || 3 : 3;
+      const projectId = this.currentProject.id;
+      const requirementId = this.selectedRequirementId;
       
       const runGeneration = async (mode) => {
-        container.innerHTML = Components.Spinner(`AI is generating ${count} scenarios for this requirement...`);
+        container.innerHTML = Components.Spinner(
+          `AI is generating ${count} scenarios. The configured model may take up to 5 minutes to respond...`
+        );
         genBtn.disabled = true;
         try {
-          await API.generateScenarios(this.currentProject.id, this.selectedRequirementId, count, mode);
+          const generatedScenarios = await API.generateScenarios(
+            projectId,
+            requirementId,
+            count,
+            mode
+          );
+          if (!Array.isArray(generatedScenarios) || generatedScenarios.length === 0) {
+            throw new Error('The request completed without returning any scenarios.');
+          }
+
+          if (
+            this.currentProject?.id === projectId
+            && this.selectedRequirementId === requirementId
+          ) {
+            const generatedIds = new Set(generatedScenarios.map(scenario => scenario.id));
+            this.scenarios = this.scenarios.filter(scenario => (
+              scenario.requirement_id !== requirementId
+              || (mode !== 'replace' && !generatedIds.has(scenario.id))
+            ));
+            this.scenarios.push(...generatedScenarios);
+            this.renderScenarios();
+            this.renderTestCasesRequirementDropdown();
+            void this.refreshProjectData();
+          }
           this.addLog(`Generated ${count} scenarios (${mode})`);
-          await this.refreshProjectData();
         } catch (err) {
+          if (
+            this.currentProject?.id === projectId
+            && this.selectedRequirementId === requirementId
+          ) {
+            this.renderScenarios();
+            const errorMessage = document.createElement('div');
+            errorMessage.setAttribute('role', 'alert');
+            errorMessage.style.color = 'var(--color-danger)';
+            errorMessage.style.marginBottom = '12px';
+            errorMessage.textContent = `Scenario generation failed: ${err.message}`;
+            container.prepend(errorMessage);
+          }
           alert(`Scenario generation failed: ${err.message}`);
-          this.renderScenarios();
         } finally {
           genBtn.disabled = false;
         }
@@ -2028,6 +2067,7 @@ class App {
 
     select.onchange = (e) => {
       this.selectedRequirementId = e.target.value;
+      this.expandedTestCaseIds.clear();
       const testDataStatus = document.getElementById('testdata-agent-testcases-status');
       if (testDataStatus) {
         testDataStatus.style.display = 'none';
@@ -2177,12 +2217,25 @@ class App {
     }
 
     genBtn.onclick = async () => {
-      container.innerHTML = Components.Spinner("Generating and evaluating test cases. This may take a few minutes...");
+      container.innerHTML = Components.Spinner("Generating and evaluating test cases. Large requirements may take up to 20 minutes...");
       genBtn.disabled = true;
+      const projectId = this.currentProject.id;
+      const requirementId = this.selectedRequirementId;
       try {
-        await API.generateTestCases(this.currentProject.id, this.selectedRequirementId);
+        const generatedTestCases = await API.generateTestCases(projectId, requirementId);
+        if (!Array.isArray(generatedTestCases) || generatedTestCases.length === 0) {
+          throw new Error("The request completed without returning any test cases.");
+        }
+
+        if (this.currentProject?.id === projectId) {
+          const scenarioIds = new Set(approvedScenarios.map(scenario => scenario.id));
+          this.testCases = this.testCases
+            .filter(testCase => !scenarioIds.has(testCase.scenario_id))
+            .concat(generatedTestCases);
+          this.renderTestCases();
+        }
         this.addLog("Test cases generated and evaluated");
-        await this.refreshProjectData();
+        this.refreshProjectData();
       } catch (err) {
         alert(`Test case generation failed: ${err.message}`);
       } finally {
@@ -2190,12 +2243,6 @@ class App {
         this.renderTestCases();
       }
     };
-
-    const testDataRunBtn = document.getElementById('btn-generate-testdata-run');
-    const testDataStatus = document.getElementById('testdata-run-status');
-    if (testDataRunBtn) {
-      testDataRunBtn.onclick = () => this.runTestDataAgent(testDataStatus, true);
-    }
 
     const testDataAgentTestCasesBtn = document.getElementById('btn-run-testdata-agent-testcases');
     const testDataAgentTestCasesStatus = document.getElementById('testdata-agent-testcases-status');
@@ -2207,6 +2254,9 @@ class App {
     const approvedScenarioIds = new Set(approvedScenarios.map(s => s.id));
     const requirementTestCases = this.testCases.filter(tc => approvedScenarioIds.has(tc.scenario_id));
 
+    const onGenerateTestData = (testCaseId) => (
+      this.generateTestDataForTestCase(testCaseId)
+    );
     container.innerHTML = Components.TestCasesTable(requirementTestCases, {
       onApprove: async (id) => {
         try {
@@ -2271,8 +2321,14 @@ class App {
         } catch (err) {
           alert(`Failed to add note: ${err.message}`);
         }
-      }
+      },
+      onGenerateTestData
     }, this.testCasesNotes, this.goldenDatasetComparison || {});
+    container.querySelectorAll('.btn-generate-testdata-case').forEach(button => {
+      button.addEventListener('click', () => (
+        onGenerateTestData(button.dataset.testCaseId)
+      ));
+    });
 
     // Bulk actions
     const bulkTcApprove = document.getElementById('btn-bulk-tc-approve');
@@ -2434,7 +2490,7 @@ class App {
     }
   }
 
-  async runTestDataAgent(status, runTests = false) {
+  async runTestDataAgent(status, runTests = false, testCaseId = null) {
     if (this.testDataAgentRunning) return;
     if (!this.currentProject || !this.selectedRequirementId) {
       alert('Select a project and requirement before running TestDataAgent.');
@@ -2444,6 +2500,13 @@ class App {
     const projectId = this.currentProject.id;
     const projectName = this.currentProject.name;
     const requirementId = this.selectedRequirementId;
+    const selectedTestCase = testCaseId
+      ? this.testCases.find(testCase => testCase.id === testCaseId)
+      : null;
+    if (testCaseId && !selectedTestCase) {
+      alert('The selected test case is no longer available. Refresh the test cases and try again.');
+      return;
+    }
     const testCycleId = this.currentTestCycle ? this.currentTestCycle.id : '';
     const wsUrl = this.settings?.playwright?.workspace_url || 'http://localhost:3000';
     const workspace = runTests ? window.open('about:blank', '_blank') : null;
@@ -2461,9 +2524,10 @@ class App {
         alert(err.message);
         return;
       }
-      workspace.document.body.textContent = 'Generating 20 requirement-based test-data records, test cases, and Playwright scripts...';
+      workspace.document.body.textContent = testCaseId
+        ? `Generating 20 unique test datasets for "${selectedTestCase.title}"...`
+        : 'Generating 20 requirement-based test-data records, test cases, and Playwright scripts...';
     }
-    const testCaseButton = document.getElementById('btn-generate-testdata-run');
     const testDataAgentButton = document.getElementById('btn-run-testdata-agent');
     const testDataAgentTestCasesButton = document.getElementById('btn-run-testdata-agent-testcases');
     const generatingLabel = runTests
@@ -2472,10 +2536,13 @@ class App {
     let outputRendered = false;
     let projectDataRefreshed = false;
     this.testDataAgentRunning = true;
-    if (testCaseButton) {
-      testCaseButton.disabled = true;
-      testCaseButton.innerText = generatingLabel;
-    }
+    const updateTestCaseButtons = (disabled, label) => {
+      document.querySelectorAll('.btn-generate-testdata-case').forEach(button => {
+        button.disabled = disabled;
+        button.innerText = label;
+      });
+    };
+    updateTestCaseButtons(true, generatingLabel);
     if (testDataAgentButton) {
       testDataAgentButton.disabled = true;
       testDataAgentButton.innerText = generatingLabel;
@@ -2488,30 +2555,45 @@ class App {
       status.style.display = 'block';
       status.innerHTML = Components.Spinner(
         runTests
-          ? 'TestDataAgent is creating 20 data-driven tests. The generated records will appear here before Playwright script generation finishes.'
+          ? testCaseId
+            ? `TestDataAgent is generating validation-specific data for "${selectedTestCase.title}"...`
+            : 'TestDataAgent is creating 20 data-driven tests. The generated records will appear here before Playwright script generation finishes.'
           : 'TestDataAgent is generating and saving 20 test-data rows and approved test cases...'
       );
     }
 
     try {
-      const dataResult = await API.generateTestDataCases(projectId, requirementId);
+      const dataResult = testCaseId
+        ? await API.generateTestDataForTestCase(projectId, requirementId, testCaseId)
+        : await API.generateTestDataCases(projectId, requirementId);
       const generatedCaseIds = dataResult.test_case_ids || [];
       const testCaseIds = generatedCaseIds;
-      if (testCaseIds.length !== 20) {
-        throw new Error(`Expected 20 generated test cases, received ${testCaseIds.length}.`);
+      const expectedCaseCount = testCaseId ? 1 : 20;
+      if (
+        testCaseIds.length !== expectedCaseCount
+        || (testCaseId && testCaseIds[0] !== testCaseId)
+      ) {
+        throw new Error(
+          `Expected ${expectedCaseCount} test case${expectedCaseCount === 1 ? '' : 's'} for this run, received ${testCaseIds.length}.`
+        );
       }
 
       const dataset = dataResult.test_data_report?.sample_dataset || {};
       const rows = Array.isArray(dataset.rows) ? dataset.rows : [];
-      if (rows.length !== 20) {
-        throw new Error(`Expected 20 generated test-data records, received ${rows.length}.`);
+      const expectedDataCount = 20;
+      if (rows.length !== expectedDataCount) {
+        throw new Error(
+          `Expected ${expectedDataCount} generated test-data records, received ${rows.length}.`
+        );
       }
       const columns = Array.isArray(dataset.header) && dataset.header.length
         ? dataset.header
         : Object.keys(rows[0] || {});
       const csv = dataset.csv_text || '';
       const coverage = dataResult.test_data_report?.coverage_summary || {};
-      const assumptions = dataResult.test_data_report?.context_understood?.assumptions_and_questions || [];
+      const assumptions = dataResult.test_data_report?.context_understood?.assumptions_and_questions
+        || dataResult.test_data_report?.context_understood?.assumptions
+        || [];
       const downloadUrl = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
       const recordsTable = `
         <div class="table-container" style="max-height: 360px; overflow: auto; margin-top: 12px;">
@@ -2527,9 +2609,11 @@ class App {
       if (status) {
         status.innerHTML = `
           <div style="padding: 16px; border: 1px solid var(--border-color); border-radius: var(--border-radius-md); background: var(--bg-secondary);">
-            <strong data-generation-status style="color: var(--color-success);">${runTests
-              ? 'Generated and saved 20 test-data rows and approved test cases. Generating the Playwright script...'
-              : 'Generated and saved 20 test-data rows and approved test cases.'}</strong>
+            <strong data-generation-status style="color: var(--color-success);">${testCaseId
+              ? `Generated 20 unique datasets for "${escapeHTML(selectedTestCase.title)}" targeting: ${escapeHTML(dataResult.test_data_report?.context_understood?.targeted_validation_rule || rows[0]?.targeted_validation_rule || 'the test case validation')}.`
+              : runTests
+                ? 'Generated and saved 20 test-data rows and approved test cases. Generating the Playwright script...'
+                : 'Generated and saved 20 test-data rows and approved test cases.'}</strong>
             <span style="margin-left: 8px; color: var(--text-secondary);">
               Positive: ${Number(coverage.positive_cases) || 0},
               negative: ${Number(coverage.negative_cases) || 0},
@@ -2548,7 +2632,9 @@ class App {
         workspace.document.body.innerHTML = `
           <main style="font-family: system-ui, sans-serif; max-width: 1200px; margin: 32px auto; padding: 0 20px; color: #1f2937;">
             <h1>Test data generated</h1>
-            <p data-generation-status>20 records and approved test cases are saved. Generating the reusable Playwright script before launching the tests...</p>
+            <p data-generation-status>${testCaseId
+              ? `20 unique datasets for "${escapeHTML(selectedTestCase.title)}" are saved. Preparing the test execution...`
+              : '20 records and approved test cases are saved. Generating the reusable Playwright script before launching the tests...'}</p>
             <p>Positive: ${Number(coverage.positive_cases) || 0},
               negative: ${Number(coverage.negative_cases) || 0},
               boundary: ${Number(coverage.boundary_cases) || 0}</p>
@@ -2566,10 +2652,56 @@ class App {
         `;
       }
 
+      if (runTests && testCaseId) {
+        if (dataResult.script_ready) {
+          if (status) {
+            const progress = status.querySelector('[data-generation-status]');
+            if (progress) {
+              progress.textContent = '20 datasets generated and saved. Reusing the matching Playwright script...';
+            }
+          }
+          if (workspace && !workspace.closed) {
+            workspace.document.title = 'Test data generated - preparing tests';
+            const progress = workspace.document.querySelector('[data-generation-status]');
+            if (progress) {
+              progress.textContent = '20 datasets generated and saved. Reusing the matching Playwright script...';
+            }
+          }
+        } else {
+          if (status) {
+            const progress = status.querySelector('[data-generation-status]');
+            if (progress) {
+              progress.textContent = '20 datasets generated and saved. Generating the Playwright script...';
+            }
+          }
+          if (workspace && !workspace.closed) {
+            workspace.document.title = 'Test data generated - creating test script';
+            const progress = workspace.document.querySelector('[data-generation-status]');
+            if (progress) {
+              progress.textContent = '20 datasets generated and saved. Generating the Playwright script...';
+            }
+          }
+          const scriptResult = await API.generateTestDataScriptForTestCase(
+            projectId,
+            requirementId,
+            testCaseId
+          );
+          if (scriptResult.test_case_ids?.[0] !== testCaseId) {
+            throw new Error('Script generation did not return the selected test case.');
+          }
+          if (workspace && !workspace.closed) {
+            const progress = workspace.document.querySelector('[data-generation-status]');
+            if (progress) {
+              progress.textContent = 'Playwright script generated. Opening the test execution workspace...';
+            }
+          }
+        }
+      }
+
       await this.refreshProjectData();
       projectDataRefreshed = true;
 
-      if (runTests) {
+      if (runTests && !testCaseId) {
         const scriptResult = await API.generateTestDataTests(projectId, requirementId);
         const scriptedCaseIds = scriptResult.test_case_ids || [];
         if (
@@ -2592,9 +2724,9 @@ class App {
         }
       }
 
-      this.addLog(
-        `Generated 20 TestDataAgent cases${runTests ? ' and scripts' : ''} for ${projectName}`
-      );
+      this.addLog(testCaseId
+        ? `Generated unique test data and script for "${selectedTestCase.title}" in ${projectName}`
+        : `Generated 20 TestDataAgent cases${runTests ? ' and scripts' : ''} for ${projectName}`);
       if (runTests) {
         workspace.location.href = `${wsUrl}/?project_id=${projectId}&test_case_ids=${testCaseIds.join(',')}&test_cycle_id=${testCycleId}&auto_run=1`;
       }
@@ -2602,10 +2734,10 @@ class App {
       if (workspace && !workspace.closed) {
         const progress = workspace.document.querySelector('[data-generation-status]');
         if (progress) {
-          progress.textContent = `Test-data generation failed: ${err.message}`;
+          progress.textContent = `Test-data or script generation failed: ${err.message}`;
           progress.style.color = '#b91c1c';
         } else {
-          workspace.document.body.textContent = `Test-data generation failed: ${err.message}`;
+          workspace.document.body.textContent = `Test-data or script generation failed: ${err.message}`;
         }
       }
       if (status) {
@@ -2632,10 +2764,7 @@ class App {
       );
     } finally {
       this.testDataAgentRunning = false;
-      if (testCaseButton) {
-        testCaseButton.disabled = false;
-        testCaseButton.innerText = 'Generate Test Data & Run Tests';
-      }
+      updateTestCaseButtons(false, 'Generate Test Data');
       if (testDataAgentButton) {
         testDataAgentButton.innerText = 'Run TestDataAgent';
       }
@@ -2644,6 +2773,74 @@ class App {
         testDataAgentTestCasesButton.innerText = 'Run Test Data Agent';
       }
       this.renderTestDataAgent();
+    }
+  }
+
+  async generateTestDataForTestCase(testCaseId) {
+    if (!this.currentProject || !this.selectedRequirementId) {
+      alert('Select a project and requirement before generating test data.');
+      return;
+    }
+    if (this.generatingTestDataCaseIds.has(testCaseId)) return;
+
+    const selectedTestCase = this.testCases.find(testCase => testCase.id === testCaseId);
+    if (!selectedTestCase) {
+      alert('The selected test case is no longer available. Refresh the test cases and try again.');
+      return;
+    }
+
+    const projectId = this.currentProject.id;
+    const requirementId = this.selectedRequirementId;
+    this.generatingTestDataCaseIds.add(testCaseId);
+    this.renderTestCases();
+
+    let generated = false;
+    try {
+      const result = await API.generateTestDataForTestCase(
+        projectId,
+        requirementId,
+        testCaseId
+      );
+      const testCaseIds = result.test_case_ids || [];
+      const rows = result.test_data_report?.sample_dataset?.rows || [];
+      const inputRows = rows.map(row => {
+        const input = Object.fromEntries(
+          Object.entries(row).filter(([key]) => ![
+            'test_data_id',
+            'targeted_validation_rule',
+            'expected_result',
+            'test_type'
+          ].includes(key))
+        );
+        return JSON.stringify(
+          Object.fromEntries(Object.entries(input).sort(([left], [right]) => left.localeCompare(right)))
+        );
+      });
+      if (testCaseIds.length !== 1 || testCaseIds[0] !== testCaseId) {
+        throw new Error('The server did not return data for only the selected test case.');
+      }
+      if (rows.length !== 20 || new Set(inputRows).size !== 20) {
+        throw new Error('The server did not return 20 unique datasets for the selected test case.');
+      }
+
+      await this.refreshProjectData();
+      const updatedTestCase = this.testCases.find(testCase => testCase.id === testCaseId);
+      if (!updatedTestCase || updatedTestCase.test_data_sets?.length !== 20) {
+        throw new Error('The generated datasets were not returned when test cases were refreshed.');
+      }
+      this.addLog(`Generated 20 unique test datasets for "${selectedTestCase.title}"`);
+      generated = true;
+    } catch (err) {
+      alert(`Test-data generation failed for "${selectedTestCase.title}": ${err.message}`);
+    } finally {
+      this.generatingTestDataCaseIds.delete(testCaseId);
+      this.renderTestCases();
+      if (generated) {
+        const expandedRow = document.getElementById(`tc-expanded-row-${testCaseId}`);
+        if (expandedRow?.style.display === 'none') {
+          window.toggleTestCaseRow(testCaseId);
+        }
+      }
     }
   }
 

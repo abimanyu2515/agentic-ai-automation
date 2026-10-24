@@ -67,7 +67,7 @@ class _GeneratedScenario(BaseModel):
     Agent is responsible for wrapping this into Scenario domain object.
     """
     scenario_name: str = Field(min_length=1, max_length=200)
-    description: str = Field(min_length=1)
+    description: str = Field(min_length=1, max_length=300)
     priority: Priority = Priority.MEDIUM
     confidence: float = Field(ge=0.0, le=1.0, default=0.95)
     path_type: str = Field(description="Type of test path: 'happy_path', 'negative', or 'edge_case'")
@@ -155,14 +155,13 @@ class ScenarioAgent(BaseAgent):
             count=str(self.scenario_count),
         )
 
-        # Nvidia NIM serving large MoE models (e.g. DeepSeek V4.1-Flash) is
-        # slow to first token: 30s per attempt times out even on healthy keys.
-        # 60s x 2 attempts fits inside the frontend's 300s abort window.
         batch = self.llm_service.structured_generate(
             user=prompt,
             response_model=_GeneratedScenarioBatch,
-            timeout=60,
-            max_retries=2,
+            timeout=300,
+            max_retries=1,
+            num_retries=0,
+            max_tokens=max(4096, self.scenario_count * 512),
         )
 
         for item in batch.scenarios:

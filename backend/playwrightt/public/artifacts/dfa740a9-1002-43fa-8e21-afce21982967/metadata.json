@@ -1,0 +1,157 @@
+{
+  "metadata": {
+    "executionId": "dfa740a9-1002-43fa-8e21-afce21982967",
+    "projectId": "80068535-c490-4525-86ad-d3fc6f56b10c",
+    "testCaseIds": [
+      "a4e64078-81cb-4a06-aa65-0ca31aba74af"
+    ],
+    "testCycleId": null,
+    "browser": "chromium",
+    "status": "completed",
+    "started": "2026-10-24T08:03:00.178Z",
+    "browserVersion": "149.0.7827.55",
+    "finished": "2026-10-24T08:03:16.725Z",
+    "duration": 16.547
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\nconst BASE_URL = process.env.TARGET_URL || 'https://www.saucedemo.com';\nconst USERNAME = process.env.TARGET_USERNAME || 'standard_user';\nconst PASSWORD = process.env.TARGET_PASSWORD || 'secret_sauce';\n\ntest('Navigate and submit valid credentials', async ({ page }) => {\n  // Navigate to the configured target site base URL\n  console.log(\"[Timeline] Navigate: to base URL\");\n  await page.goto(BASE_URL);\n\n  // Enter the valid username into the username field\n  console.log(\"[Timeline] Enter: username into username field\");\n  await page.getByLabel('Username').fill(USERNAME);\n\n  // Enter the valid password into the password field\n  console.log(\"[Timeline] Enter: password into password field\");\n  await page.getByLabel('Password').fill(PASSWORD);\n\n  // Submit the login form\n  console.log(\"[Timeline] Click: login button\");\n  await page.getByRole('button', { name: 'Login' }).click();\n\n  // Wait for the post-login landing to complete (redirect to authenticated page)\n  console.log(\"[Timeline] Wait: for navigation to authenticated home or dashboard page\");\n  await expect(page).not.toHaveURL(BASE_URL, { timeout: 15000 });\n\n  // Assert the application accepted valid credentials and redirected away from the login page\n  console.log(\"[Timeline] Assert: user is on authenticated home or dashboard page\");\n  await expect(page).not.toHaveURL(BASE_URL);\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-10-24T08:03:00.178Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:00.198Z",
+      "time": 0.02,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:00.254Z",
+      "time": 0.076,
+      "event": "Launching browser",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:00.827Z",
+      "time": 0.649,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:00.905Z",
+      "time": 0.727,
+      "event": "Running: Navigate and submit valid credentials",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:11.405Z",
+      "time": 11.227,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:11.417Z",
+      "time": 11.239,
+      "event": "Navigate: https://www.saucedemo.com",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:13.017Z",
+      "time": 12.839,
+      "event": "Screenshot Captured",
+      "details": "step-02-type_text_getbylabel_username.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:13.027Z",
+      "time": 12.849,
+      "event": "Type text: getByLabel('Username')",
+      "details": "step-02-type_text_getbylabel_username.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:14.538Z",
+      "time": 14.359,
+      "event": "Screenshot Captured",
+      "details": "step-03-type_text_getbylabel_password.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:14.542Z",
+      "time": 14.364,
+      "event": "Type text: getByLabel('Password')",
+      "details": "step-03-type_text_getbylabel_password.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:16.120Z",
+      "time": 15.942,
+      "event": "Screenshot Captured",
+      "details": "step-04-click_getbyrole_button_name_login.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:16.135Z",
+      "time": 15.957,
+      "event": "Click: getByRole('button', { name: 'Login' })",
+      "details": "step-04-click_getbyrole_button_name_login.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:16.219Z",
+      "time": 16.041,
+      "event": "Session storage state saved",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:16.459Z",
+      "time": 16.281,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:16.570Z",
+      "time": 16.392,
+      "event": "video Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:16.577Z",
+      "time": 16.399,
+      "event": "Simulation video saved: page@27a98a57aaf06734f19cfd225085b5e3.webm",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:16.716Z",
+      "time": 16.538,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-24T08:03:16.725Z",
+      "time": 16.547,
+      "event": "Status: completed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_www_saucedemo_com.png",
+      "step-02-type_text_getbylabel_username.png",
+      "step-03-type_text_getbylabel_password.png",
+      "step-04-click_getbyrole_button_name_login.png"
+    ],
+    "logs": [],
+    "console": [
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "[error] Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    ],
+    "trace": "trace.zip",
+    "video": "page@27a98a57aaf06734f19cfd225085b5e3.webm",
+    "htmlReport": "report.html"
+  }
+}

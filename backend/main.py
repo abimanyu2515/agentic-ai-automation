@@ -1475,7 +1475,8 @@ def generate_test_cases(project_id: UUID, requirement_id: UUID):
                 jira_issue_key=getattr(tc, "jira_issue_key", None),
                 jira_issue_url=getattr(tc, "jira_issue_url", None),
                 jira_sync_status=getattr(tc, "jira_sync_status", None),
-                jira_last_synced_at=getattr(tc, "jira_last_synced_at", None)
+                jira_last_synced_at=getattr(tc, "jira_last_synced_at", None),
+                test_data_sets=tc.test_data_sets or [],
             )
             for tc in test_cases
         ]
@@ -1512,6 +1513,64 @@ def generate_test_data_tests(
         )
 
 
+@app.post(
+    "/api/v1/projects/{project_id}/requirements/{requirement_id}"
+    "/testcases/{test_case_id}/generate-testdata"
+)
+def generate_test_data_for_test_case(
+    project_id: UUID,
+    requirement_id: UUID,
+    test_case_id: UUID,
+):
+    try:
+        report, test_case = workflow_service.generate_test_data_for_test_case(
+            project_id,
+            requirement_id,
+            test_case_id,
+        )
+        return {
+            "test_data_report": report,
+            "test_case_ids": [str(test_case.id)],
+            "script_ready": bool(test_case.playwright_script),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Test-data generation for test case failed: {exc}",
+        )
+
+
+@app.post(
+    "/api/v1/projects/{project_id}/requirements/{requirement_id}"
+    "/testcases/{test_case_id}/generate-testdata-script"
+)
+def generate_test_data_script_for_test_case(
+    project_id: UUID,
+    requirement_id: UUID,
+    test_case_id: UUID,
+):
+    try:
+        test_case = workflow_service.generate_test_data_script_for_test_case(
+            project_id,
+            requirement_id,
+            test_case_id,
+        )
+        return {"test_case_ids": [str(test_case.id)]}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Playwright script generation for test case failed: {exc}",
+        )
+
+
 @app.get("/api/v1/projects/{project_id}/testcases", response_model=list[TestCaseResponse])
 def get_test_cases(project_id: UUID):
     try:
@@ -1535,7 +1594,8 @@ def get_test_cases(project_id: UUID):
                 jira_issue_key=getattr(tc, "jira_issue_key", None),
                 jira_issue_url=getattr(tc, "jira_issue_url", None),
                 jira_sync_status=getattr(tc, "jira_sync_status", None),
-                jira_last_synced_at=getattr(tc, "jira_last_synced_at", None)
+                jira_last_synced_at=getattr(tc, "jira_last_synced_at", None),
+                test_data_sets=tc.test_data_sets,
             )
             for tc in test_cases
         ]
@@ -1577,7 +1637,8 @@ def update_test_case(project_id: UUID, test_case_id: UUID, data: TestCaseUpdate)
         jira_issue_key=getattr(updated, "jira_issue_key", None),
         jira_issue_url=getattr(updated, "jira_issue_url", None),
         jira_sync_status=getattr(updated, "jira_sync_status", None),
-        jira_last_synced_at=getattr(updated, "jira_last_synced_at", None)
+        jira_last_synced_at=getattr(updated, "jira_last_synced_at", None),
+        test_data_sets=updated.test_data_sets or [],
     )
 
 

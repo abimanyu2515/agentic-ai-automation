@@ -1,4 +1,5 @@
 const API_BASE = '/api/v1';
+const TEST_CASE_GENERATION_TIMEOUT_MS = 20 * 60 * 1000;
 
 let isRefreshing = false;
 let refreshSubscribers = [];
@@ -253,9 +254,8 @@ export const API = {
     return request(`/projects/${projectId}/requirements/${requirementId}/generate-scenarios`, {
       method: 'POST',
       body: JSON.stringify({ count, mode }),
-      // Large MoE models via Nvidia NIM can take minutes to first token.
-      // Keep this above the backend's worst case (60s x 2 attempts + overhead).
-      signal: AbortSignal.timeout(300000)
+      // Allow the scenario agent's single five-minute model request to finish.
+      signal: AbortSignal.timeout(360000)
     });
   },
 
@@ -302,7 +302,7 @@ export const API = {
   async generateTestCases(projectId, requirementId) {
     return request(`/projects/${projectId}/requirements/${requirementId}/generate-testcases`, {
       method: 'POST',
-      signal: AbortSignal.timeout(300000)
+      signal: AbortSignal.timeout(TEST_CASE_GENERATION_TIMEOUT_MS)
     });
   },
 
@@ -318,6 +318,26 @@ export const API = {
       method: 'POST',
       signal: AbortSignal.timeout(300000)
     });
+  },
+
+  async generateTestDataForTestCase(projectId, requirementId, testCaseId) {
+    return request(
+      `/projects/${projectId}/requirements/${requirementId}/testcases/${testCaseId}/generate-testdata`,
+      {
+        method: 'POST',
+        signal: AbortSignal.timeout(300000)
+      }
+    );
+  },
+
+  async generateTestDataScriptForTestCase(projectId, requirementId, testCaseId) {
+    return request(
+      `/projects/${projectId}/requirements/${requirementId}/testcases/${testCaseId}/generate-testdata-script`,
+      {
+        method: 'POST',
+        signal: AbortSignal.timeout(300000)
+      }
+    );
   },
 
   async updateTestCase(projectId, testCaseId, data) {
