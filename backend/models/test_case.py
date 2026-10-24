@@ -68,5 +68,6 @@ class TestCase(BaseModel):
     jira_sync_status: str | None = None
     jira_last_synced_at: datetime | None = None
     test_data: dict[str, str] = Field(default_factory=dict)
+    test_data_sets: list[dict[str, str]] = Field(default_factory=list)
     execution_type: str = "UI Automation"
     automation_framework: str = "playwright"

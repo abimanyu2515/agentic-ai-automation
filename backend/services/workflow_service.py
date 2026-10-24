@@ -16,17 +16,30 @@ from backend.agents.defect_management_agent import DefectManagementAgent
 from backend.repository.project_repository import get_project_repository
 
 
-_test_data_generation_locks: dict[tuple[UUID, UUID], threading.Lock] = {}
+_test_data_generation_locks: dict[UUID, threading.Lock] = {}
+_test_case_generation_locks: dict[tuple[UUID, UUID], threading.Lock] = {}
 _test_data_generation_locks_guard = threading.Lock()
 
 
-def _test_data_generation_lock(project_id: UUID, requirement_id: UUID) -> threading.Lock:
-    key = (project_id, requirement_id)
+def _test_data_generation_lock(project_id: UUID) -> threading.Lock:
     with _test_data_generation_locks_guard:
-        lock = _test_data_generation_locks.get(key)
+        lock = _test_data_generation_locks.get(project_id)
         if lock is None:
             lock = threading.Lock()
-            _test_data_generation_locks[key] = lock
+            _test_data_generation_locks[project_id] = lock
+        return lock
+
+
+def _test_case_generation_lock(
+    project_id: UUID,
+    test_case_id: UUID,
+) -> threading.Lock:
+    key = (project_id, test_case_id)
+    with _test_data_generation_locks_guard:
+        lock = _test_case_generation_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _test_case_generation_locks[key] = lock
         return lock
 
 
@@ -61,9 +74,6 @@ class WorkflowService:
         if not requirement:
             raise ValueError(f"Requirement {requirement_id} not found in project {project_id}")
 
-        if mode == "replace":
-            self.repo.clear_scenarios_for_requirement(requirement_id)
-
         # New LangGraph-based Orchestration:
         from backend.graph.workflow import build_graph
         from backend.models.operation import WorkflowOperation
@@ -79,6 +89,8 @@ class WorkflowService:
         final_state = WorkflowState(**raw_result)
         
         # Persist scenarios
+        if mode == "replace":
+            self.repo.clear_scenarios_for_requirement(requirement_id)
         self.repo.save_scenarios(final_state.generated_scenarios)
         return final_state.generated_scenarios
 
@@ -151,12 +163,196 @@ class WorkflowService:
         requirement_id: UUID,
         generate_scripts: bool = True,
     ) -> tuple[dict, list[TestCase]]:
-        with _test_data_generation_lock(project_id, requirement_id):
+        with _test_data_generation_lock(project_id):
             return self._generate_test_data_test_cases(
                 project_id,
                 requirement_id,
                 generate_scripts,
             )
+
+    def generate_test_data_for_test_case(
+        self,
+        project_id: UUID,
+        requirement_id: UUID,
+        test_case_id: UUID,
+    ) -> tuple[dict, TestCase]:
+        with _test_case_generation_lock(project_id, test_case_id):
+            with _test_data_generation_lock(project_id):
+                return self._generate_test_data_for_test_case(
+                    project_id,
+                    requirement_id,
+                    test_case_id,
+                )
+
+    def _generate_test_data_for_test_case(
+        self,
+        project_id: UUID,
+        requirement_id: UUID,
+        test_case_id: UUID,
+    ) -> tuple[dict, TestCase]:
+        repo = self.repo
+        project = repo.get_project(project_id)
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+        if (project.framework or "").lower() != "playwright":
+            raise ValueError(
+                "Per-test-case test-data execution currently requires the Playwright framework"
+            )
+
+        requirement = next(
+            (item for item in repo.get_requirements(project_id) if item.id == requirement_id),
+            None,
+        )
+        if not requirement:
+            raise ValueError(f"Requirement {requirement_id} not found in project {project_id}")
+
+        test_case = repo.get_test_case(test_case_id)
+        if not test_case:
+            raise ValueError(f"Test case {test_case_id} not found")
+        if (test_case.automation_framework or "").lower() != "playwright":
+            raise ValueError(
+                "Per-test-case test-data execution requires a Playwright test case"
+            )
+        scenario = repo.get_scenario(test_case.scenario_id)
+        if not scenario or scenario.requirement_id != requirement_id:
+            raise ValueError(
+                f"Test case {test_case_id} does not belong to requirement {requirement_id}"
+            )
+
+        reserved_test_data = []
+        for related_scenario in repo.get_scenarios_for_project(project_id):
+            for related_case in repo.get_test_cases(related_scenario.id):
+                if related_case.id == test_case.id:
+                    continue
+                if related_case.test_data:
+                    reserved_test_data.append(related_case.test_data)
+                else:
+                    legacy_test_data = TestDataAgent._scenario_test_data(
+                        related_scenario
+                    )
+                    if legacy_test_data:
+                        reserved_test_data.append({
+                            key: value
+                            for key, value in legacy_test_data.items()
+                            if key not in {
+                                "test_data_id",
+                                "targeted_validation_rule",
+                                "expected_result",
+                                "test_type",
+                            }
+                        })
+                reserved_test_data.extend(related_case.test_data_sets)
+
+        state = WorkflowState(
+            requirement=requirement,
+            generated_scenarios=[scenario],
+            generated_test_cases=[test_case],
+            human_approved_test_case_ids=[test_case.id],
+            testing_context={
+                "reserved_test_data": reserved_test_data,
+                "application_context": {
+                    "name": getattr(project, "name", None),
+                    "target_url": getattr(project, "target_url", None),
+                },
+            },
+        )
+        previous_test_data_sets = [
+            dict(dataset) for dataset in test_case.test_data_sets
+        ]
+        previous_playwright_script = test_case.playwright_script
+        state = TestDataAgent().run(state)
+        if len(state.generated_test_data) != 20:
+            raise ValueError(
+                "TestDataAgent must generate exactly 20 datasets for the selected test case"
+            )
+        fingerprints = {
+            tuple(sorted(dataset.items()))
+            for dataset in test_case.test_data_sets
+        }
+        if len(test_case.test_data_sets) != 20 or len(fingerprints) != 20:
+            raise ValueError(
+                "TestDataAgent must return 20 distinct datasets for the selected test case"
+            )
+        test_case.test_data = test_case.test_data_sets[0]
+        datasets_unchanged = (
+            previous_test_data_sets == test_case.test_data_sets
+        )
+        script_matches_datasets = (
+            bool(previous_playwright_script)
+            and previous_playwright_script.count("test(") == 20
+            and all(
+                f"TD-{test_case.id.hex[:8].upper()}-{index:02d}"
+                in previous_playwright_script
+                for index in range(1, 21)
+            )
+        )
+        test_case.playwright_script = (
+            previous_playwright_script
+            if datasets_unchanged and script_matches_datasets
+            else None
+        )
+        repo.save_test_cases([test_case])
+
+        return state.test_data_report or {}, test_case
+
+    def generate_test_data_script_for_test_case(
+        self,
+        project_id: UUID,
+        requirement_id: UUID,
+        test_case_id: UUID,
+    ) -> TestCase:
+        with _test_case_generation_lock(project_id, test_case_id):
+            repo = self.repo
+            project = repo.get_project(project_id)
+            if not project:
+                raise ValueError(f"Project {project_id} not found")
+            if (project.framework or "").lower() != "playwright":
+                raise ValueError(
+                    "Per-test-case script generation currently requires the Playwright framework"
+                )
+
+            requirement = next(
+                (item for item in repo.get_requirements(project_id) if item.id == requirement_id),
+                None,
+            )
+            if not requirement:
+                raise ValueError(
+                    f"Requirement {requirement_id} not found in project {project_id}"
+                )
+            test_case = repo.get_test_case(test_case_id)
+            if not test_case:
+                raise ValueError(f"Test case {test_case_id} not found")
+            scenario = repo.get_scenario(test_case.scenario_id)
+            if not scenario or scenario.requirement_id != requirement_id:
+                raise ValueError(
+                    f"Test case {test_case_id} does not belong to requirement {requirement_id}"
+                )
+            fingerprints = {
+                tuple(sorted(dataset.items()))
+                for dataset in test_case.test_data_sets
+            }
+            if len(test_case.test_data_sets) != 20 or len(fingerprints) != 20:
+                raise ValueError(
+                    "Generate 20 unique datasets for this test case before creating its script"
+                )
+
+            state = WorkflowState(
+                requirement=requirement,
+                generated_scenarios=[scenario],
+                generated_test_cases=[test_case],
+                human_approved_test_case_ids=[test_case.id],
+            )
+            PlaywrightAgent(
+                repo=repo,
+                max_workers=1,
+                test_data_template=True,
+            ).run(state)
+            if not test_case.playwright_script:
+                raise ValueError(
+                    f"PlaywrightAgent did not generate a script for '{test_case.title}'"
+                )
+            repo.save_test_cases([test_case])
+            return test_case
 
     def _generate_test_data_test_cases(
         self,

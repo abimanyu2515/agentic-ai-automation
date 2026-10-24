@@ -1,8 +1,14 @@
 import pytest
 
-from backend.agents.test_data_agent import TestDataAgent
+from backend.agents.test_data_agent import (
+    TestCaseDataBatchResponse,
+    TestCaseDataResponse,
+    TestDataAgent,
+)
 from backend.models.requirement import Requirement
+from backend.models.scenario import Scenario
 from backend.models.state import WorkflowState
+from backend.models.test_case import TestCase
 
 
 def test_test_data_agent_requires_requirement():
@@ -79,3 +85,397 @@ def test_test_data_agent_detects_human_readable_field_names():
         "confirm_password",
         "accept_terms",
     ]
+
+
+def test_test_data_agent_retries_duplicate_llm_batches_for_unsupported_rule():
+    requirement = Requirement(
+        title="User registration",
+        description="Users register with a contact phone number.",
+        business_rules=[
+            "Phone numbers must use a supported international format."
+        ],
+    )
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Reject invalid phone",
+        description="Reject a phone number that does not use a supported format.",
+    )
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Invalid phone number",
+        steps=["Enter an unsupported phone number", "Submit the form"],
+        expected_result="Phone validation error is shown",
+    )
+    def batch(start):
+        return TestCaseDataBatchResponse(
+            datasets=[
+                TestCaseDataResponse(
+                    test_data={
+                        "phone": (
+                            "invalid-phone" if start == 0 and index == 0
+                            else f"invalid-{start + index}"
+                        ),
+                    },
+                    targeted_validation_rule="Phone number must use a supported international format.",
+                    test_type="invalid",
+                )
+                for index in range(20)
+            ]
+        )
+
+    responses = [batch(0), batch(100)]
+
+    class StubLLMService:
+        def __init__(self):
+            self.prompts = []
+            self.options = []
+
+        def structured_generate(self, *, user, response_model, **kwargs):
+            assert response_model is TestCaseDataBatchResponse
+            self.prompts.append(user)
+            self.options.append(kwargs)
+            return responses.pop(0)
+
+    llm_service = StubLLMService()
+    state = WorkflowState(
+        requirement=requirement,
+        generated_scenarios=[scenario],
+        generated_test_cases=[test_case],
+        testing_context={
+            "reserved_test_data": [
+                {"phone": "invalid-phone"}
+            ]
+        },
+    )
+
+    result = TestDataAgent(llm_service=llm_service).run(state)
+
+    assert len(llm_service.prompts) == 2
+    assert llm_service.options == [
+        {"max_retries": 1, "timeout": 240},
+        {"max_retries": 1, "timeout": 240},
+    ]
+    assert "unsupported phone number" in llm_service.prompts[0]
+    assert len(result.generated_test_data) == 20
+    assert len(result.test_data_report["sample_dataset"]["rows"]) == 20
+    assert len(result.generated_test_cases[0].test_data_sets) == 20
+    assert len({
+        TestDataAgent._dataset_fingerprint(dataset)
+        for dataset in result.generated_test_cases[0].test_data_sets
+    }) == 20
+    assert result.generated_test_data[0]["phone"] == "invalid-100"
+    assert result.test_data_report["context_understood"]["expected_result"] == test_case.expected_result
+    assert result.test_data_report["context_understood"]["unique_for_test_case"] is True
+
+
+def test_test_data_agent_generates_numeric_password_data_from_existing_test_data():
+    requirement = Requirement(
+        title="User registration",
+        description="Register with an email address and password.",
+        business_rules=[
+            "Password must include at least one letter and one symbol."
+        ],
+    )
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Reject numeric-only password",
+        description="Reject a password containing only numeric characters.",
+    )
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Test data TD-016: invalid",
+        steps=["Submit a password containing only digits"],
+        expected_result="Password is rejected",
+        test_data={
+            "test_data_id": "TD-016",
+            "email": "user@example.test",
+            "password": "12345678",
+            "targeted_validation_rule": "Password contains only numeric characters.",
+            "expected_result": "Password is rejected",
+            "test_type": "invalid",
+        },
+    )
+
+    class UnusedLLMService:
+        def structured_generate(self, **kwargs):
+            raise AssertionError("Recognized numeric-password data should be generated locally")
+
+    state = WorkflowState(
+        requirement=requirement,
+        generated_scenarios=[scenario],
+        generated_test_cases=[test_case],
+        testing_context={
+            "reserved_test_data": [
+                {"email": "user@example.test", "password": f"{index:08d}"}
+                for index in range(1, 21)
+            ]
+        },
+    )
+
+    result = TestDataAgent(llm_service=UnusedLLMService()).run(state)
+
+    datasets = test_case.test_data_sets
+    assert len(datasets) == 20
+    assert len({TestDataAgent._dataset_fingerprint(dataset) for dataset in datasets}) == 20
+    assert all(dataset["password"].isdigit() for dataset in datasets)
+    assert all(dataset["email"] == "user@example.test" for dataset in datasets)
+    assert all(
+        set(dataset) == {"email", "password"}
+        for dataset in datasets
+    )
+    assert {
+        TestDataAgent._dataset_fingerprint(dataset) for dataset in datasets
+    }.isdisjoint({
+        TestDataAgent._dataset_fingerprint(dataset)
+        for dataset in state.testing_context["reserved_test_data"]
+    })
+    assert result.test_data_report["context_understood"]["number_of_datasets"] == 20
+
+
+@pytest.mark.parametrize(
+    ("title", "steps", "expected_result", "changed_field", "target_rule"),
+    [
+        (
+            "Login rejects an invalid username",
+            ["Enter an unknown username", "Enter a valid password", "Submit"],
+            "Username is rejected",
+            "username",
+            "Unknown usernames must be rejected.",
+        ),
+        (
+            "Login requires an empty username",
+            ["Leave username empty", "Enter a password", "Submit"],
+            "Username required message is displayed",
+            "username",
+            "Username is required and cannot be empty.",
+        ),
+        (
+            "Login rejects an invalid password",
+            ["Enter a valid username", "Enter an incorrect password", "Submit"],
+            "Password is rejected",
+            "password",
+            "Incorrect passwords must be rejected.",
+        ),
+        (
+            "Login requires an empty password",
+            ["Enter a username", "Leave password empty", "Submit"],
+            "Password required message is displayed",
+            "password",
+            "Password is required and cannot be empty.",
+        ),
+    ],
+)
+def test_login_case_generation_targets_only_the_selected_validation(
+    title,
+    steps,
+    expected_result,
+    changed_field,
+    target_rule,
+):
+    requirement = Requirement(
+        title="Swag Labs login",
+        description="Validate the login form for the selected case.",
+    )
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name=title,
+        description="Use the configured Swag Labs login form.",
+    )
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title=title,
+        steps=steps,
+        expected_result=expected_result,
+        test_data={"username": "standard_user", "password": "vault-managed"},
+    )
+
+    class UnusedLLMService:
+        def structured_generate(self, **kwargs):
+            raise AssertionError("Recognized login validation cases should use local data")
+
+    result = TestDataAgent(llm_service=UnusedLLMService()).run(
+        WorkflowState(
+            requirement=requirement,
+            generated_scenarios=[scenario],
+            generated_test_cases=[test_case],
+        )
+    )
+
+    datasets = test_case.test_data_sets
+    assert len(datasets) == 20
+    assert len({TestDataAgent._dataset_fingerprint(dataset) for dataset in datasets}) == 20
+    assert all(
+        dataset[changed_field] == ""
+        for dataset in datasets
+    ) if "empty" in title else len({
+        dataset[changed_field] for dataset in datasets
+    }) == 20
+    if "empty" in title:
+        varied_field = "password" if changed_field == "username" else "username"
+        assert len({dataset[varied_field] for dataset in datasets}) == 20
+    else:
+        unchanged_field = "password" if changed_field == "username" else "username"
+        safe_value = (
+            "synthetic-password"
+            if unchanged_field == "password"
+            else "synthetic-user"
+        )
+        assert all(
+            dataset[unchanged_field] == safe_value
+            for dataset in datasets
+        )
+    assert all(
+        row["targeted_validation_rule"] == target_rule
+        for row in result.generated_test_data
+    )
+
+
+def test_generic_invalid_login_does_not_assume_numeric_password_rule():
+    requirement = Requirement(title="Login", description="Validate user login.")
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Reject invalid login",
+        description="Reject an invalid login attempt.",
+    )
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Invalid login",
+        steps=["Enter login details", "Submit"],
+        expected_result="Login is rejected",
+        test_data={"username": "unknown-user", "password": "incorrect-password"},
+    )
+
+    class StubLLMService:
+        def structured_generate(self, **kwargs):
+            return TestCaseDataBatchResponse(
+                datasets=[
+                    TestCaseDataResponse(
+                        test_data={
+                            "username": f"unknown-user-{index:02d}",
+                            "password": f"incorrect-password-{index:02d}",
+                        },
+                        targeted_validation_rule="Invalid login credentials are rejected.",
+                        test_type="invalid",
+                    )
+                    for index in range(1, 21)
+                ]
+            )
+
+    result = TestDataAgent(llm_service=StubLLMService()).run(
+        WorkflowState(
+            requirement=requirement,
+            generated_scenarios=[scenario],
+            generated_test_cases=[test_case],
+        )
+    )
+
+    assert len(result.generated_test_data) == 20
+    assert all(
+        dataset["targeted_validation_rule"]
+        == "Invalid login credentials are rejected."
+        for dataset in result.generated_test_data
+    )
+
+
+def test_test_data_agent_reads_legacy_row_from_scenario_for_generic_invalid_case():
+    requirement = Requirement(
+        title="User registration",
+        description="Register with a name, email, password, and terms acceptance.",
+    )
+    legacy_row = {
+        "test_data_id": "TD-016",
+        "full_name": "Synthetic User",
+        "email": "user@example.test",
+        "password": "ValidPass1!",
+        "confirm_password": "ValidPass1!",
+        "accept_terms": "true",
+        "expected_result": "rejected_validation_error",
+        "test_type": "invalid",
+    }
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Test data TD-016: invalid",
+        description=(
+            f"Exercise the requirement with the generated input data TD-016: "
+            f"{legacy_row}. Expected result: rejected_validation_error."
+        ),
+        path_type="invalid",
+    )
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Test data TD-016: invalid",
+        steps=[scenario.description],
+        expected_result="Registration is rejected with a validation error.",
+    )
+
+    class UnusedLLMService:
+        def structured_generate(self, **kwargs):
+            raise AssertionError("The legacy invalid password case should use local data")
+
+    result = TestDataAgent(llm_service=UnusedLLMService()).run(
+        WorkflowState(
+            requirement=requirement,
+            generated_scenarios=[scenario],
+            generated_test_cases=[test_case],
+        )
+    )
+
+    assert len(result.generated_test_data) == 20
+    assert len(test_case.test_data_sets) == 20
+    assert all(dataset["password"].isdigit() for dataset in test_case.test_data_sets)
+    assert all(
+        dataset["confirm_password"] == dataset["password"]
+        for dataset in test_case.test_data_sets
+    )
+    assert all(
+        dataset["email"] == legacy_row["email"]
+        and dataset["full_name"] == legacy_row["full_name"]
+        and dataset["accept_terms"] == "true"
+        for dataset in test_case.test_data_sets
+    )
+    assert all(
+        set(dataset) == {"full_name", "email", "password", "confirm_password", "accept_terms"}
+        for dataset in test_case.test_data_sets
+    )
+
+
+def test_test_data_agent_fails_when_llm_cannot_generate_unique_unsupported_data():
+    requirement = Requirement(title="User registration", description="Register a user.")
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Invalid phone",
+        description="Reject unsupported phone numbers.",
+    )
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Reject unsupported phone",
+        steps=["Enter an unsupported phone number", "Submit"],
+        expected_result="Phone validation error is shown",
+    )
+    duplicate = TestCaseDataBatchResponse(
+        datasets=[
+            TestCaseDataResponse(
+                test_data={"phone": "invalid-phone"},
+                targeted_validation_rule="Phone number must use a supported format.",
+                test_type="invalid",
+            )
+            for _ in range(20)
+        ]
+    )
+
+    class StubLLMService:
+        calls = 0
+
+        def structured_generate(self, **kwargs):
+            self.calls += 1
+            return duplicate
+
+    state = WorkflowState(
+        requirement=requirement,
+        generated_scenarios=[scenario],
+        generated_test_cases=[test_case],
+        testing_context={"reserved_test_data": [{"phone": "invalid-phone"}]},
+    )
+
+    with pytest.raises(ValueError, match="could not generate 20 unique datasets"):
+        TestDataAgent(llm_service=StubLLMService()).run(state)

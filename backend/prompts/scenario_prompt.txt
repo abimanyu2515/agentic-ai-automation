@@ -23,7 +23,7 @@ Respond with ONLY a JSON object in exactly this shape, with no extra text before
   "scenarios": [
     {
       "scenario_name": "short name, 3-6 words",
-      "description": "one or two sentences describing what this scenario tests",
+      "description": "one concise sentence of at most 25 words describing what this scenario tests",
       "priority": "low",
       "confidence": 0.95,
       "path_type": "happy_path"

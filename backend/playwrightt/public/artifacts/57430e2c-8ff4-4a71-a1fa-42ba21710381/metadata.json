@@ -1,0 +1,167 @@
+{
+  "metadata": {
+    "executionId": "57430e2c-8ff4-4a71-a1fa-42ba21710381",
+    "projectId": "46ed48f2-487f-4f22-971a-b919aab21a1a",
+    "testCaseIds": [
+      "2f23ed26-0891-4858-b92e-e09290523828"
+    ],
+    "testCycleId": "637f3abe-9f18-4952-a658-eb13bbcacdb1",
+    "browser": "chromium",
+    "status": "failed",
+    "started": "2026-10-22T09:47:31.472Z",
+    "finished": "2026-10-22T11:29:54.512Z",
+    "duration": 6143.04
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\nconst test_data = {\n  full_name: \"Karen Wang\",\n  email: \"karen@example.com\",\n  password: \"C0mplex!9\",\n  confirm_password: \"C0mplex!9\",\n  accept_terms: \"true\"\n};\n\ntest('Test data TD-011: boundary', async ({ page }) => {\n  console.log(\"[Timeline] Navigation: goto https://www.saucedemo.com\");\n  await page.goto(\"https://www.saucedemo.com\");\n\n  // Step 1: Complete the requirement workflow using the supplied test_data values.\n\n  // TODO: locate and fill full name field\n  console.log(\"[Timeline] Fill: Full Name\");\n  // await page.locator('TODO_SELECTOR').fill(test_data.full_name);\n\n  // TODO: locate and fill email field\n  console.log(\"[Timeline] Fill: Email\");\n  // await page.locator('TODO_SELECTOR').fill(test_data.email);\n\n  // TODO: locate and fill password field\n  console.log(\"[Timeline] Fill: Password\");\n  // await page.locator('TODO_SELECTOR').fill(test_data.password);\n\n  // TODO: locate and fill confirm password field\n  console.log(\"[Timeline] Fill: Confirm Password\");\n  // await page.locator('TODO_SELECTOR').fill(test_data.confirm_password);\n\n  // TODO: locate and set accept terms checkbox\n  console.log(\"[Timeline] Set: Accept Terms\");\n  // await page.locator('TODO_SELECTOR').check();\n\n  // Step 2: Verify the expected_result for the supplied test_data values.\n  console.log(\"[Timeline] Verify expected result\");\n  await expect(page.getByText('accepted_on_boundary')).toBeVisible();\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-10-22T09:47:31.472Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T09:47:31.485Z",
+      "time": 0.013,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T09:47:31.624Z",
+      "time": 0.152,
+      "event": "Session restored from storage state",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:47:31.804Z",
+      "time": 0.332,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:47:31.818Z",
+      "time": 0.346,
+      "event": "Running: Test data TD-011: boundary",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T09:47:33.970Z",
+      "time": 2.498,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:47:33.973Z",
+      "time": 2.501,
+      "event": "Navigate: https://www.saucedemo.com",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:47:39.008Z",
+      "time": 7.536,
+      "event": "Failure detected: \"locator.waitFor: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('accepted_on_boundary') to be visible\u001b[22m\n\". Recovery action: retry",
+      "type": "warning"
+    },
+    {
+      "timestamp": "2026-10-22T09:47:39.078Z",
+      "time": 7.606,
+      "event": "Retrying execution (Attempt 1)...",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T09:47:39.082Z",
+      "time": 7.61,
+      "event": "Session restored from storage state",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:47:39.237Z",
+      "time": 7.765,
+      "event": "Browser opened with clean context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:47:39.250Z",
+      "time": 7.778,
+      "event": "Running: Test data TD-011: boundary",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T09:47:44.475Z",
+      "time": 13.003,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:47:44.479Z",
+      "time": 13.007,
+      "event": "Navigate: https://www.saucedemo.com",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T10:13:53.762Z",
+      "time": 1582.29,
+      "event": "Screenshot Captured",
+      "details": "error-2026-10-22T10-13-53.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T10:13:53.773Z",
+      "time": 1582.301,
+      "event": "Screenshot captured on error: error-2026-10-22T10-13-53.png",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-22T10:13:54.038Z",
+      "time": 1582.566,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:29:54.503Z",
+      "time": 6143.031,
+      "event": "video Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:29:54.508Z",
+      "time": 6143.036,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T11:29:54.510Z",
+      "time": 6143.038,
+      "event": "Error Occurred",
+      "details": "locator.waitFor: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('accepted_on_boundary') to be visible\u001b[22m\n",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-22T11:29:54.512Z",
+      "time": 6143.04,
+      "event": "Status: failed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_www_saucedemo_com.png",
+      "step-01-navigate_https_www_saucedemo_com.png",
+      "error-2026-10-22T10-13-53.png"
+    ],
+    "logs": [],
+    "console": [
+      "[error] Failed to load resource: net::ERR_NETWORK_IO_SUSPENDED",
+      "[error] Failed to load resource: net::ERR_NETWORK_IO_SUSPENDED",
+      "[error] Failed to load resource: net::ERR_NETWORK_IO_SUSPENDED"
+    ],
+    "trace": "trace.zip",
+    "video": "page@4366e8d0137a44d48c0e1cf0b69233e8.webm",
+    "htmlReport": "report.html"
+  },
+  "error": "locator.waitFor: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('accepted_on_boundary') to be visible\u001b[22m\n"
+}

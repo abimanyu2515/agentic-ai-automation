@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
@@ -54,6 +55,87 @@ def test_create_and_list_projects(client):
     projs = response.json()
     assert len(projs) == 1
     assert projs[0]["id"] == proj["id"]
+
+
+def test_generate_test_data_script_endpoint(client, monkeypatch):
+    from backend.main import workflow_service
+    from types import SimpleNamespace
+
+    project_id = uuid4()
+    requirement_id = uuid4()
+    test_case_id = uuid4()
+    monkeypatch.setattr(
+        workflow_service,
+        "generate_test_data_script_for_test_case",
+        lambda requested_project_id, requested_requirement_id, requested_test_case_id: (
+            SimpleNamespace(id=test_case_id)
+        ),
+    )
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/requirements/{requirement_id}"
+        f"/testcases/{test_case_id}/generate-testdata-script"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"test_case_ids": [str(test_case_id)]}
+
+
+def test_generate_test_data_endpoint_reports_matching_script_readiness(client, monkeypatch):
+    from backend.main import workflow_service
+    from types import SimpleNamespace
+
+    project_id = uuid4()
+    requirement_id = uuid4()
+    test_case_id = uuid4()
+    report = {"sample_dataset": {"rows": [{"test_data_id": "TD-001"}]}}
+    monkeypatch.setattr(
+        workflow_service,
+        "generate_test_data_for_test_case",
+        lambda requested_project_id, requested_requirement_id, requested_test_case_id: (
+            report,
+            SimpleNamespace(id=test_case_id, playwright_script="matching script"),
+        ),
+    )
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/requirements/{requirement_id}"
+        f"/testcases/{test_case_id}/generate-testdata"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "test_data_report": report,
+        "test_case_ids": [str(test_case_id)],
+        "script_ready": True,
+    }
+
+
+def test_get_test_cases_includes_persisted_test_data_sets(client, monkeypatch):
+    from backend.main import project_service
+    from backend.models.scenario import Scenario
+    from backend.models.test_case import TestCase
+
+    test_case = TestCase(
+        scenario_id=uuid4(),
+        title="Login rejects invalid username",
+        steps=["Enter invalid username", "Submit"],
+        expected_result="Username is rejected",
+        test_data_sets=[
+            {"username": f"invalid-user-{index:02d}", "password": "vault-managed"}
+            for index in range(1, 21)
+        ],
+    )
+    monkeypatch.setattr(
+        project_service,
+        "get_test_cases_for_project",
+        lambda project_id: [test_case],
+    )
+
+    response = client.get(f"/api/v1/projects/{uuid4()}/testcases")
+
+    assert response.status_code == 200
+    assert response.json()[0]["test_data_sets"] == test_case.test_data_sets
 
 
 def test_create_and_get_requirements(client):

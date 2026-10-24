@@ -1,0 +1,42 @@
+Create exactly 20 synthetic input datasets for the selected test case.
+
+Requirement:
+Title: $requirement_title
+Description: $requirement_description
+
+Configured application context:
+$application_context
+
+Explicit functional requirements, business rules, and acceptance criteria:
+$validation_rules
+
+Related scenario:
+$scenario
+
+Selected test case:
+$test_case
+
+Previously-used dataset fingerprints (do not reproduce any):
+$reserved_dataset_fingerprints
+
+Uniqueness nonce for this generation attempt: $uniqueness_nonce
+
+Instructions:
+- All 20 datasets must exercise the behavior in this one selected test case. Do not generate data for any other test case.
+- Use the selected test case's title, preconditions, steps, and expected result to identify the exact behavior being tested.
+- For login cases, vary only the field or scenario targeted by the selected case (for example, invalid username, invalid password, empty username, empty password, or valid login). Keep the other fields appropriate to the selected case.
+- Never invent or include real application credentials. Use synthetic login values only; if the selected case requires valid account credentials that are not supplied in its approved test data, state that limitation in assumptions.
+- Choose fields and values from the supplied requirement and test-case information. Keep unrelated values valid when testing one invalid field.
+- For a negative password test, generate 20 different passwords that violate the exact stated rule, such as numeric-only passwords or lengths outside a documented limit. Do not use the same invalid value repeatedly.
+- For boundary tests, cover documented boundaries and nearby values; do not invent limits.
+- Make every dataset distinct from the other 19 and from every reserved fingerprint. Vary unconstrained synthetic values as needed without weakening the validation condition under test.
+- Keep the same field names in all 20 datasets. Use an empty string for a field deliberately testing a missing value.
+- Use synthetic values only. Do not include real personal information, credentials, or secrets.
+- Do not invent validation rules. State unknowns in assumptions.
+- Return only a JSON object with a "datasets" array containing exactly 20 objects. Each object must match:
+{
+  "test_data": {"field_name": "synthetic value"},
+  "targeted_validation_rule": "The exact rule exercised",
+  "test_type": "positive, invalid, boundary, missing_required, or workflow",
+  "assumptions": []
+}

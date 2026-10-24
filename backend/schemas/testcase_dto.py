@@ -36,6 +36,7 @@ class TestCaseResponse(BaseModel):
     jira_issue_url: str | None = None
     jira_sync_status: str | None = None
     jira_last_synced_at: datetime | None = None
+    test_data_sets: list[dict[str, str]] = Field(default_factory=list)
 
 
 class ScriptUpdatePayload(BaseModel):

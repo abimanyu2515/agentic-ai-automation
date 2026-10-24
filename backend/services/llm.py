@@ -34,6 +34,10 @@ _PROVIDER_PREFIXES: dict[str, str] = {
     "gemini": "gemini/",
 }
 
+_DEFAULT_API_BASES: dict[str, str] = {
+    "nvidia": "https://integrate.api.nvidia.com/v1",
+}
+
 # How each provider is told "respond with JSON". These are NOT
 # interchangeable: OpenAI (and OpenAI-compatible providers like Groq) use
 # response_format={"type": "json_object"}; Ollama's own JSON mode is a
@@ -104,6 +108,9 @@ class LLMService:
         prefix = _PROVIDER_PREFIXES.get(self.config.provider, "")
         return f"{prefix}{self.config.model}"
 
+    def _api_base(self) -> str | None:
+        return self.config.api_base or _DEFAULT_API_BASES.get(self.config.provider)
+
     def _json_mode_kwargs(self) -> dict:
         return _JSON_MODE_KWARGS.get(self.config.provider, _DEFAULT_JSON_MODE_KWARGS)
     
@@ -113,8 +120,9 @@ class LLMService:
             "temperature": self.config.temperature,
         }
 
-        if self.config.api_base:
-            kwargs["api_base"] = self.config.api_base
+        api_base = self._api_base()
+        if api_base:
+            kwargs["api_base"] = api_base
 
         if self.config.api_key:
             kwargs["api_key"] = self.config.api_key
@@ -142,7 +150,7 @@ class LLMService:
             response = completion(
                 model=self._model_string(),
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-                api_base=self.config.api_base,
+                api_base=self._api_base(),
                 api_key=self.config.api_key,
                 timeout=timeout,
                 **kwargs,
@@ -185,7 +193,7 @@ class LLMService:
                     response = completion(
                         model=self._model_string(),
                         messages=[{"role": "system", "content": system}, {"role": "user", "content": user_prompt}],
-                        api_base=self.config.api_base,
+                        api_base=self._api_base(),
                         api_key=self.config.api_key,
                         timeout=timeout,
                         **self._json_mode_kwargs(),
@@ -194,7 +202,16 @@ class LLMService:
                 except Exception as exc:
                     raise LLMServiceError(f"LLM call failed ({self.config.provider}/{self.config.model}): {exc}") from exc
 
-                content = response.choices[0].message.content.strip()
+                choice = response.choices[0]
+                content = getattr(choice.message, "content", None)
+                if not isinstance(content, str) or not content.strip():
+                    finish_reason = getattr(choice, "finish_reason", None)
+                    raise LLMServiceError(
+                        "LLM returned empty response content "
+                        f"(finish_reason={finish_reason!r}); the selected model may have "
+                        "used its output-token budget before producing a final answer"
+                    )
+                content = content.strip()
                 last_content = content
                 # Strip markdown fences if present
                 if content.startswith("```"):
@@ -269,8 +286,16 @@ class LLMService:
                 return response_model.model_validate_json(content)
             except Exception as exc:
                 last_exception = exc
+                retry_message = (
+                    "Retrying..."
+                    if attempt < max_retries - 1
+                    else "No attempts remain."
+                )
                 logger.warning(
-                    f"structured_generate attempt {attempt + 1} failed: {exc}. Retrying..."
+                    "structured_generate attempt %s failed: %s. %s",
+                    attempt + 1,
+                    exc,
+                    retry_message,
                 )
                 if attempt < max_retries - 1:
                     time.sleep(1)
@@ -279,6 +304,15 @@ class LLMService:
         logger.warning(
             "structured_generate raw output (first 2000 chars): %s", last_content[:2000]
         )
+        if isinstance(last_exception, LLMServiceError):
+            if str(last_exception).startswith("LLM call failed"):
+                raise LLMServiceError(
+                    f"{last_exception} after {max_retries} attempt(s), "
+                    f"with a {timeout}s timeout per attempt"
+                ) from last_exception
+            raise LLMServiceError(
+                f"{last_exception} after {max_retries} attempt(s)"
+            ) from last_exception
         raise LLMServiceError(
             f"LLM response did not match {response_model.__name__} after {max_retries} attempts: {last_exception}\nRaw content: {last_content}"
-        )
+        ) from last_exception

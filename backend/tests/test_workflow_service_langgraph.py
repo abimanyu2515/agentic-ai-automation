@@ -47,6 +47,27 @@ def test_generate_scenarios_via_langgraph(mock_llm_service):
     assert len(stored) == 3
 
 
+def test_replace_scenarios_preserves_existing_data_when_generation_fails(monkeypatch):
+    ws = WorkflowService()
+    project = ws.repo.create_project("Scenario Failure Project", "Testing replacement")
+    req = ws.repo.create_requirement(project.id, "Req Title", "Req Description", "high", "finance")
+    existing = Scenario(
+        requirement_id=req.id,
+        scenario_name="Existing scenario",
+        description="Keep this if generation fails",
+    )
+    ws.repo.save_scenarios([existing])
+    monkeypatch.setattr(
+        "backend.graph.workflow.build_graph",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("model unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="model unavailable"):
+        ws.generate_scenarios(project.id, req.id, count=3, mode="replace")
+
+    assert ws.repo.get_scenarios(req.id) == [existing]
+
+
 def test_generate_test_cases_via_langgraph(mock_llm_service):
     ws = WorkflowService()
     project = ws.repo.create_project("LangGraph Project", "Testing LangGraph integration")

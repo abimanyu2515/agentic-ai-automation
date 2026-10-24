@@ -52,9 +52,11 @@ window.toggleTestCaseRow = (id) => {
     if (detailRow.style.display === 'none') {
       detailRow.style.display = 'table-row';
       if (caret) caret.style.transform = 'rotate(90deg)';
+      window.appInstance?.expandedTestCaseIds?.add(id);
     } else {
       detailRow.style.display = 'none';
       if (caret) caret.style.transform = 'rotate(0deg)';
+      window.appInstance?.expandedTestCaseIds?.delete(id);
     }
   }
 };
@@ -275,7 +277,7 @@ export const Components = {
         
         <tr id="expanded-row-${sc.id}" style="display: none; background-color: rgba(255, 255, 255, 0.01);">
           <td></td>
-          <td colspan="6" style="padding: 16px 24px; border-top: 1px dashed var(--border-color); border-bottom: 1px solid var(--border-color);">
+          <td colspan="${handlers.onGenerateTestDataAndRun ? 8 : 7}" style="padding: 16px 24px; border-top: 1px dashed var(--border-color); border-bottom: 1px solid var(--border-color);">
             <div style="display: flex; flex-direction: column; gap: 16px;">
               
               <!-- Description / Gherkin Steps -->
@@ -436,7 +438,7 @@ export const Components = {
           </td>
           <td style="font-weight: 600; min-width: 200px;">
             <div style="display: flex; align-items: center; gap: 8px;">
-              <span id="tc-caret-${tc.id}" style="display: inline-block; transition: transform var(--transition-fast); transform: rotate(0deg); color: var(--text-secondary);">▶</span>
+              <span id="tc-caret-${tc.id}" style="display: inline-block; transition: transform var(--transition-fast); transform: rotate(${window.appInstance?.expandedTestCaseIds?.has(tc.id) ? '90deg' : '0deg'}); color: var(--text-secondary);">▶</span>
               <span class="tc-title-text" id="tc-title-txt-${tc.id}">${escapeHTML(tc.title)}</span>
             </div>
             <input type="text" class="form-control" id="tc-title-in-${tc.id}" value="${escapeHTML(tc.title)}" style="display: none; padding: 4px 8px; font-size: 0.85rem;" onclick="event.stopPropagation();" />
@@ -471,11 +473,22 @@ export const Components = {
               <span style="color: var(--text-muted); font-size: 0.8rem;">Review Pending</span>
             `}
           </td>
+          ${handlers.onGenerateTestData ? `
+            <td onclick="event.stopPropagation();">
+              <button
+                class="btn btn-primary btn-generate-testdata-case"
+                type="button"
+                data-test-case-id="${tc.id}"
+                style="padding: 6px 12px; font-size: 0.8rem; white-space: nowrap;"
+                ${window.appInstance?.testDataAgentRunning || window.appInstance?.generatingTestDataCaseIds?.has(tc.id) ? 'disabled' : ''}
+              >Generate Test Data</button>
+            </td>
+          ` : ''}
         </tr>
 
-        <tr id="tc-expanded-row-${tc.id}" style="display: none; background-color: rgba(255, 255, 255, 0.01);">
+        <tr id="tc-expanded-row-${tc.id}" style="display: ${window.appInstance?.expandedTestCaseIds?.has(tc.id) ? 'table-row' : 'none'}; background-color: rgba(255, 255, 255, 0.01);">
           <td></td>
-          <td colspan="6" style="padding: 16px 24px; border-top: 1px dashed var(--border-color); border-bottom: 1px solid var(--border-color);">
+          <td colspan="${handlers.onGenerateTestData ? 8 : 7}" style="padding: 16px 24px; border-top: 1px dashed var(--border-color); border-bottom: 1px solid var(--border-color);">
             <div style="display: flex; flex-direction: column; gap: 16px;">
               
               <!-- Preconditions -->
@@ -503,6 +516,32 @@ export const Components = {
                 <div class="tc-expected-text" id="tc-expected-txt-${tc.id}" style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5;">${escapeHTML(tc.expected_result)}</div>
                 <textarea class="form-control" id="tc-expected-in-${tc.id}" style="display: none; padding: 8px; font-size: 0.85rem; width: 100%; min-height: 60px;">${escapeHTML(tc.expected_result)}</textarea>
               </div>
+
+              ${tc.test_data_sets?.length ? `
+                <div style="border-top: 1px solid var(--border-color); padding-top: 12px;">
+                  <h4 style="font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; letter-spacing: 0.5px;">
+                    Generated Test Data (${tc.test_data_sets.length})
+                  </h4>
+                  <div class="table-container" style="max-height: 320px; overflow: auto;">
+                    <table class="custom-table">
+                      <thead>
+                        <tr>
+                          <th>Dataset</th>
+                          ${Object.keys(tc.test_data_sets[0]).map(field => `<th>${escapeHTML(field)}</th>`).join('')}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${tc.test_data_sets.map((dataset, index) => `
+                          <tr>
+                            <td>TD-${tc.id.slice(0, 8).toUpperCase()}-${String(index + 1).padStart(2, '0')}</td>
+                            ${Object.keys(tc.test_data_sets[0]).map(field => `<td>${escapeHTML(String(dataset[field] ?? ''))}</td>`).join('')}
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ` : ''}
 
               <!-- Playwright Script / JIRA Integration -->
               <div style="border-top: 1px solid var(--border-color); padding-top: 12px; display: flex; gap: 32px; flex-wrap: wrap;">
@@ -599,6 +638,7 @@ export const Components = {
               <th>Confidence</th>
               <th>Golden Dataset %</th>
               <th>Status</th>
+              ${handlers.onGenerateTestData ? '<th>Actions</th>' : ''}
             </tr>
           </thead>
           <tbody>

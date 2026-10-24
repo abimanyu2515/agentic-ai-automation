@@ -278,6 +278,58 @@ def test_test_data_template_retries_once_when_model_omits_a_data_marker():
     assert any("retrying template generation once" in log for log in result.logs)
 
 
+def test_test_data_template_expands_selected_case_to_20_distinct_playwright_tests():
+    requirement = Requirement(title="Registration", description="Register with a password.")
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Reject numeric-only password",
+        description="Reject passwords containing only digits.",
+        path_type="negative",
+    )
+    datasets = [
+        {"password": f"{index:08d}", "email": f"user-{index}@example.test"}
+        for index in range(20)
+    ]
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Invalid Password: numeric-only input",
+        steps=["Enter a numeric-only password", "Submit the form"],
+        expected_result="Password validation error is shown",
+        test_data=datasets[0],
+        test_data_sets=datasets,
+        evaluation_status=EvaluationStatus.APPROVED,
+    )
+    script_template = """import { test, expect } from '@playwright/test';
+test('Test data __TEST_DATA_ID__: __TEST_TYPE__', async ({ page }) => {
+  await page.getByLabel('Password').fill('__TEST_DATA_01__');
+  await page.getByLabel('Email').fill('__TEST_DATA_02__');
+  await expect(page.getByText('__EXPECTED_RESULT__')).toBeVisible();
+});"""
+    state = WorkflowState(
+        requirement=requirement,
+        generated_scenarios=[scenario],
+        generated_test_cases=[test_case],
+    )
+
+    result = PlaywrightAgent(
+        llm_service=StubLLMService(generate_response=script_template),
+        repo=type(
+            "TemplateRepository",
+            (),
+            {"list_projects": lambda self: [], "get_scenario": lambda self, scenario_id: scenario},
+        )(),
+        test_data_template=True,
+    ).run(state)
+
+    generated_script = result.generated_test_cases[0].playwright_script
+    assert generated_script.count("test(") == 20
+    assert generated_script.count("import { test, expect }") == 1
+    assert "00000000" in generated_script
+    assert "00000019" in generated_script
+    assert "user-19@example.test" in generated_script
+    assert PlaywrightAgent._escape_js_string_content("O'Brien") == "O\\'Brien"
+
+
 def test_no_approved_test_cases_is_not_an_error():
     requirement = Requirement(title="x", description="y")
     scenario = Scenario(requirement_id=requirement.id, scenario_name="s", description="d")

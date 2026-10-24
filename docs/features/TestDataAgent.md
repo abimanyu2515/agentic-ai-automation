@@ -42,7 +42,7 @@ Do not treat a guessed field, allowed value, validation rule, or expected result
 
 ## 4. Required Output A — Test Combination Analysis
 
-First, identify the fields and behaviors that should be tested. Then provide a combination matrix.
+For requirement-level generation, identify the fields and behaviors that should be tested, then provide a combination matrix. For generation scoped to one selected test case, focus on that case's stated validation; do not add unrelated combinations just to fill the matrix.
 
 Consider the following categories when relevant to the supplied feature:
 
@@ -136,6 +136,8 @@ Do not leave placeholder values in the final dataset. If the requirements are in
 
 Return the results in this order:
 
+For a requirement-level run, include all four sections below. For a run scoped to one selected test case, include the context, dataset, and coverage sections; the combinations section may be empty when no additional combinations are needed beyond the selected case. State the targeted validation rule in the context section.
+
 ### A. Context understood
 - Requirement / feature:
 - Source material used:
@@ -200,7 +202,8 @@ When implemented in the existing workflow:
 - Use the existing LangSmith tracing setup when the workflow's established tracing mechanism applies.
 - The **Run TestDataAgent** action generates and persists the 20-row dataset and its approved test cases without waiting for Playwright script generation. Playwright scripts and automatic execution are a separate action in the Test Cases workspace.
 - The Test Cases workspace provides a **Run Test Data Agent** button with loading, success, and error states; successful runs display all generated records, coverage, assumptions, and a CSV download.
-- **Generate Test Data & Run Tests** derives one approved test case directly from each row, without a redundant LLM test-case-generation step. The UI first persists and displays the 20-row dataset and approved test cases, then generates their reusable Playwright script and launches execution. Script generation reuses those saved cases and one template model call; if script generation fails, the generated data remains visible and saved for retry. Repeated requests for the same project and requirement reuse existing TestDataAgent cases (preferring cases that already have scripts) and generate only missing scripts, avoiding duplicate cases after a timeout; concurrent requests for that pair are serialized. New cases are persisted before script generation so a later Playwright/LLM failure does not discard the data-driven cases. For this flow, the Playwright agent makes one model call to create a reusable script template, then fills each case's data and expected result into that template instead of making 20 separate model calls. If the model omits required template markers, it retries template generation once and fails explicitly if markers are still missing. It checks that the Playwright workspace is running before starting and shows how to start it if unavailable. Script-generation requests have finite client-side timeouts and report failures instead of leaving the interface loading indefinitely.
+- Each test-case row has its own **Generate Test Data** button after the Status column. Clicking it generates exactly 20 distinct datasets for only that test case, persists those datasets on the selected case, refreshes the case list, and expands that case to show its data. It does not generate data for other cases, generate a Playwright script, or launch test execution. Other test cases' datasets are preserved. Generating datasets for 20 cases individually therefore stores up to 400 case-specific datasets. Login datasets target the selected case's stated validation (such as invalid username, invalid password, empty username, or empty password); valid account credentials are not invented, and project requirements that restrict login testing remain authoritative. Test-case responses include persisted `test_data_sets` so each expanded row can render its own records. The separate **Run Test Data Agent** action continues to generate the requirement-level 20-row dataset and approved cases.
+- An expanded test-case row remains expanded after the case list is refreshed or re-rendered, until the user collapses it or selects another requirement.
 - Persist generated scenarios and test cases before attempting script generation so a later Playwright/LLM failure does not discard the generated data-driven cases.
 
 This file defines the agent's behavior. It does not, by itself, implement or register the agent in the application; integration with the agent code and workflow may still be required.

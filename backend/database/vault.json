@@ -2,5 +2,9 @@
   "653c1667-2139-492c-8af6-dacaceb26f67": {
     "username_enc": null,
     "password_enc": null
+  },
+  "80068535-c490-4525-86ad-d3fc6f56b10c": {
+    "username_enc": "gAAAAABq3GWUjp93M2pq-FDJwqja-mfKCcBjVNxvYnbnwU1lfHNLp54GIW_5olkA5TYfj4jTKpHzxj9wdTRHVcBy4NUglmWE2w==",
+    "password_enc": "gAAAAABq3GWU3So-4gQUcgNFS0c-1sq7sO8hvEPvsD71XfRrdJTC-RT3uZO8XYaOrcbE27rZa5BJygBbhvwsnjhLNWSL7WuzAw=="
   }
 }

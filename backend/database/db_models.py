@@ -189,6 +189,8 @@ class TestCaseDB(Base):
     jira_issue_url = Column(String(500), nullable=True)
     jira_sync_status = Column(String(50), nullable=True)
     jira_last_synced_at = Column(DateTime(timezone=True), nullable=True)
+    test_data = Column(JSON, nullable=False, default=dict)
+    test_data_sets = Column(JSON, nullable=False, default=list)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)

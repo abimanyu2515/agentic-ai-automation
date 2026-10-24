@@ -1,0 +1,95 @@
+{
+  "metadata": {
+    "executionId": "89d78a7d-30ec-4c1b-ada4-b2f840424363",
+    "projectId": "46ed48f2-487f-4f22-971a-b919aab21a1a",
+    "testCaseIds": [
+      "e071561d-437d-4888-a72c-cf11b793bd10"
+    ],
+    "testCycleId": "637f3abe-9f18-4952-a658-eb13bbcacdb1",
+    "browser": "chromium",
+    "status": "completed",
+    "started": "2026-10-22T09:42:16.446Z",
+    "finished": "2026-10-22T09:42:17.974Z",
+    "duration": 1.528
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\nconst test_data = {\n  full_name: \"Grace Patel\",\n  email: \"grace@example.com\",\n  password: \"ValidPass!7\",\n  confirm_password: \"ValidPass!7\",\n  accept_terms: \"true\"\n};\n\ntest('Test data TD-007: positive', async ({ page }) => {\n  console.log(\"[Timeline] Navigation: goto https://www.saucedemo.com\");\n  await page.goto(\"https://www.saucedemo.com\");\n\n  // Step 1: Complete the requirement workflow using the supplied test_data values.\n\n  // TODO: locate and fill full name field\n  console.log(\"[Timeline] Fill: Full Name\");\n  // await page.locator('TODO_SELECTOR').fill(test_data.full_name);\n\n  // TODO: locate and fill email field\n  console.log(\"[Timeline] Fill: Email\");\n  // await page.locator('TODO_SELECTOR').fill(test_data.email);\n\n  // TODO: locate and fill password field\n  console.log(\"[Timeline] Fill: Password\");\n  // await page.locator('TODO_SELECTOR').fill(test_data.password);\n\n  // TODO: locate and fill confirm password field\n  console.log(\"[Timeline] Fill: Confirm Password\");\n  // await page.locator('TODO_SELECTOR').fill(test_data.confirm_password);\n\n  // TODO: locate and set accept terms checkbox\n  console.log(\"[Timeline] Set: Accept Terms\");\n  // await page.locator('TODO_SELECTOR').check();\n\n  // Step 2: Verify the expected_result for the supplied test_data values.\n  console.log(\"[Timeline] Verify expected result\");\n  await expect(page.getByText('accepted')).toBeVisible();\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-10-22T09:42:16.446Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T09:42:16.480Z",
+      "time": 0.034,
+      "event": "Status: running",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T09:42:16.498Z",
+      "time": 0.052,
+      "event": "Session restored from storage state",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:42:16.502Z",
+      "time": 0.056,
+      "event": "Reusing existing browser context",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:42:16.512Z",
+      "time": 0.066,
+      "event": "Running: Test data TD-007: positive",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-22T09:42:17.898Z",
+      "time": 1.452,
+      "event": "Screenshot Captured",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:42:17.902Z",
+      "time": 1.456,
+      "event": "Navigate: https://www.saucedemo.com",
+      "details": "step-01-navigate_https_www_saucedemo_com.png",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:42:17.954Z",
+      "time": 1.508,
+      "event": "Session storage state saved",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:42:17.960Z",
+      "time": 1.514,
+      "event": "trace Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:42:17.970Z",
+      "time": 1.524,
+      "event": "htmlReport Generated",
+      "type": "success"
+    },
+    {
+      "timestamp": "2026-10-22T09:42:17.974Z",
+      "time": 1.528,
+      "event": "Status: completed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [
+      "step-01-navigate_https_www_saucedemo_com.png"
+    ],
+    "logs": [],
+    "console": [],
+    "trace": "trace.zip",
+    "htmlReport": "report.html"
+  }
+}
