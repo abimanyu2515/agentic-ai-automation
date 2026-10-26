@@ -156,19 +156,23 @@ export const API = {
     });
   },
 
-  async updateProject(id, name, description, lineOfBusiness, framework = 'playwright', jiraProjectKey = null, targetUrl = null, targetUsername = null, targetPassword = null) {
+  async updateProject(id, name, description, lineOfBusiness, framework = 'playwright', jiraProjectKey = null, targetUrl = null, targetUsername = null, targetPassword = null, isSafeTestEnvironment = undefined) {
+    const body = {
+      name,
+      description,
+      line_of_business: lineOfBusiness,
+      framework,
+      jira_project_key: jiraProjectKey,
+      target_url: targetUrl,
+      target_username: targetUsername,
+      target_password: targetPassword
+    };
+    if (typeof isSafeTestEnvironment === 'boolean') {
+      body.is_safe_test_environment = isSafeTestEnvironment;
+    }
     return request(`/projects/${id}`, {
       method: 'PUT',
-      body: JSON.stringify({
-        name,
-        description,
-        line_of_business: lineOfBusiness,
-        framework,
-        jira_project_key: jiraProjectKey,
-        target_url: targetUrl,
-        target_username: targetUsername,
-        target_password: targetPassword
-      })
+      body: JSON.stringify(body)
     });
   },
 
@@ -293,6 +297,16 @@ export const API = {
   // Test Cases
   async getTestCases(projectId) {
     return request(`/projects/${projectId}/testcases`);
+  },
+
+  async validateProjectScripts(projectId, testCaseIds) {
+    return request(`/projects/${projectId}/testcases/validate-scripts`, {
+      method: 'POST',
+      body: JSON.stringify({
+        test_case_ids: testCaseIds,
+        confirmed_safe_test_run: true
+      })
+    });
   },
 
   async getGoldenDatasetComparison(projectId) {

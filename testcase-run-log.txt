@@ -1,0 +1,185 @@
+UVICORN TERMINAL
+-----------------
+
+INFO:     127.0.0.1:60721 - "GET /api/v1/projects/3b003a50-cbc0-4d6f-83e1-cf39df617407/executions HTTP/1.1" 200 OK
+[Webhook DEBUG] Received payload: {'execution_id': 'b3f56316-0ce9-4fc7-80b6-b51d3b429eaf', 'test_case_id': 'caab02bd-d4b9-43e2-958f-875e8cc37f65', 'event': 'completed', 'status': 'failed', 'duration_seconds': 0.908, 'screenshot_path': None, 'video_path': None, 'trace_path': None, 'browser_version': None, 'error_message': "browserType.launch: Executable doesn't exist at C:\\Users\\devis\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝", 'timeline': [{'timestamp': '2026-10-21T07:44:51.642Z', 'time': 0, 'event': 'Execution Queued', 'type': 'info'}, {'timestamp': '2026-10-21T07:44:51.660Z', 'time': 0.018, 'event': 'Status: running', 'type': 'info'}, {'timestamp': '2026-10-21T07:44:51.878Z', 'time': 0.236, 'event': 'Launching browser', 'type': 'info'}, {'timestamp': '2026-10-21T07:44:52.020Z', 'time': 0.378, 'event': "Browser launch failed: browserType.launch: Executable doesn't exist at C:\\Users\\devis\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝", 'type': 'error'}, {'timestamp': '2026-10-21T07:44:52.072Z', 'time': 0.43, 'event': 'Failure detected: "browserType.launch: Executable doesn\'t exist at C:\\Users\\devis\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝". Recovery action: retry', 'type': 'warning'}, {'timestamp': '2026-10-21T07:44:52.081Z', 'time': 0.439, 'event': 'Retrying execution (Attempt 1)...', 'type': 'info'}, {'timestamp': '2026-10-21T07:44:52.115Z', 'time': 0.472, 'event': 'Launching browser', 'type': 'info'}, {'timestamp': '2026-10-21T07:44:52.337Z', 'time': 0.695, 'event': "Browser launch failed: browserType.launch: Executable doesn't exist at C:\\Users\\devis\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝", 'type': 'error'}, {'timestamp': '2026-10-21T07:44:52.504Z', 'time': 0.862, 'event': 'htmlReport Generated', 'type': 'success'}, {'timestamp': '2026-10-21T07:44:52.519Z', 'time': 0.877, 'event': 'Error Occurred', 'details': "browserType.launch: Executable doesn't exist at C:\\Users\\devis\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1228\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     pnpm exec playwright install                           ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝", 'type': 'error'}, {'timestamp': '2026-10-21T07:44:52.551Z', 'time': 0.909, 'event': 'Status: failed', 'type': 'info'}], 'screenshots': [], 'test_cycle_id': '3f3816db-d566-4e34-ba03-7fee3fdef47c'}
+[Repository] test_cycle_id 3f3816db-d566-4e34-ba03-7fee3fdef47c not found in test_cycles table, setting to None
+[Report Engine] _on_execution_completed() called for execution b3f56316-0ce9-4fc7-80b6-b51d3b429eaf
+[Report Engine] Stack trace:
+INFO:     127.0.0.1:60721 - "GET /api/v1/projects/3b003a50-cbc0-4d6f-83e1-cf39df617407/executions HTTP/1.1" 200 OK
+  File "C:\Program Files\Python312\Lib\threading.py", line 1032, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Program Files\Python312\Lib\threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "C:\Users\devis\agentic-ai-automation\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "C:\Users\devis\agentic-ai-automation\.venv\Lib\site-packages\fastapi\telemetry\_api.py", line 244, in _run_sync_endpoint
+    return function(**arguments)
+  File "C:\Users\devis\agentic-ai-automation\backend\main.py", line 2577, in process_execution_webhook
+    result = exec_service.finalize_execution(project_id, payload)
+  File "C:\Users\devis\agentic-ai-automation\backend\services\execution_service.py", line 102, in finalize_execution
+    emit_execution_completed(project_id, result)
+  File "C:\Users\devis\agentic-ai-automation\backend\services\execution_service.py", line 21, in emit_execution_completed
+    listener(project_id, execution_result)
+  File "C:\Users\devis\agentic-ai-automation\backend\services\report_service.py", line 1798, in _on_execution_completed
+    traceback.print_stack()
+[ReportConfig] Current Configuration:
+[ReportConfig]   REPORT_ENGINE env var: 'professional'
+[ReportConfig]   REPORT_ENGINE enum: ReportEngine.PROFESSIONAL
+[ReportConfig]   ENABLE_PROFESSIONAL_REPORTS: True
+[ReportConfig]   FALLBACK_TO_LEGACY_ON_ERROR: True
+[ReportConfig]   PROFESSIONAL_TEMPLATE_DIR: backend/templates
+[ReportConfig]   PROFESSIONAL_REPORT_DIR: data/professional_reports
+[Report Engine] Calling compile_reports_with_engine_selection()...
+[Report Engine] compile_reports_with_engine_selection() called for execution b3f56316-0ce9-4fc7-80b6-b51d3b429eaf
+[Report Engine] REPORT_ENGINE value: ReportEngine.PROFESSIONAL
+[ReportConfig] is_professional_enabled() called, returning: True
+[Report Engine] is_professional_enabled(): True
+[Report Engine] should_fallback_on_error(): True
+[ReportConfig] is_professional_enabled() called, returning: True
+[Report Engine] Selected: PROFESSIONAL
+[ReportService] Step 1 - _compile_professional_reports() entered
+[ExecutionAnalyzer] Starting initialization...
+[ReportService] Step 2 - Printing object summaries
+[ReportService] execution_result type: <class 'backend.models.execution_result.ExecutionResult'>
+[ReportService] execution_result.id: b3f56316-0ce9-4fc7-80b6-b51d3b429eaf
+[ReportService] timeline length: 11
+[ReportService] screenshots length: 0
+[ReportService] Step 3 - Loading test case
+[ExecutionAnalyzer] test_case loaded: <class 'backend.models.test_case.TestCase'>
+[ReportService] test_case type: <class 'backend.models.test_case.TestCase'>
+[ReportService] test_case.steps type: <class 'list'>
+[ReportService] test_case.steps contents: ['Search for and view the product details', 'Enter the maximum quantity allowed for purchase directly in the quantity field', 'Add the product to the cart', 'Proceed to checkout', 'Confirm and submit the order']
+[ReportService] test_case.expected_result: The system accepts the order with the maximum quantity, updates the inventory to reflect the purchase, and generates a confirmation receipt.
+[ReportService] test_case.title: Purchase maximum quantity allowed
+[ExecutionAnalyzer] test_case.steps: ['Search for and view the product details', 'Enter the maximum quantity allowed for purchase directly in the quantity field', 'Add the product to the cart', 'Proceed to checkout', 'Confirm and submit the order']
+[ExecutionAnalyzer] test_case.steps type: <class 'list'>
+[ExecutionAnalyzer] first step type: <class 'str'>
+[ExecutionAnalyzer] first step repr: 'Search for and view the product details'
+[ReportService] Step 4 - Extracting test case steps
+[ReportService] Step 5 - Extracting website URL
+[ReportService] Extracted website URL: https://www.saucedemo.com
+[ReportService] Step 6 - Creating ExecutionAnalyzer
+[ExecutionAnalyzer] Instantiating LLMService...
+[ReportService] Step 7 - LLMService created
+[ExecutionAnalyzer] Instantiating ExecutionAnalyzer...
+[ExecutionAnalyzer] Step 1 - Constructor entered
+[ExecutionAnalyzer] Step 2 - LLMService initialized
+[ExecutionAnalyzer] Step 3 - Constructor completed
+[ReportService] Step 8 - ExecutionAnalyzer created
+[ExecutionAnalyzer] Started
+[ReportService] Step 9 - Calling analyze_execution()
+[ExecutionAnalyzer] Analyzing execution...
+[ReportService] Step 10 - Extracting test case attributes
+[ExecutionAnalyzer] test_case_title: Purchase maximum quantity allowed
+[ExecutionAnalyzer] test_case_description: 
+[ExecutionAnalyzer] expected_result: The system accepts the order with the maximum quantity, updates the inventory to reflect the purchase, and generates a confirmation receipt.
+[ExecutionAnalyzer] test_case_steps: ['Search for and view the product details', 'Enter the maximum quantity allowed for purchase directly in the quantity field', 'Add the product to the cart', 'Proceed to checkout', 'Confirm and submit the order']
+[ExecutionAnalyzer] Step 4 - analyze_execution() entered
+[ExecutionAnalyzer] Analyzing execution b3f56316-0ce9-4fc7-80b6-b51d3b429eaf
+[ExecutionAnalyzer] Step 5 - Extracting timeline and screenshots
+[ExecutionAnalyzer] Step 6 - Timeline loaded: 11 events
+[ExecutionAnalyzer] Step 7 - Screenshots loaded: 0 items
+[ExecutionAnalyzer] screenshots: []
+[ExecutionAnalyzer] screenshots type: <class 'list'>
+[ExecutionAnalyzer] Step 8 - Validation generation started
+[ExecutionAnalyzer] Using deterministic validation generation from execution status
+[ExecutionAnalyzer] Step 9 - Validation generation completed (deterministic)
+[ExecutionAnalyzer] Deterministic validation generation succeeded
+[ExecutionAnalyzer] Step 10 - Executive summary generation started
+[ExecutionAnalyzer] Using deterministic executive summary generation from execution metrics
+[ExecutionAnalyzer] Step 11 - Executive summary generated (deterministic)
+[ExecutionAnalyzer] Deterministic executive summary generation succeeded
+[ExecutionAnalyzer] Step 12 - Extracting business rules
+[ExecutionAnalyzer] Step 13 - Evidence index generation started
+[ExecutionAnalyzer] Generating evidence index from 0 screenshots...
+[ExecutionAnalyzer] _generate_evidence_index() called
+[ExecutionAnalyzer] screenshots input: []
+[ExecutionAnalyzer] screenshots type: <class 'list'>
+[ExecutionAnalyzer] execution_id: b3f56316-0ce9-4fc7-80b6-b51d3b429eaf
+[ExecutionAnalyzer] project_id: 3b003a50-cbc0-4d6f-83e1-cf39df617407
+[ExecutionAnalyzer] Step 14 - Evidence index generated
+[ExecutionAnalyzer] Evidence index generated: 0 items
+[ExecutionAnalyzer] Step 15 - Calculating metrics
+[ExecutionAnalyzer] Step 16 - Determining overall status
+[ExecutionAnalyzer] Step 17 - Building ProfessionalReportContext
+[ExecutionAnalyzer] Step 18 - Returning ProfessionalReportContext
+[ReportService] Step 11 - analyze_execution() completed
+[ExecutionAnalyzer] Analysis complete
+[ReportService] Step 12 - Creating ProfessionalReportGenerator
+[ProfessionalReportGenerator] Starting initialization...
+[ProfessionalReportGenerator] Step 1 - Constructor entered
+[ProfessionalReportGenerator] Step 2 - Template directory: backend\templates
+[ProfessionalReportGenerator] Step 3 - Jinja2 environment initialized
+[ProfessionalReportGenerator] Step 4 - Constructor completed
+[ReportService] Step 13 - ProfessionalReportGenerator created
+[ProfessionalReportGenerator] Started
+[ReportService] Step 14 - Calling generate_reports()
+[ProfessionalReportGenerator] Generating reports...
+[ProfessionalReportGenerator] Step 14 - generate_reports() entered
+[ProfessionalReportGenerator] Step 15 - Creating output directory
+[ProfessionalReportGenerator] Step 16 - Generating file paths
+[ProfessionalReportGenerator] Step 17 - Calling generate_html()
+[ProfessionalReportGenerator] Step 5 - generate_html() entered
+[ProfessionalReportGenerator] Step 6 - Loading template
+INFO:     127.0.0.1:60721 - "GET /api/v1/projects/3b003a50-cbc0-4d6f-83e1-cf39df617407/executions HTTP/1.1" 200 OK
+[ProfessionalReportGenerator] Step 7 - Template loaded
+[ProfessionalReportGenerator] Step 8 - Rendering HTML
+[ProfessionalReportGenerator] Step 9 - HTML rendered
+[ProfessionalReportGenerator] Step 10 - Creating output directory
+[ProfessionalReportGenerator] Step 11 - Writing HTML file
+[ProfessionalReportGenerator] Step 12 - HTML file written
+[ProfessionalReportGenerator] Step 13 - generate_html() completed
+[ProfessionalReportGenerator] Step 18 - generate_html() completed
+[ProfessionalReportGenerator] Step 19 - Starting PDF generation (optional)
+[ProfessionalReportGenerator] Step 20 - Calling generate_pdf()
+
+-----
+
+WeasyPrint could not import some external libraries. Please carefully follow the installation steps before reporting an issue:
+https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation
+https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#troubleshooting 
+
+-----
+
+WeasyPrint failed: cannot load library 'libgobject-2.0-0': error 0x7e.  Additionally, ctypes.util.find_library() did not manage to locate a library called 'libgobject-2.0-0'
+[ProfessionalReportGenerator] Step 21 - PDF generation completed
+[ProfessionalReportGenerator] Step 22 - Building result dictionary
+[ProfessionalReportGenerator] Step 23 - generate_reports() completed
+[ReportService] Step 15 - generate_reports() completed
+INFO:     127.0.0.1:60721 - "GET /api/v1/projects/3b003a50-cbc0-4d6f-83e1-cf39df617407/executions HTTP/1.1" 200 OK
+[Professional Report Generated] HTML: data\professional_reports\professional_report_b3f56316-0ce9-4fc7-80b6-b51d3b429eaf.html
+[Professional Report Generated] PDF: data\professional_reports\professional_report_b3f56316-0ce9-4fc7-80b6-b51d3b429eaf.pdf
+[ReportService] Step 16 - Generating JUnit XML
+[ReportService] Step 17 - JUnit XML generated
+[ReportService] Step 18 - Saving report to repository
+[Report Engine] Saving professional report to repository:
+[Report Engine]   html_path: data\professional_reports\professional_report_b3f56316-0ce9-4fc7-80b6-b51d3b429eaf.html
+[Report Engine]   pdf_path: data\professional_reports\professional_report_b3f56316-0ce9-4fc7-80b6-b51d3b429eaf.pdf
+[Report Engine]   engine: professional
+[ReportService] Step 19 - Repository updated
+[Report Engine] Repository save result: {'id': '8c51c8e8-05e4-4ba5-bb96-366746c37039', 'project_id': '3b003a50-cbc0-4d6f-83e1-cf39df617407', 'execution_id': 'b3f56316-0ce9-4fc7-80b6-b51d3b429eaf', 'junit_path': 'data\\professional_reports\\junit_b3f56316-0ce9-4fc7-80b6-b51d3b429eaf.xml', 'html_path': 'data\\professional_reports\\professional_report_b3f56316-0ce9-4fc7-80b6-b51d3b429eaf.html', 'pdf_path': 'data\\professional_reports\\professional_report_b3f56316-0ce9-4fc7-80b6-b51d3b429eaf.pdf', 'jira_attachment_id': None, 'jira_last_uploaded_at': 'None', 'created_at': 'None'}
+[ReportService] Step 20 - Professional pipeline completed
+
+
+PLAYWRIGHT TERMINAL
+-------------------
+
+POST /api/execute 200 in 3.2s (next.js: 3.1s, application-code: 148ms)
+[Webhook SUCCESS] Sent event started to FastAPI for project 3b003a50-cbc0-4d6f-83e1-cf39df617407
+[Webhook DEBUG] sendWebhook invoked. projectId: "3b003a50-cbc0-4d6f-83e1-cf39df617407", testCaseId: "caab02bd-d4b9-43e2-958f-875e8cc37f65", event: "updated", testCycleId: "3f3816db-d566-4e34-ba03-7fee3fdef47c"
+[Webhook SUCCESS] Sent event updated to FastAPI for project 3b003a50-cbc0-4d6f-83e1-cf39df617407
+[Webhook DEBUG] sendWebhook invoked. projectId: "3b003a50-cbc0-4d6f-83e1-cf39df617407", testCaseId: "caab02bd-d4b9-43e2-958f-875e8cc37f65", event: "updated", testCycleId: "3f3816db-d566-4e34-ba03-7fee3fdef47c"
+[Webhook SUCCESS] Sent event updated to FastAPI for project 3b003a50-cbc0-4d6f-83e1-cf39df617407
+[Recovery] Failure: "browserType.launch: Executable doesn't exist at C:\Users\devis\AppData\Local\ms-playwright\chromium_headless_shell-1228\chrome-headless-shell-win64\chrome-headless-shell.exe
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     pnpm exec playwright install                           ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝". Recovery action: retry. Next retry count: 1
+[Webhook DEBUG] sendWebhook invoked. projectId: "3b003a50-cbc0-4d6f-83e1-cf39df617407", testCaseId: "caab02bd-d4b9-43e2-958f-875e8cc37f65", event: "updated", testCycleId: "3f3816db-d566-4e34-ba03-7fee3fdef47c"
+[API Status GET] Request url: http://localhost:3000/api/status?projectId=3b003a50-cbc0-4d6f-83e1-cf39df617407
+[Webhook SUCCESS] Sent event updated to FastAPI for project 3b003a50-cbc0-4d6f-83e1-cf39df617407

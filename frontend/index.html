@@ -469,6 +469,7 @@
             <button class="btn btn-primary" id="btn-run-selected-batch" style="padding: 10px 20px; font-size: 0.9rem; background-color: var(--color-success); border-color: var(--color-success);">Run Selected Batch</button>
           </div>
         </div>
+        <div id="script-validation-status" role="status" aria-live="polite" style="margin-top: 12px;"></div>
       </div>
 
       <div class="view-panel" id="jira-traceability-view">
@@ -918,6 +919,13 @@
               <div class="form-group" style="margin-bottom: 24px;">
                 <label for="project-settings-password" style="display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500;">Target Application Password</label>
                 <input type="password" id="project-settings-password" class="form-control" placeholder="••••••••" style="width: 100%;" />
+              </div>
+              <div class="form-group" style="margin-bottom: 24px;">
+                <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 0.85rem; font-weight: 500;">
+                  <input type="checkbox" id="project-settings-safe-test-environment" />
+                  <span>Mark this project as a safe test environment</span>
+                </label>
+                <p style="margin: 8px 0 0; color: var(--text-secondary); font-size: 0.8rem;">Only enable this for a staging or disposable site where automated test submissions are safe.</p>
               </div>
               <button type="submit" class="btn btn-primary w-100" style="padding: 12px; font-weight: 600;">Save Project Settings</button>
             </form>

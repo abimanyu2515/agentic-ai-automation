@@ -26,4 +26,5 @@ class ProjectResponse(BaseModel):
     jira_project_key: str | None = None
     target_url: str | None = None
     target_username: str | None = None
+    is_safe_test_environment: bool = False
     readiness: dict[str, Any]

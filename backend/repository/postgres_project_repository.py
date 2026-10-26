@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 import logging
+from functools import wraps
 from sqlalchemy.orm import scoped_session
 from sqlalchemy import select, func
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from backend.models.project import Project
 from backend.models.requirement import Requirement, RequirementSource
@@ -24,6 +25,28 @@ from backend.database.db_models import (
 
 logger = logging.getLogger("backend.repository.postgres_project_repository")
 
+
+def _rollback_on_database_errors(repository_class):
+    def wrap_method(method):
+        @wraps(method)
+        def wrapped(self, *args, **kwargs):
+            try:
+                return method(self, *args, **kwargs)
+            except SQLAlchemyError:
+                try:
+                    self.rollback()
+                except Exception:
+                    logger.exception("Failed to recover PostgreSQL repository session")
+                raise
+
+        return wrapped
+
+    for name, method in vars(repository_class).items():
+        if callable(method) and not name.startswith("_") and name != "rollback":
+            setattr(repository_class, name, wrap_method(method))
+    return repository_class
+
+
 def _get_val(x):
     if x is None:
         return None
@@ -33,6 +56,7 @@ def _get_val(x):
 db_session = scoped_session(SessionLocal)
 
 
+@_rollback_on_database_errors
 class PostgresProjectRepository(ProjectRepository):
     def __init__(self):
         super().__init__()
@@ -94,6 +118,7 @@ class PostgresProjectRepository(ProjectRepository):
                 target_url=getattr(p, "target_url", None),
                 target_username=getattr(p, "target_username", None),
                 target_password_enc=getattr(p, "target_password_enc", None),
+                is_safe_test_environment=getattr(p, "is_safe_test_environment", False),
                 created_at=p.created_at,
                 requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted],
                 is_deleted=p.is_deleted,
@@ -121,6 +146,7 @@ class PostgresProjectRepository(ProjectRepository):
             target_url=getattr(p, "target_url", None),
             target_username=getattr(p, "target_username", None),
             target_password_enc=getattr(p, "target_password_enc", None),
+            is_safe_test_environment=getattr(p, "is_safe_test_environment", False),
             created_at=p.created_at,
             requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted],
             is_deleted=p.is_deleted,
@@ -197,6 +223,7 @@ class PostgresProjectRepository(ProjectRepository):
         db_proj.target_url = project.target_url
         db_proj.target_username = project.target_username
         db_proj.target_password_enc = project.target_password_enc
+        db_proj.is_safe_test_environment = project.is_safe_test_environment
         try:
             self._flush_or_commit()
         except IntegrityError as exc:
@@ -629,6 +656,10 @@ class PostgresProjectRepository(ProjectRepository):
                     jira_last_synced_at=tc.jira_last_synced_at,
                     test_data=tc.test_data,
                     test_data_sets=tc.test_data_sets,
+                    script_validation_status=_get_val(tc.script_validation_status),
+                    script_validation_attempts=tc.script_validation_attempts,
+                    script_validation_completed_at=tc.script_validation_completed_at,
+                    script_validation_diagnostic=tc.script_validation_diagnostic,
                 )
                 session.add(db_tc)
             else:
@@ -652,6 +683,10 @@ class PostgresProjectRepository(ProjectRepository):
                 db_tc.jira_last_synced_at = tc.jira_last_synced_at
                 db_tc.test_data = tc.test_data
                 db_tc.test_data_sets = tc.test_data_sets
+                db_tc.script_validation_status = _get_val(tc.script_validation_status)
+                db_tc.script_validation_attempts = tc.script_validation_attempts
+                db_tc.script_validation_completed_at = tc.script_validation_completed_at
+                db_tc.script_validation_diagnostic = tc.script_validation_diagnostic
                 db_tc.is_deleted = False
         self._flush_or_commit()
 
@@ -681,6 +716,10 @@ class PostgresProjectRepository(ProjectRepository):
         db_tc.jira_last_synced_at = test_case.jira_last_synced_at
         db_tc.test_data = test_case.test_data
         db_tc.test_data_sets = test_case.test_data_sets
+        db_tc.script_validation_status = _get_val(test_case.script_validation_status)
+        db_tc.script_validation_attempts = test_case.script_validation_attempts
+        db_tc.script_validation_completed_at = test_case.script_validation_completed_at
+        db_tc.script_validation_diagnostic = test_case.script_validation_diagnostic
         self._flush_or_commit()
         return test_case
 

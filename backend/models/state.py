@@ -37,6 +37,7 @@ from backend.models.test_case import EvaluationStatus, TestCase
 
 
 class WorkflowState(BaseModel):
+    project_id: UUID | None = None
     requirement: Requirement | None = None
     generated_scenarios: list[Scenario] = Field(default_factory=list)
     selected_scenario_ids: list[UUID] = Field(default_factory=list)
@@ -48,6 +49,8 @@ class WorkflowState(BaseModel):
     logs: list[str] = Field(default_factory=list)
     user_stories: list[dict] = Field(default_factory=list)
     testing_context: dict | None = None
+    dom_context: dict | None = None
+    repair_feedback: str | None = None
     test_data_report: dict | None = None
     test_data_combinations: list[dict] = Field(default_factory=list)
     generated_test_data: list[dict] = Field(default_factory=list)

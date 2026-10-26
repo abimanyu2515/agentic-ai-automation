@@ -63,7 +63,13 @@ class FakePlaywrightRunner:
         self._default = default_result or PlaywrightRunResult(status="passed", duration_seconds=1.5)
         self._result_map = result_map or {}
 
-    def run(self, script: str, run_id: str) -> PlaywrightRunResult:
+    def run(
+        self,
+        script: str,
+        run_id: str,
+        project_id: str | None = None,
+        **kwargs,
+    ) -> PlaywrightRunResult:
         return self._result_map.get(run_id, self._default)
 
 

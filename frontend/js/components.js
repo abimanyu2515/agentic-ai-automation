@@ -407,6 +407,14 @@ export const Components = {
       if (tc.status === 'failed') runBadgeClass = "badge-rejected";
       if (tc.status === 'blocked') runBadgeClass = "badge-review";
 
+      const validationStatus = tc.script_validation_status || 'unverified';
+      const validationBadgeClass = validationStatus === 'validated'
+        ? 'badge-approved'
+        : validationStatus === 'failed'
+          ? 'badge-rejected'
+          : validationStatus === 'running'
+            ? 'badge-review'
+            : 'badge-pending';
       const confidencePct = Math.round(tc.confidence * 100);
       const hasScript = !!tc.playwright_script;
 
@@ -454,6 +462,11 @@ export const Components = {
           </td>
           <td>
             <div><span class="badge ${runBadgeClass}">${escapeHTML(tc.status || 'pending')}</span></div>
+          </td>
+          <td>
+            <span class="badge ${validationBadgeClass}" title="${escapeHTML(tc.script_validation_diagnostic || '')}">
+              ${escapeHTML(validationStatus)}
+            </span>
           </td>
           <td>
             <div class="tc-conf-text" id="tc-conf-txt-${tc.id}">${confidencePct}%</div>
@@ -635,6 +648,7 @@ export const Components = {
               <th>Test Case Title</th>
               <th>Evaluation Status</th>
               <th>Run Status</th>
+              <th>Script Validation</th>
               <th>Confidence</th>
               <th>Golden Dataset %</th>
               <th>Status</th>

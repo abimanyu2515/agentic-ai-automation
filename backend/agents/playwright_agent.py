@@ -7,7 +7,7 @@ Purpose:
 
 Responsibilities:
     - Load Playwright script generation prompt template
-    - Resolve project target URL and credentials from vault
+    - Resolve only the explicitly selected project URL and framework
     - Generate executable code via LLM (TypeScript for Playwright, Python for Selenium, Gherkin for Cucumber)
     - Strip markdown code fences from LLM output
     - Validate generated code contains expected framework imports/patterns
@@ -27,7 +27,7 @@ Inputs:
     - state.approved_test_cases(): Test cases with evaluation_status=APPROVED or human-approved
     - test_case.title, preconditions, steps, expected_result
     - project.framework: Target automation framework (playwright, selenium, cucumber)
-    - project.target_url, target_username, target_password: Application credentials from vault
+    - project.target_url, project.framework, and optional live page evidence
 
 Outputs:
     - test_case.playwright_script: Generated executable code
@@ -70,7 +70,6 @@ from uuid import UUID
 from backend.agents.base import BaseAgent
 from backend.models.state import WorkflowState
 from backend.models.test_case import TestCase
-from backend.config.settings import get_settings
 from backend.services.llm import LLMService
 from backend.utils.prompts import load_prompt
 
@@ -78,13 +77,13 @@ _SYSTEM_PROMPT = (
     "You are a senior QA automation engineer who writes clean, idiomatic Playwright TypeScript tests. "
     "You output ONLY code - no explanation, no markdown code fences, nothing before or after it.\n\n"
     "CRITICAL rules (apply to ANY target web application):\n"
-    "1. The test case inputs (title, preconditions, steps, expected result, and test_data) plus the "
-    "project's target base URL are the ONLY source of truth. Use supplied test_data values for inputs; "
+    "1. The test case inputs, supplied test_data, selected project URL, and live page evidence are "
+    "the ONLY source of truth. Use supplied test_data values for inputs; "
     "never invent test data or rely on prior knowledge of any specific "
     "demo site, and never hardcode selectors, URLs, or credentials from memory.\n"
-    "2. Derive every locator from the steps: prefer accessible locators (getByRole, getByLabel, "
-    "getByPlaceholder, getByText) with unambiguous names; fall back to stable CSS/ID selectors only "
-    "when the steps name them. If a locator cannot be derived with confidence, emit a "
+    "2. When live page evidence is provided, derive every locator only from it: prefer uniquely "
+    "observed accessible locators (getByRole, getByLabel, getByPlaceholder, getByText); use an "
+    "observed CSS selector only when the evidence includes it. If a locator is absent, emit a "
     "`// TODO: locator not specified in inputs` comment instead of fabricating one.\n"
     "3. Match the control type to the wording: `<select>` dropdowns use selectOption({ label: '...' }); "
     "text inputs use fill(); buttons/links use click(). Never call selectOption on a text input.\n"
@@ -181,49 +180,30 @@ class PlaywrightAgent(BaseAgent):
         # Resolve project framework via repository
         framework = "playwright"
         target_url = None
-        target_username = None
-        target_password = None
 
         if self.repo and state.requirement:
             req_id = state.requirement.id
-            projects = self.repo.list_projects()
-            target_proj = None
-            for proj in projects:
-                if req_id in proj.requirements:
-                    target_proj = proj
-                    framework = proj.framework or "playwright"
-                    break
-            
-            if not target_proj and projects:
-                target_proj = projects[0]
-                framework = target_proj.framework or "playwright"
-            
-            if target_proj:
-                target_url = target_proj.target_url
-                target_username = target_proj.target_username
-                if target_proj.target_password_enc:
-                    from backend.utils.crypto import decrypt_value
-                    target_password = decrypt_value(target_proj.target_password_enc)
-
-                 # Fallback or override from vault
-                try:
-                    from backend.services.vault_service import VaultService
-                    v_user, v_pass = VaultService().get_credentials(str(target_proj.id))
-                    if v_user:
-                        target_username = v_user
-                    if v_pass:
-                        target_password = v_pass
-                except Exception as vault_err:
-                    state.add_log(f"[PlaywrightAgent] Vault load warning: {vault_err}")
-
-                # No hardcoded credential fallback: if neither the project nor the
-                # vault provides credentials, leave them as None so generated
-                # scripts use clearly-marked placeholders / env variables.
-                if not target_username or not target_password:
-                    state.add_log(
-                        f"[{self.name}] No project/vault credentials found; "
-                        "scripts will use placeholder credentials."
+            if state.project_id is not None:
+                target_proj = self.repo.get_project(state.project_id)
+                if target_proj is None or req_id not in target_proj.requirements:
+                    raise ValueError(
+                        f"{self.name}: requirement does not belong to the selected project"
                     )
+            else:
+                matching_projects = [
+                    project for project in self.repo.list_projects()
+                    if req_id in project.requirements
+                ]
+                if len(matching_projects) != 1:
+                    raise ValueError(
+                        f"{self.name}: requirement must resolve to exactly one project"
+                    )
+                target_proj = matching_projects[0]
+
+            framework = target_proj.framework or "playwright"
+            target_url = target_proj.target_url
+            if not target_url:
+                raise ValueError(f"{self.name}: selected project has no target URL")
 
         if self.test_data_template:
             if framework != "playwright":
@@ -240,9 +220,9 @@ class PlaywrightAgent(BaseAgent):
                 template_case,
                 framework,
                 target_url,
-                target_username,
-                target_password,
                 test_data_template=True,
+                dom_context=state.dom_context,
+                repair_feedback=state.repair_feedback,
             )
             missing_markers = [
                 marker for marker in markers.values()
@@ -257,8 +237,6 @@ class PlaywrightAgent(BaseAgent):
                     template_case,
                     framework,
                     target_url,
-                    target_username,
-                    target_password,
                     test_data_template=True,
                     template_feedback=(
                         "Your previous script template was rejected because it omitted "
@@ -267,6 +245,8 @@ class PlaywrightAgent(BaseAgent):
                         "and preserve every required marker exactly as provided in the "
                         "test_data, title, and expected result. Do not omit fields."
                     ),
+                    dom_context=state.dom_context,
+                    repair_feedback=state.repair_feedback,
                 )
                 missing_markers = [
                     marker for marker in markers.values()
@@ -369,8 +349,8 @@ class PlaywrightAgent(BaseAgent):
                 test_case,
                 framework,
                 target_url,
-                target_username,
-                target_password,
+                dom_context=state.dom_context,
+                repair_feedback=state.repair_feedback,
             )
 
         if self.max_workers == 1 or len(approved) == 1:
@@ -450,13 +430,14 @@ class PlaywrightAgent(BaseAgent):
         target_password: str | None = None,
         test_data_template: bool = False,
         template_feedback: str | None = None,
+        dom_context: dict | None = None,
+        repair_feedback: str | None = None,
     ) -> str:
         import os
-        settings = get_settings()
-        base_url = target_url or settings.playwright.base_url or ""
+        base_url = target_url or ""
 
         # Override framework if configured at test case level
-        if getattr(test_case, "automation_framework", None):
+        if dom_context is None and getattr(test_case, "automation_framework", None):
             framework = test_case.automation_framework.lower()
 
         framework_context_str = "None specified"
@@ -483,9 +464,6 @@ class PlaywrightAgent(BaseAgent):
                     except Exception:
                         pass
 
-        title_lower = test_case.title.lower()
-        is_login_test = "login" in title_lower or any("login" in step.lower() for step in test_case.steps[:2])
-
         if framework == "selenium":
             system_prompt = (
                 "You are a senior QA automation engineer who writes clean, idiomatic Selenium WebDriver tests in Python using pytest. "
@@ -500,29 +478,9 @@ class PlaywrightAgent(BaseAgent):
                 test_data=json.dumps(test_case.test_data, ensure_ascii=False),
                 base_url=base_url,
                 framework_context=framework_context_str,
-                target_username=target_username or "default_username",
-                target_password=target_password or "default_password"
+                target_username="",
+                target_password=""
             )
-            if target_username and target_password:
-                if is_login_test:
-                    prompt += (
-                        f"\n\nLoad the credentials securely from environment variables at the top of the test code block:\n"
-                        f"import os\n"
-                        f"BASE_URL = os.environ.get('TARGET_URL', '{base_url}')\n"
-                        f"USERNAME = os.environ.get('TARGET_USERNAME', '{target_username}')\n"
-                        f"PASSWORD = os.environ.get('TARGET_PASSWORD', '{target_password}')\n"
-                        f"Use USERNAME and PASSWORD when the test steps request entering the valid username and password."
-                    )
-                else:
-                    prompt += (
-                        f"\n\nAt the start of the test, after navigating to the base URL, you MUST log in. "
-                        f"Load the credentials securely from environment variables at the top of the test code block: "
-                        f"import os\n"
-                        f"BASE_URL = os.environ.get('TARGET_URL', '{base_url}')\n"
-                        f"USERNAME = os.environ.get('TARGET_USERNAME', '{target_username}')\n"
-                        f"PASSWORD = os.environ.get('TARGET_PASSWORD', '{target_password}')\n"
-                        f"Navigate to BASE_URL. Type USERNAME into the username field, PASSWORD into the password field, click login, and wait for the post-login landing to load (e.g. wait for a URL change or for a dashboard element named in the steps to become visible) before executing subsequent steps."
-                    )
             prompt += "\n\nWrite this test case using Selenium Python with pytest instead of Playwright."
         elif framework == "cucumber":
             system_prompt = (
@@ -539,20 +497,9 @@ class PlaywrightAgent(BaseAgent):
                 test_data=json.dumps(test_case.test_data, ensure_ascii=False),
                 base_url=base_url,
                 framework_context=framework_context_str,
-                target_username=target_username or "default_username",
-                target_password=target_password or "default_password"
+                target_username="",
+                target_password=""
             )
-            if target_username and target_password:
-                if is_login_test:
-                    prompt += (
-                        f"\n\nRetrieve the username and password from environment variables `TARGET_USERNAME` and `TARGET_PASSWORD` in your behave steps, "
-                        f"and use them when the steps request entering the valid credentials (username: '{target_username}', password: '{target_password}')."
-                    )
-                else:
-                    prompt += (
-                        f"\n\nAt the start of the test, after navigating to the base URL, you MUST log in. "
-                        f"Retrieve the username and password from environment variables `TARGET_USERNAME` and `TARGET_PASSWORD` in your behave steps (using fallback username: '{target_username}', password: '{target_password}')."
-                    )
             prompt += "\n\nWrite this test case using Gherkin feature syntax and Python step definitions instead of Playwright."
         else:
             system_prompt = _SYSTEM_PROMPT
@@ -566,28 +513,9 @@ class PlaywrightAgent(BaseAgent):
                 test_data=json.dumps(test_case.test_data, ensure_ascii=False),
                 base_url=base_url,
                 framework_context=framework_context_str,
-                target_username=target_username or "default_username",
-                target_password=target_password or "default_password"
+                target_username="",
+                target_password=""
             )
-            if target_username and target_password:
-                if is_login_test:
-                    prompt += (
-                        f"\n\nLoad the credentials securely from environment variables at the top of the test code block:\n"
-                        f"const BASE_URL = process.env.TARGET_URL || '{base_url}';\n"
-                        f"const USERNAME = process.env.TARGET_USERNAME || '{target_username}';\n"
-                        f"const PASSWORD = process.env.TARGET_PASSWORD || '{target_password}';\n"
-                        f"Use USERNAME and PASSWORD when the test steps request entering the valid username and password."
-                    )
-                else:
-                    prompt += (
-                        f"\n\nAt the start of the test, after navigating to the base URL, you MUST log in. "
-                        f"Load the credentials securely from environment variables at the top of the test code block: "
-                        f"const BASE_URL = process.env.TARGET_URL || '{base_url}';\n"
-                        f"const USERNAME = process.env.TARGET_USERNAME || '{target_username}';\n"
-                        f"const PASSWORD = process.env.TARGET_PASSWORD || '{target_password}';\n"
-                        f"Navigate to BASE_URL. Type USERNAME into the username field, PASSWORD into the password field, click login, and wait for the post-login landing to load (e.g. wait for a URL change or for a dashboard element named in the steps to become visible) before executing subsequent steps."
-                    )
-
         if test_data_template:
             prompt += (
                 "\n\nThis is a reusable data-driven script template. Keep these exact "
@@ -600,6 +528,26 @@ class PlaywrightAgent(BaseAgent):
             )
         if template_feedback:
             prompt += f"\n\n{template_feedback}"
+        prompt += (
+            "\n\nProject credentials are never included in this prompt. For a valid login, "
+            "use process.env.TARGET_USERNAME and process.env.TARGET_PASSWORD without "
+            "fallback values. For an invalid login, use only explicit test_data values. "
+            "Do not add a login step unless the case asks for one."
+        )
+        if dom_context is not None:
+            prompt += (
+                "\n\nLIVE PAGE EVIDENCE (the only allowed source for locators and observed text):\n"
+                + json.dumps(dom_context, ensure_ascii=False, separators=(",", ":"))
+                + "\nUse only uniquely observed labels, accessible names, visible text, and selectors. "
+                "Do not invent locators. Assert the stated expected_result with an observed "
+                "visible result or an outcome explicitly named by the test case."
+            )
+        if repair_feedback:
+            prompt += (
+                "\n\nREPAIR FEEDBACK:\n"
+                + repair_feedback[:2000]
+                + "\nReturn a complete corrected script. Do not repeat the failed approach."
+            )
 
         raw_output = self.llm_service.generate(
             system=system_prompt,
@@ -621,11 +569,9 @@ class PlaywrightAgent(BaseAgent):
 
             decl_lines = []
             if "const BASE_URL" not in code and "BASE_URL" in code:
-                decl_lines.append(f"const BASE_URL = process.env.TARGET_URL || '{base_url}';")
-            if "const USERNAME" not in code and "USERNAME" in code:
-                decl_lines.append(f"const USERNAME = process.env.TARGET_USERNAME || '{target_username or 'default_username'}';")
-            if "const PASSWORD" not in code and "PASSWORD" in code:
-                decl_lines.append(f"const PASSWORD = process.env.TARGET_PASSWORD || '{target_password or 'default_password'}';")
+                decl_lines.append(
+                    f"const BASE_URL = process.env.TARGET_URL || {json.dumps(base_url)};"
+                )
             
             if decl_lines:
                 lines = code.split("\n")
@@ -638,11 +584,9 @@ class PlaywrightAgent(BaseAgent):
         elif framework == "selenium":
             decl_lines = []
             if "BASE_URL =" not in code and "BASE_URL" in code:
-                decl_lines.append(f"BASE_URL = os.environ.get('TARGET_URL', '{base_url}')")
-            if "USERNAME =" not in code and "USERNAME" in code:
-                decl_lines.append(f"USERNAME = os.environ.get('TARGET_USERNAME', '{target_username or 'default_username'}')")
-            if "PASSWORD =" not in code and "PASSWORD" in code:
-                decl_lines.append(f"PASSWORD = os.environ.get('TARGET_PASSWORD', '{target_password or 'default_password'}')")
+                decl_lines.append(
+                    f"BASE_URL = os.environ.get('TARGET_URL', {json.dumps(base_url)})"
+                )
             
             if decl_lines:
                 lines = code.split("\n")

@@ -22,6 +22,7 @@ from backend.models.requirement import Requirement
 from backend.models.scenario import Scenario
 from backend.models.state import WorkflowState
 from backend.models.test_case import EvaluationStatus, TestCase
+from backend.models.project import Project
 from backend.services.llm import LLMService
 from backend.tests.conftest import StubLLMService
 
@@ -91,6 +92,66 @@ def test_playwright_script_generation_uses_extended_llm_timeout():
     PlaywrightAgent(llm_service=llm_service).run(state)
 
     assert llm_service.timeout == 120
+
+
+def test_grounded_generation_uses_evidence_without_project_credentials():
+    requirement = Requirement(title="Login", description="Users can sign in.")
+    project = Project(
+        name="Staging",
+        target_url="https://staging.example.test",
+        target_username="private-user",
+        target_password_enc="private-password",
+        requirements=[requirement.id],
+    )
+    test_case = TestCase(
+        scenario_id=uuid4(),
+        title="Invalid login",
+        steps=["Enter the supplied invalid credentials", "Submit"],
+        expected_result='The "Invalid credentials" message appears.',
+        test_data={"username": "bad-user", "password": "bad-password"},
+        evaluation_status=EvaluationStatus.APPROVED,
+    )
+
+    class PromptCaptureLLM:
+        prompt = None
+
+        def generate(self, *, system, user, **kwargs):
+            self.prompt = user
+            return "import { test, expect } from '@playwright/test';\ntest('login', async () => {});"
+
+    class GroundedRepository:
+        def get_project(self, project_id):
+            assert project_id == project.id
+            return project
+
+    llm_service = PromptCaptureLLM()
+    state = WorkflowState(
+        project_id=project.id,
+        requirement=requirement,
+        generated_test_cases=[test_case],
+        human_approved_test_case_ids=[test_case.id],
+        dom_context={
+            "pages": [{
+                "title": "Sign in",
+                "forms": [],
+                "elements": [{"role": "button", "name": "Submit"}],
+                "visible_text": ["Invalid credentials"],
+            }]
+        },
+    )
+
+    PlaywrightAgent(llm_service=llm_service, repo=GroundedRepository()).run(state)
+
+    assert "LIVE PAGE EVIDENCE" in llm_service.prompt
+    assert "Invalid credentials" in llm_service.prompt
+    assert "the only source for page structure, locators" in llm_service.prompt
+    assert "Do not derive CSS selectors from field names" in llm_service.prompt
+    assert "Do not use vague checks such as `/error|success/i`" in llm_service.prompt
+    assert "also valid standard JavaScript" in llm_service.prompt
+    assert "non-null assertions such as `value!` or `textContent()!`" in llm_service.prompt
+    assert "handle null explicitly with a guard" in llm_service.prompt
+    assert "private-user" not in llm_service.prompt
+    assert "private-password" not in llm_service.prompt
 
 
 def test_script_generation_respects_configured_worker_limit():
@@ -184,7 +245,13 @@ def test_test_data_template_generates_one_script_and_substitutes_each_case():
 
     class TemplateRepository:
         def list_projects(self):
-            return []
+            return [
+                Project(
+                    name="Registration",
+                    target_url="https://registration.example.test",
+                    requirements=[requirement.id],
+                )
+            ]
 
         def get_scenario(self, scenario_id):
             return next(scenario for scenario in scenarios if scenario.id == scenario_id)
@@ -253,7 +320,13 @@ def test_test_data_template_retries_once_when_model_omits_a_data_marker():
 
     class TemplateRepository:
         def list_projects(self):
-            return []
+            return [
+                Project(
+                    name="Registration",
+                    target_url="https://registration.example.test",
+                    requirements=[requirement.id],
+                )
+            ]
 
         def get_scenario(self, scenario_id):
             assert scenario_id == scenario.id
@@ -310,13 +383,21 @@ test('Test data __TEST_DATA_ID__: __TEST_TYPE__', async ({ page }) => {
         generated_scenarios=[scenario],
         generated_test_cases=[test_case],
     )
+    project = Project(
+        name="Registration",
+        target_url="https://registration.example.test",
+        requirements=[requirement.id],
+    )
 
     result = PlaywrightAgent(
         llm_service=StubLLMService(generate_response=script_template),
         repo=type(
             "TemplateRepository",
             (),
-            {"list_projects": lambda self: [], "get_scenario": lambda self, scenario_id: scenario},
+            {
+                "list_projects": lambda self: [project],
+                "get_scenario": lambda self, scenario_id: scenario,
+            },
         )(),
         test_data_template=True,
     ).run(state)

@@ -182,14 +182,14 @@ class PlaywrightRunner:
         
         # Inject the automatic screenshot wrapper block
         screenshot_wrapper = """
-import { test, expect } from '@playwright/test';
-import * as path from 'path';
-import * as fs from 'fs';
+import { test as __runnerTest } from '@playwright/test';
+import * as __runnerPath from 'path';
+import * as __runnerFs from 'fs';
 
-test.beforeEach(async ({ page }) => {
-  const screenshotsDir = path.join(__dirname, 'screenshots');
-  if (!fs.existsSync(screenshotsDir)) {
-    fs.mkdirSync(screenshotsDir, { recursive: true });
+__runnerTest.beforeEach(async ({ page }) => {
+  const screenshotsDir = __runnerPath.join(__dirname, 'screenshots');
+  if (!__runnerFs.existsSync(screenshotsDir)) {
+    __runnerFs.mkdirSync(screenshotsDir, { recursive: true });
   }
 
   let stepIndex = 0;
