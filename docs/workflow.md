@@ -144,6 +144,16 @@ SupervisorAgent ──(reads operation)──►
     END
 ```
 
+## Grounded Bulk Script Validation
+
+The bulk script action is available only when the selected project is marked as a safe test environment. That setting is off by default and can be changed in Project Settings by a user with project edit permission. Before each batch, the tester confirms that inspection and form submissions are safe for the target site.
+
+The UI submits approved test case IDs to `POST /api/v1/projects/{project_id}/testcases/validate-scripts` with explicit safety confirmation. It polls the existing project test case list for per case validation state.
+
+The backend inspects the selected project's target URL and gives bounded page evidence to script generation. The evidence includes observed controls and relevant visible text, but excludes field values and URL query strings. Invalid login probes run only when an approved case explicitly supplies invalid username and password test data. Project credentials are not sent to the model.
+
+Each generated script is compiled, checked for observed locators and an expected outcome assertion, then executed with Playwright. A failed script can receive one repair attempt using the failure and refreshed evidence. The latest validation state is stored separately from test execution status as `running`, `validated`, `failed`, or `unverified`. A script is ready only when its validation state is `validated`; failed and unverified scripts remain visible for tester review.
+
 ---
 
 ## State Machine Design

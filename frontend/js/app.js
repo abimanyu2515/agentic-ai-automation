@@ -2361,21 +2361,79 @@ class App {
       if (approvedTCs.length > 0) {
         bulkScriptContainer.style.display = 'block';
         const btn = document.getElementById('btn-generate-all-scripts');
+        const validationStatus = document.getElementById('script-validation-status');
+        if (validationStatus) validationStatus.style.whiteSpace = 'pre-line';
+        const safeEnvironment = this.currentProject?.is_safe_test_environment === true;
+        btn.disabled = !safeEnvironment;
+        btn.title = safeEnvironment
+          ? ''
+          : 'Mark this project as a safe test environment in project settings first.';
+        if (!safeEnvironment && validationStatus) {
+          validationStatus.textContent = 'Grounded validation is disabled until this project is marked as a safe test environment.';
+        }
         btn.onclick = async () => {
+          if (!this.currentProject?.is_safe_test_environment) return;
+          const confirmed = window.confirm(
+            'This will inspect the target site and run scripts for approved test cases. ' +
+            'Form submissions may change site data. Continue only if this is a safe test environment.'
+          );
+          if (!confirmed) return;
+
+          const projectId = this.currentProject.id;
+          const testCaseIds = approvedTCs.map(tc => tc.id);
+          let batchStarted = false;
           btn.disabled = true;
-          btn.innerText = "Generating Scripts in Background...";
+          btn.innerText = 'Validating scripts...';
           try {
-            for (const tc of approvedTCs) {
-              await API.generatePlaywrightScript(this.currentProject.id, tc.id, this.currentProject.framework);
+            await API.validateProjectScripts(projectId, testCaseIds);
+            batchStarted = true;
+            if (validationStatus) validationStatus.textContent = 'Inspection and validation started.';
+
+            const finishedStatuses = new Set(['validated', 'failed', 'unverified']);
+            let cases = [];
+            while (this.currentProject?.id === projectId) {
+              cases = await API.getTestCases(projectId);
+              const batchCases = cases.filter(tc => testCaseIds.includes(tc.id));
+              this.testCases = cases;
+              const finishedCount = batchCases.filter(tc => finishedStatuses.has(tc.script_validation_status)).length;
+              if (validationStatus) {
+                validationStatus.textContent = [
+                  `Completed ${finishedCount} of ${testCaseIds.length} test cases.`,
+                  ...batchCases.map(tc =>
+                    `${tc.title}: ${tc.script_validation_status || 'pending'}`
+                  ),
+                ].join('\n');
+              }
+              if (batchCases.length < testCaseIds.length || finishedCount === testCaseIds.length) break;
+              await new Promise(resolve => setTimeout(resolve, 2000));
             }
-            this.addLog(`Playwright scripts generated for ${approvedTCs.length} approved test cases`);
-            await this.refreshProjectData();
-            this.renderTestCases();
+
+            if (this.currentProject?.id === projectId) {
+              const batchCasesById = new Map(
+                cases.filter(tc => testCaseIds.includes(tc.id)).map(tc => [tc.id, tc])
+              );
+              const details = approvedTCs.map(originalCase => {
+                const tc = batchCasesById.get(originalCase.id);
+                if (!tc) return `${originalCase.title}: unverified (test case unavailable)`;
+                const status = tc.script_validation_status || 'unverified';
+                const attempts = tc.script_validation_attempts || 0;
+                const diagnostic = tc.script_validation_diagnostic
+                  ? `: ${tc.script_validation_diagnostic}`
+                  : '';
+                return `${tc.title}: ${status} (${attempts} attempt${attempts === 1 ? '' : 's'})${diagnostic}`;
+              });
+              if (validationStatus) validationStatus.textContent = details.join('\n');
+              this.renderTestCases();
+              this.addLog(`Grounded script validation finished for ${details.length} test cases`);
+            }
           } catch (err) {
-            alert(`Script generation failed: ${err.message}`);
+            const message = batchStarted
+              ? `Validation started, but its status could not be loaded: ${err.message}`
+              : `Script validation failed to start: ${err.message}`;
+            if (validationStatus) validationStatus.textContent = message;
           } finally {
-            btn.disabled = false;
-            btn.innerText = "Generate Playwright Scripts for All Approved Test Cases";
+            btn.disabled = !this.currentProject?.is_safe_test_environment;
+            btn.innerText = 'Generate Playwright Scripts for All Approved Test Cases';
           }
         };
 
@@ -4438,6 +4496,8 @@ class App {
     document.getElementById('project-settings-url').value = proj.target_url || '';
     document.getElementById('project-settings-username').value = proj.target_username || '';
     document.getElementById('project-settings-password').value = proj.target_username ? '********' : '';
+    document.getElementById('project-settings-safe-test-environment').checked =
+      proj.is_safe_test_environment === true;
   }
 
   async saveProjectSettings(e) {
@@ -4452,6 +4512,8 @@ class App {
     const targetUrl = document.getElementById('project-settings-url').value;
     const targetUsername = document.getElementById('project-settings-username').value;
     const targetPassword = document.getElementById('project-settings-password').value;
+    const isSafeTestEnvironment =
+      document.getElementById('project-settings-safe-test-environment').checked;
 
     try {
       const updated = await API.updateProject(
@@ -4463,12 +4525,28 @@ class App {
         proj.jira_project_key,
         targetUrl,
         targetUsername,
-        targetPassword
+        targetPassword,
+        isSafeTestEnvironment
       );
       
       // Update local project object
       proj.target_url = updated.target_url;
       proj.target_username = updated.target_username;
+      proj.is_safe_test_environment = updated.is_safe_test_environment;
+      if (this.currentProject?.id === updated.id) {
+        this.currentProject.is_safe_test_environment = updated.is_safe_test_environment;
+      }
+      const scriptGenerationButton = document.getElementById('btn-generate-all-scripts');
+      if (scriptGenerationButton) {
+        scriptGenerationButton.disabled = updated.is_safe_test_environment !== true;
+        scriptGenerationButton.title = updated.is_safe_test_environment
+          ? ''
+          : 'Mark this project as a safe test environment in project settings first.';
+      }
+      const validationStatus = document.getElementById('script-validation-status');
+      if (validationStatus && updated.is_safe_test_environment) {
+        validationStatus.textContent = '';
+      }
       
       this.addLog(`Project settings updated for: ${proj.name}`);
       alert("Project settings updated successfully");

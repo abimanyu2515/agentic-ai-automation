@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import Column, String, Text, Float, Boolean, DateTime, ForeignKey, Integer, JSON, UniqueConstraint, Index
+from sqlalchemy import Column, String, Text, Float, Boolean, DateTime, ForeignKey, Integer, JSON, UniqueConstraint, Index, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from backend.database.db import Base
@@ -35,6 +35,7 @@ class ProjectDB(Base):
     target_url = Column(String(500), nullable=True, default=None)
     target_username = Column(String(255), nullable=True)
     target_password_enc = Column(String(500), nullable=True)
+    is_safe_test_environment = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     
@@ -191,6 +192,10 @@ class TestCaseDB(Base):
     jira_last_synced_at = Column(DateTime(timezone=True), nullable=True)
     test_data = Column(JSON, nullable=False, default=dict)
     test_data_sets = Column(JSON, nullable=False, default=list)
+    script_validation_status = Column(String(30), nullable=False, default="unverified", server_default=text("'unverified'"))
+    script_validation_attempts = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    script_validation_completed_at = Column(DateTime(timezone=True), nullable=True)
+    script_validation_diagnostic = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)

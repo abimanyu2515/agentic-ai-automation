@@ -101,11 +101,12 @@ from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.config.settings import get_settings
 from backend.services.project_service import ProjectService
 from backend.services.workflow_service import WorkflowService
+from backend.services.grounded_playwright_service import GroundedPlaywrightScriptService
 from backend.schemas.project_dto import ProjectCreate, ProjectResponse
 from backend.repository.project_repository import ProjectURLConflictError
 from backend.services.project_configuration import (
@@ -226,6 +227,7 @@ def on_startup():
 # Initialize application services
 project_service = ProjectService()
 workflow_service = WorkflowService()
+grounded_playwright_service = GroundedPlaywrightScriptService()
 
 
 def resolve_scenario_response(s) -> ScenarioResponse:
@@ -287,6 +289,7 @@ def resolve_project_response(p) -> ProjectResponse:
         jira_project_key=getattr(p, "jira_project_key", None),
         target_url=getattr(p, "target_url", None),
         target_username=username if username else (getattr(p, "target_username", None) if getattr(p, "target_username", None) != "vault_secured" else None),
+        is_safe_test_environment=getattr(p, "is_safe_test_environment", False),
         readiness=readiness_for_project(p, owner_projects),
     )
 
@@ -311,19 +314,24 @@ def migrate_credentials_to_vault():
     from backend.services.vault_service import VaultService
     from backend.utils.crypto import decrypt_value
     vs = VaultService()
-    projects = project_service.list_projects()
-    migrated = False
-    for p in projects:
-        if getattr(p, "target_password_enc", None) != "vault_secured":
-            username = getattr(p, "target_username", None)
-            password = None
-            if getattr(p, "target_password_enc", None):
-                password = decrypt_value(p.target_password_enc)
-            vs.set_credentials(str(p.id), username, password)
-            p.target_username = "vault_secured"
-            p.target_password_enc = "vault_secured"
-            project_service.repo.update_project(p)
-            migrated = True
+    repo = project_service.repo
+    try:
+        projects = repo.list_projects()
+        migrated = False
+        for p in projects:
+            if getattr(p, "target_password_enc", None) != "vault_secured":
+                username = getattr(p, "target_username", None)
+                password = None
+                if getattr(p, "target_password_enc", None):
+                    password = decrypt_value(p.target_password_enc)
+                vs.set_credentials(str(p.id), username, password)
+                p.target_username = ""
+                p.target_password_enc = ""
+                repo.update_project(p)
+                migrated = True
+    except Exception:
+        repo.rollback()
+        raise
     if migrated:
         print("[Vault] Successfully migrated project credentials to secure vault.")
 
@@ -337,6 +345,7 @@ class ProjectUpdate(BaseModel):
     target_url: str | None = None
     target_username: str | None = None
     target_password: str | None = None
+    is_safe_test_environment: bool | None = None
 
 
 @app.get("/api/v1/projects", response_model=list[ProjectResponse])
@@ -411,7 +420,12 @@ def create_project(
 
 
 @app.put("/api/v1/projects/{project_id}", response_model=ProjectResponse)
-def update_project_settings(project_id: UUID, data: ProjectUpdate):
+def update_project_settings(
+    project_id: UUID,
+    data: ProjectUpdate,
+    user: UserDB = Depends(get_current_user),
+    authorized: bool = Depends(has_permission("Projects", "edit")),
+):
     p = project_service.get_project(project_id)
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -427,6 +441,8 @@ def update_project_settings(project_id: UUID, data: ProjectUpdate):
         p.jira_project_key = data.jira_project_key
     if data.target_url is not None:
         p.target_url = data.target_url
+    if data.is_safe_test_environment is not None:
+        p.is_safe_test_environment = data.is_safe_test_environment
     
     if data.target_username is not None or (data.target_password is not None and data.target_password != "" and data.target_password != "********"):
         from backend.services.vault_service import VaultService
@@ -1471,6 +1487,10 @@ def generate_test_cases(project_id: UUID, requirement_id: UUID):
                 evaluation_status=tc.evaluation_status,
                 evaluation_reason=tc.evaluation_reason,
                 playwright_script=tc.playwright_script,
+                script_validation_status=tc.script_validation_status,
+                script_validation_attempts=tc.script_validation_attempts,
+                script_validation_completed_at=tc.script_validation_completed_at,
+                script_validation_diagnostic=tc.script_validation_diagnostic,
                 generated_at=tc.generated_at,
                 jira_issue_key=getattr(tc, "jira_issue_key", None),
                 jira_issue_url=getattr(tc, "jira_issue_url", None),
@@ -1590,6 +1610,10 @@ def get_test_cases(project_id: UUID):
                 evaluation_status=tc.evaluation_status,
                 evaluation_reason=tc.evaluation_reason,
                 playwright_script=tc.playwright_script,
+                script_validation_status=tc.script_validation_status,
+                script_validation_attempts=tc.script_validation_attempts,
+                script_validation_completed_at=tc.script_validation_completed_at,
+                script_validation_diagnostic=tc.script_validation_diagnostic,
                 generated_at=tc.generated_at,
                 jira_issue_key=getattr(tc, "jira_issue_key", None),
                 jira_issue_url=getattr(tc, "jira_issue_url", None),
@@ -1633,6 +1657,10 @@ def update_test_case(project_id: UUID, test_case_id: UUID, data: TestCaseUpdate)
         evaluation_status=updated.evaluation_status,
         evaluation_reason=updated.evaluation_reason,
         playwright_script=updated.playwright_script,
+        script_validation_status=updated.script_validation_status,
+        script_validation_attempts=updated.script_validation_attempts,
+        script_validation_completed_at=updated.script_validation_completed_at,
+        script_validation_diagnostic=updated.script_validation_diagnostic,
         generated_at=updated.generated_at,
         jira_issue_key=getattr(updated, "jira_issue_key", None),
         jira_issue_url=getattr(updated, "jira_issue_url", None),
@@ -1683,6 +1711,10 @@ def update_test_case_script(project_id: UUID, test_case_id: UUID, payload: Scrip
         evaluation_status=updated.evaluation_status,
         evaluation_reason=updated.evaluation_reason,
         playwright_script=updated.playwright_script,
+        script_validation_status=updated.script_validation_status,
+        script_validation_attempts=updated.script_validation_attempts,
+        script_validation_completed_at=updated.script_validation_completed_at,
+        script_validation_diagnostic=updated.script_validation_diagnostic,
         generated_at=updated.generated_at,
         jira_issue_key=getattr(updated, "jira_issue_key", None),
         jira_issue_url=getattr(updated, "jira_issue_url", None),
@@ -1802,31 +1834,6 @@ def save_settings(payload: dict = Body(...)):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save settings: {exc}")
-
-
-
-@app.put("/api/v1/projects/{project_id}", response_model=ProjectResponse)
-def update_project(project_id: UUID, data: ProjectCreate):
-    updated = project_service.update_project(project_id, name=data.name, description=data.description, line_of_business=data.line_of_business)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if data.jira_project_key is not None:
-        updated.jira_project_key = data.jira_project_key
-        updated = project_service.repo.update_project(updated)
-    return ProjectResponse(
-        id=updated.id,
-        name=updated.name,
-        description=updated.description,
-        line_of_business=updated.line_of_business,
-        framework=getattr(updated, "framework", "playwright"),
-        created_at=updated.created_at,
-        requirements=updated.requirements,
-        jira_project_key=getattr(updated, "jira_project_key", None),
-        target_url=getattr(updated, "target_url", None),
-        readiness=readiness_for_project(updated, project_service.list_projects()),
-    )
-
-
 @app.delete("/api/v1/projects/{project_id}")
 def delete_project(project_id: UUID):
     success = project_service.delete_project(project_id)
@@ -1989,6 +1996,11 @@ class GenerateScriptPayload(BaseModel):
     framework: str = "Playwright"
 
 
+class ScriptValidationBatchRequest(BaseModel):
+    test_case_ids: list[UUID] = Field(min_length=1)
+    confirmed_safe_test_run: bool
+
+
 @app.post("/api/v1/projects/{project_id}/testcases/{test_case_id}/generate-script", response_model=TestCaseResponse)
 def generate_playwright_script(project_id: UUID, test_case_id: UUID, payload: GenerateScriptPayload = Body(default=GenerateScriptPayload())):
     try:
@@ -2006,6 +2018,10 @@ def generate_playwright_script(project_id: UUID, test_case_id: UUID, payload: Ge
             evaluation_status=updated_tc.evaluation_status,
             evaluation_reason=updated_tc.evaluation_reason,
             playwright_script=updated_tc.playwright_script,
+            script_validation_status=updated_tc.script_validation_status,
+            script_validation_attempts=updated_tc.script_validation_attempts,
+            script_validation_completed_at=updated_tc.script_validation_completed_at,
+            script_validation_diagnostic=updated_tc.script_validation_diagnostic,
             generated_at=updated_tc.generated_at,
             jira_issue_key=getattr(updated_tc, "jira_issue_key", None),
             jira_issue_url=getattr(updated_tc, "jira_issue_url", None),
@@ -2016,6 +2032,61 @@ def generate_playwright_script(project_id: UUID, test_case_id: UUID, payload: Ge
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Script generation failed: {exc}")
+
+
+@app.post(
+    "/api/v1/projects/{project_id}/testcases/validate-scripts",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def validate_project_scripts(
+    project_id: UUID,
+    payload: ScriptValidationBatchRequest,
+    background_tasks: BackgroundTasks,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("Playwright", "create")),
+):
+    if not payload.confirmed_safe_test_run:
+        raise HTTPException(
+            status_code=400,
+            detail="Confirm that the selected project is a safe test environment.",
+        )
+    project = project_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if user.role not in {"Superadmin", "Admin"} and project.owner_id != user.id:
+        assignment = db.query(ProjectUserDB.id).filter(
+            ProjectUserDB.project_id == project_id,
+            ProjectUserDB.user_id == user.id,
+        ).first()
+        if not assignment:
+            raise HTTPException(
+                status_code=403,
+                detail="You must be assigned to this project to validate its scripts.",
+            )
+    try:
+        cases = grounded_playwright_service.reserve_batch(
+            project_id,
+            payload.test_case_ids,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 409 if "safe test environment" in message or "already running" in message else 422
+        raise HTTPException(status_code=status_code, detail=message)
+
+    case_ids = [test_case.id for test_case in cases]
+    logger.info(
+        "Grounded script validation batch started: project_id=%s actor_id=%s case_count=%s",
+        project_id,
+        user.id,
+        len(case_ids),
+    )
+    background_tasks.add_task(
+        grounded_playwright_service.run_reserved_batch,
+        project_id,
+        case_ids,
+    )
+    return {"status": "started", "test_case_ids": case_ids}
 
 
 @app.post("/api/v1/projects/{project_id}/testcases/{test_case_id}/execute")
@@ -2530,6 +2601,10 @@ def get_test_case(project_id: UUID, test_case_id: UUID):
         evaluation_status=tc.evaluation_status,
         evaluation_reason=tc.evaluation_reason,
         playwright_script=tc.playwright_script,
+        script_validation_status=tc.script_validation_status,
+        script_validation_attempts=tc.script_validation_attempts,
+        script_validation_completed_at=tc.script_validation_completed_at,
+        script_validation_diagnostic=tc.script_validation_diagnostic,
         generated_at=tc.generated_at,
         jira_issue_key=getattr(tc, "jira_issue_key", None),
         jira_issue_url=getattr(tc, "jira_issue_url", None),

@@ -23,6 +23,7 @@ class Project(BaseModel):
     target_url: str | None = None
     target_username: str | None = None
     target_password_enc: str | None = None
+    is_safe_test_environment: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     requirements: list[UUID] = Field(default_factory=list)
     is_deleted: bool = False

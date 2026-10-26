@@ -48,6 +48,7 @@ def test_create_and_list_projects(client):
     assert proj["name"] == "Test Project"
     assert proj["description"] == "Desc"
     assert "id" in proj
+    assert proj["is_safe_test_environment"] is False
 
     # Check listed
     response = client.get("/api/v1/projects")
@@ -55,6 +56,55 @@ def test_create_and_list_projects(client):
     projs = response.json()
     assert len(projs) == 1
     assert projs[0]["id"] == proj["id"]
+
+
+def test_project_safe_environment_can_be_changed_in_settings(client):
+    created = client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Safe Test Project",
+            "description": "staging",
+            "framework": "playwright",
+            "target_url": "https://staging.example.test",
+        },
+    )
+    project_id = created.json()["id"]
+
+    updated = client.put(
+        f"/api/v1/projects/{project_id}",
+        json={"is_safe_test_environment": True},
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["is_safe_test_environment"] is True
+
+
+def test_credential_migration_rolls_back_failed_repository_session(monkeypatch):
+    from backend import main
+
+    class FailingRepository:
+        rolled_back = False
+
+        def list_projects(self):
+            raise RuntimeError("database query failed")
+
+        def rollback(self):
+            self.rolled_back = True
+
+    class FakeVaultService:
+        pass
+
+    repo = FailingRepository()
+    monkeypatch.setattr(repo_module, "_active_project_repo", repo)
+    monkeypatch.setattr(
+        "backend.services.vault_service.VaultService",
+        FakeVaultService,
+    )
+
+    with pytest.raises(RuntimeError, match="database query failed"):
+        main.migrate_credentials_to_vault()
+
+    assert repo.rolled_back
 
 
 def test_generate_test_data_script_endpoint(client, monkeypatch):
@@ -136,6 +186,107 @@ def test_get_test_cases_includes_persisted_test_data_sets(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.json()[0]["test_data_sets"] == test_case.test_data_sets
+
+
+def test_grounded_validation_requires_confirmation(client, monkeypatch):
+    from backend.main import grounded_playwright_service
+
+    def should_not_reserve(*args):
+        raise AssertionError("validation should not be reserved without confirmation")
+
+    monkeypatch.setattr(grounded_playwright_service, "reserve_batch", should_not_reserve)
+    response = client.post(
+        f"/api/v1/projects/{uuid4()}/testcases/validate-scripts",
+        json={"test_case_ids": [str(uuid4())], "confirmed_safe_test_run": False},
+    )
+
+    assert response.status_code == 400
+    assert "safe test environment" in response.json()["detail"]
+
+
+def test_grounded_validation_queues_confirmed_batch(client, monkeypatch):
+    from types import SimpleNamespace
+    from backend.main import grounded_playwright_service, project_service
+
+    project_id = uuid4()
+    test_case_id = uuid4()
+    queued = []
+    monkeypatch.setattr(
+        project_service,
+        "get_project",
+        lambda requested_project_id: SimpleNamespace(
+            id=requested_project_id,
+            owner_id=None,
+        ),
+    )
+    monkeypatch.setattr(
+        grounded_playwright_service,
+        "reserve_batch",
+        lambda requested_project_id, test_case_ids: [SimpleNamespace(id=test_case_id)],
+    )
+    monkeypatch.setattr(
+        grounded_playwright_service,
+        "run_reserved_batch",
+        lambda requested_project_id, test_case_ids: queued.append(
+            (requested_project_id, test_case_ids)
+        ),
+    )
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/testcases/validate-scripts",
+        json={"test_case_ids": [str(test_case_id)], "confirmed_safe_test_run": True},
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "status": "started",
+        "test_case_ids": [str(test_case_id)],
+    }
+    assert queued == [(project_id, [test_case_id])]
+
+
+def test_grounded_validation_requires_non_admin_project_assignment(monkeypatch):
+    from types import SimpleNamespace
+    from fastapi import BackgroundTasks, HTTPException
+    from backend.database.db_models import ProjectUserDB
+    from backend.main import ScriptValidationBatchRequest, project_service, validate_project_scripts
+
+    project_id = uuid4()
+    monkeypatch.setattr(
+        project_service,
+        "get_project",
+        lambda requested_project_id: SimpleNamespace(
+            id=requested_project_id,
+            owner_id=uuid4(),
+        ),
+    )
+
+    class EmptyQuery:
+        def filter(self, *args):
+            return self
+
+        def first(self):
+            return None
+
+    class EmptyDatabase:
+        def query(self, model):
+            assert model is ProjectUserDB.id
+            return EmptyQuery()
+
+    with pytest.raises(HTTPException) as error:
+        validate_project_scripts(
+            project_id=project_id,
+            payload=ScriptValidationBatchRequest(
+                test_case_ids=[uuid4()],
+                confirmed_safe_test_run=True,
+            ),
+            background_tasks=BackgroundTasks(),
+            user=SimpleNamespace(id=uuid4(), role="Tester"),
+            db=EmptyDatabase(),
+            authorized=True,
+        )
+
+    assert error.value.status_code == 403
 
 
 def test_create_and_get_requirements(client):

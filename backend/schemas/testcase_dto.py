@@ -2,7 +2,7 @@ from datetime import datetime
 from uuid import UUID
 from pydantic import BaseModel, Field
 from backend.models.common import Priority
-from backend.models.test_case import TestCaseStatus, EvaluationStatus
+from backend.models.test_case import TestCaseStatus, EvaluationStatus, ScriptValidationStatus
 
 
 class TestCaseUpdate(BaseModel):
@@ -31,6 +31,10 @@ class TestCaseResponse(BaseModel):
     evaluation_status: EvaluationStatus
     evaluation_reason: str | None
     playwright_script: str | None
+    script_validation_status: ScriptValidationStatus = ScriptValidationStatus.UNVERIFIED
+    script_validation_attempts: int = 0
+    script_validation_completed_at: datetime | None = None
+    script_validation_diagnostic: str | None = None
     generated_at: datetime
     jira_issue_key: str | None = None
     jira_issue_url: str | None = None

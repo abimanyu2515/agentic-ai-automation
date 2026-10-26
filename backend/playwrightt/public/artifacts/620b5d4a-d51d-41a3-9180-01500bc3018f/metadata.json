@@ -1,0 +1,43 @@
+{
+  "metadata": {
+    "executionId": "620b5d4a-d51d-41a3-9180-01500bc3018f",
+    "projectId": "403cd6e6-8d2b-4e2f-b279-f2528d9e9552",
+    "testCaseIds": [
+      "c86ca445-2a7c-41a8-94cb-d7e1dc54b8b7"
+    ],
+    "testCycleId": null,
+    "browser": "chromium",
+    "status": "failed",
+    "started": "2026-10-26T07:27:42.106Z",
+    "finished": "2026-10-26T07:27:42.254Z",
+    "duration": 0.148
+  },
+  "script": "import { test, expect } from '@playwright/test';\n\nconst BASE_URL = process.env.TARGET_URL || 'https://www.saucedemo.com';\n\ntest('Complete purchase flow', async ({ page }) => {\n  // Navigate to base URL (assumes authenticated session via storage state or prior login)\n  console.log('[Timeline] Navigate to base URL');\n  await page.goto(BASE_URL);\n\n  // Step 1: Sort products by Name (A to Z) and verify sorting order\n  console.log('[Timeline] Sort products by Name (A to Z)');\n  await page.locator('[data-test=\"product_sort_container\"]').selectOption({ label: 'Name (A to Z)' });\n  const productNamesAZ = await page.locator('.inventory_item_name').allTextContents();\n  const sortedNamesAZ = [...productNamesAZ].sort((a, b) => a.localeCompare(b));\n  await expect(productNamesAZ).toEqual(sortedNamesAZ);\n\n  // Step 2: Sort products by Price (low to high) and verify sorting order\n  console.log('[Timeline] Sort products by Price (low to high)');\n  await page.locator('[data-test=\"product_sort_container\"]').selectOption({ label: 'Price (low to high)' });\n  const priceElements = await page.locator('.inventory_item_price').allTextContents();\n  const prices = priceElements.map(p => parseFloat(p.replace('$', '')));\n  const sortedPrices = [...prices].sort((a, b) => a - b);\n  await expect(prices).toEqual(sortedPrices);\n\n  // Step 3: Add two different products to the cart\n  const product1 = 'Sauce Labs Backpack';\n  const product2 = 'Sauce Labs Bolt T-Shirt';\n  console.log('[Timeline] Add first product to cart');\n  await page.locator(`[data-test=\"add-to-cart-${product1.toLowerCase().replace(/ /g, '-')}\"]`).click();\n  console.log('[Timeline] Add second product to cart');\n  await page.locator(`[data-test=\"add-to-cart-${product2.toLowerCase().replace(/ /g, '-')}\"]`).click();\n\n  // Step 4: Verify the cart badge shows a count of 2\n  console.log('[Timeline] Verify cart badge count');\n  await expect(page.locator('.shopping_cart_badge')).toHaveText('2');\n\n  // Step 5: Navigate to the Cart page and verify both products appear with correct names, descriptions, quantities, and prices\n  console.log('[Timeline] Navigate to Cart page');\n  await page.locator('.shopping_cart_link').click();\n  await expect(page).toHaveURL(/.*cart\\.html/);\n  const cartItems = page.locator('.cart_item');\n  await expect(cartItems).toHaveCount(2);\n  // Verify first product\n  await expect(cartItems.nth(0).locator('.inventory_item_name')).toHaveText(product1);\n  await expect(cartItems.nth(0).locator('.inventory_item_desc')).toBeVisible();\n  await expect(cartItems.nth(0).locator('.cart_quantity')).toHaveText('1');\n  await expect(cartItems.nth(0).locator('.inventory_item_price')).toBeVisible();\n  // Verify second product\n  await expect(cartItems.nth(1).locator('.inventory_item_name')).toHaveText(product2);\n  await expect(cartItems.nth(1).locator('.inventory_item_desc')).toBeVisible();\n  await expect(cartItems.nth(1).locator('.cart_quantity')).toHaveText('1');\n  await expect(cartItems.nth(1).locator('.inventory_item_price')).toBeVisible();\n\n  // Step 6: Remove one product from the cart and verify cart updates\n  console.log('[Timeline] Remove one product from cart');\n  await page.locator(`[data-test=\"remove-${product1.toLowerCase().replace(/ /g, '-')}\"]`).click();\n  await expect(page.locator('.shopping_cart_badge')).toHaveText('1');\n  await expect(page.locator('.cart_item')).toHaveCount(1);\n  await expect(page.locator('.cart_item .inventory_item_name')).toHaveText(product2);\n\n  // Step 7: Click Continue Shopping and verify return to Products page\n  console.log('[Timeline] Click Continue Shopping');\n  await page.locator('[data-test=\"continue-shopping\"]').click();\n  await expect(page).toHaveURL(/.*inventory\\.html/);\n\n  // Step 8: Navigate back to Cart and proceed to Checkout\n  console.log('[Timeline] Navigate back to Cart');\n  await page.locator('.shopping_cart_link').click();\n  await expect(page).toHaveURL(/.*cart\\.html/);\n  console.log('[Timeline] Proceed to Checkout');\n  await page.locator('[data-test=\"checkout\"]').click();\n  await expect(page).toHaveURL(/.*checkout-step-one\\.html/);\n\n  // Step 9: Enter valid First Name, Last Name, and Zip/Postal Code on the Information page\n  console.log('[Timeline] Fill checkout information');\n  await page.locator('[data-test=\"firstName\"]').fill('John');\n  await page.locator('[data-test=\"lastName\"]').fill('Doe');\n  await page.locator('[data-test=\"postalCode\"]').fill('12345');\n\n  // Step 10: Click Continue to proceed to Overview page\n  console.log('[Timeline] Click Continue to Overview');\n  await page.locator('[data-test=\"continue\"]').click();\n  await expect(page).toHaveURL(/.*checkout-step-two\\.html/);\n\n  // Step 11: Verify product details, item total, tax, and final total calculation on Overview page\n  console.log('[Timeline] Verify overview page details');\n  await expect(page.locator('.cart_item')).toHaveCount(1);\n  await expect(page.locator('.cart_item .inventory_item_name')).toHaveText(product2);\n  const itemPriceText = await page.locator('.cart_item .inventory_item_price').textContent();\n  const itemPrice = parseFloat(itemPriceText!.replace('$', ''));\n  const itemTotalText = await page.locator('.summary_subtotal_label').textContent();\n  const itemTotal = parseFloat(itemTotalText!.replace('Item total: $', ''));\n  await expect(itemTotal).toBeCloseTo(itemPrice);\n  const taxText = await page.locator('.summary_tax_label').textContent();\n  const tax = parseFloat(taxText!.replace('Tax: $', ''));\n  const totalText = await page.locator('.summary_total_label').textContent();\n  const total = parseFloat(totalText!.replace('Total: $', ''));\n  await expect(total).toBeCloseTo(itemTotal + tax);\n\n  // Step 12: Click Finish to complete the order\n  console.log('[Timeline] Click Finish');\n  await page.locator('[data-test=\"finish\"]').click();\n  await expect(page).toHaveURL(/.*checkout-complete\\.html/);\n\n  // Step 13: Verify order confirmation message and completion image on Checkout Complete page\n  console.log('[Timeline] Verify order confirmation');\n  await expect(page.locator('.complete-header')).toHaveText('Thank you for your order!');\n  await expect(page.locator('.pony_express')).toBeVisible();\n\n  // Step 14: Click Back Home and verify navigation returns to Products page with empty cart\n  console.log('[Timeline] Click Back Home');\n  await page.locator('[data-test=\"back-to-products\"]').click();\n  await expect(page).toHaveURL(/.*inventory\\.html/);\n  await expect(page.locator('.shopping_cart_badge')).toHaveCount(0);\n});",
+  "timeline": [
+    {
+      "timestamp": "2026-10-26T07:27:42.106Z",
+      "time": 0,
+      "event": "Execution Queued",
+      "type": "info"
+    },
+    {
+      "timestamp": "2026-10-26T07:27:42.157Z",
+      "time": 0.051,
+      "event": "Error Occurred",
+      "details": "missing ) after argument list",
+      "type": "error"
+    },
+    {
+      "timestamp": "2026-10-26T07:27:42.254Z",
+      "time": 0.148,
+      "event": "Status: failed",
+      "type": "info"
+    }
+  ],
+  "artifacts": {
+    "screenshots": [],
+    "logs": [],
+    "console": []
+  },
+  "error": "missing ) after argument list"
+}

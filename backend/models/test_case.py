@@ -45,6 +45,13 @@ class EvaluationStatus(str, Enum):
     REJECTED = "rejected"        # duplicate, or evaluation judged it unusable
 
 
+class ScriptValidationStatus(str, Enum):
+    UNVERIFIED = "unverified"
+    RUNNING = "running"
+    VALIDATED = "validated"
+    FAILED = "failed"
+
+
 class TestCase(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     scenario_id: UUID
@@ -59,6 +66,10 @@ class TestCase(BaseModel):
     evaluation_status: EvaluationStatus = EvaluationStatus.PENDING
     evaluation_reason: str | None = None
     playwright_script: str | None = None
+    script_validation_status: ScriptValidationStatus = ScriptValidationStatus.UNVERIFIED
+    script_validation_attempts: int = Field(default=0, ge=0)
+    script_validation_completed_at: datetime | None = None
+    script_validation_diagnostic: str | None = None
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     reviewer: str | None = None
     approved_at: datetime | None = None
