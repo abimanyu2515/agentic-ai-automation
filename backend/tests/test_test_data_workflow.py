@@ -330,7 +330,7 @@ def test_generate_unique_test_data_then_script_for_selected_case(monkeypatch):
             assert len(repository.get_test_case(selected_case.id).test_data_sets) == 20
             assert selected_case.playwright_script is None
             selected_case.playwright_script = "\n".join(
-                f"test('data {index}')" for index in range(20)
+                f"test('data {index}', () => expect(true).toBe(true))" for index in range(20)
             )
             return state
 

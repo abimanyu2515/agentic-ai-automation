@@ -163,10 +163,13 @@ def test_test_data_agent_retries_duplicate_llm_batches_for_unsupported_rule():
         TestDataAgent._dataset_fingerprint(dataset)
         for dataset in result.generated_test_cases[0].test_data_sets
     }) == 20
-    # The reserved "invalid-phone" is skipped, the other 19 from the first
-    # reply are kept, and the second reply supplies the 20th.
-    phones = [row["phone"] for row in result.generated_test_data]
-    assert phones == [f"invalid-{i}" for i in range(1, 20)] + ["invalid-100"]
+    # The 19 distinct datasets from the first reply are kept; only the one that
+    # collided with reserved data is requested again.
+    assert [row["phone"] for row in result.generated_test_data] == [
+        *(f"invalid-{index}" for index in range(1, 20)),
+        "invalid-100",
+    ]
+    assert "Return exactly 1 NEW datasets" in llm_service.prompts[1]
     assert result.test_data_report["context_understood"]["expected_result"] == test_case.expected_result
     assert result.test_data_report["context_understood"]["unique_for_test_case"] is True
 
@@ -484,121 +487,166 @@ def test_test_data_agent_fails_when_llm_cannot_generate_unique_unsupported_data(
         TestDataAgent(llm_service=StubLLMService()).run(state)
 
 
-def _phone_state():
-    requirement = Requirement(title="User registration", description="Register a user.")
+def _order_form_state():
+    requirement = Requirement(title="Coffee order", description="Customers order two coffees.")
     scenario = Scenario(
         requirement_id=requirement.id,
-        scenario_name="Invalid phone",
-        description="Reject unsupported phone numbers.",
+        scenario_name="Order form validation",
+        description="Validate the coffee order form.",
     )
     test_case = TestCase(
         scenario_id=scenario.id,
-        title="Reject unsupported phone",
-        steps=["Enter an unsupported phone number", "Submit"],
-        expected_result="Phone validation error is shown",
+        title="Coffee order form validation",
+        steps=["Choose two coffees", "Enter name and email", "Submit the order"],
+        expected_result="The order is accepted",
     )
-    return WorkflowState(
+    state = WorkflowState(
         requirement=requirement,
         generated_scenarios=[scenario],
         generated_test_cases=[test_case],
     )
+    return state, test_case
 
 
-def _phone_dataset(value):
+def _order_dataset(index, **overrides):
+    data = {"coffee": f"Blend {index}", "email": f"buyer{index}@example.test"}
+    data.update(overrides)
     return {
-        "test_data": {"phone": value},
-        "targeted_validation_rule": "Phone number must use a supported format.",
-        "test_type": "invalid",
+        "test_data": data,
+        "targeted_validation_rule": "Valid order details are accepted.",
+        "test_type": "positive",
+        "expected_outcome": "accepted",
+        "assumptions": [],
     }
 
 
-def test_batch_response_drops_malformed_items_and_accepts_more_than_20():
-    """The live failure: 44 entries, some of them bare numbers, rejected
-    outright for exceeding 20 even though 20+ usable datasets were present."""
-    raw = [32995941, *[_phone_dataset(f"invalid-{i}") for i in range(43)]]
+class _QueuedReplies:
+    """Returns each reply in turn; a reply can be an exception to raise."""
 
-    batch = TestCaseDataBatchResponse.model_validate({"datasets": raw})
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.prompts = []
 
-    assert len(batch.datasets) == 43
-
-
-def test_test_data_agent_keeps_20_unique_datasets_from_oversized_response():
-    raw = [
-        32995941,
-        *[_phone_dataset(f"invalid-{i}") for i in range(30)],
-        _phone_dataset("invalid-0"),
-        {"test_data": {"other": "x"}, "targeted_validation_rule": "r", "test_type": "invalid"},
-    ]
-
-    class StubLLMService:
-        def structured_generate(self, *, user, response_model, **kwargs):
-            return response_model.model_validate({"datasets": raw})
-
-    result = TestDataAgent(llm_service=StubLLMService()).run(_phone_state())
-
-    rows = result.generated_test_cases[0].test_data_sets
-    assert len(rows) == 20
-    assert [row["phone"] for row in rows] == [f"invalid-{i}" for i in range(20)]
+    def structured_generate(self, *, user, response_model, **kwargs):
+        self.prompts.append(user)
+        reply = self.replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
 
 
-def test_test_data_agent_retries_llm_after_schema_failure():
+def test_reply_with_59_datasets_keeps_the_first_20_distinct():
+    """Live failure: 'List should have at most 20 items after validation, not 59'."""
+    state, test_case = _order_form_state()
+    reply = TestCaseDataBatchResponse.model_validate(
+        {"datasets": [_order_dataset(index) for index in range(59)]}
+    )
+    llm = _QueuedReplies([reply])
+
+    result = TestDataAgent(llm_service=llm).run(state)
+
+    assert len(llm.prompts) == 1
+    assert len(test_case.test_data_sets) == 20
+    assert [d["coffee"] for d in test_case.test_data_sets] == [f"Blend {i}" for i in range(20)]
+    assert len(result.generated_test_data) == 20
+    assert len(test_case.test_data_profiles) == 20
+
+
+def test_malformed_item_is_dropped_and_the_rest_is_requested_again():
+    """Live failure: one item had the key 'test_type: ' and the reply held 3 items."""
+    state, test_case = _order_form_state()
+    broken = (
+        '{"datasets": ['
+        + ",".join(__import__("json").dumps(_order_dataset(i)) for i in range(2))
+        + ', {"test_data": {"coffee": "Mocha", "email": ""}, '
+        '"targeted_validation_rule": "Email is required", "test_type: ": 1000000000000}]}'
+    )
+    first = TestCaseDataBatchResponse.model_validate_json(broken)
+    second = TestCaseDataBatchResponse.model_validate(
+        {"datasets": [_order_dataset(index) for index in range(2, 20)]}
+    )
+    llm = _QueuedReplies([first, second])
+
+    TestDataAgent(llm_service=llm).run(state)
+
+    assert len(first.datasets) == 2
+    assert len(llm.prompts) == 2
+    assert "Return exactly 18 NEW datasets" in llm.prompts[1]
+    assert '["coffee", "email"]' in llm.prompts[1]
+    assert len({d["coffee"] for d in test_case.test_data_sets}) == 20
+
+
+def test_llm_error_counts_as_one_request_not_a_failure():
     from backend.services.llm import LLMServiceError
 
-    class StubLLMService:
-        calls = 0
+    state, test_case = _order_form_state()
+    good = TestCaseDataBatchResponse.model_validate(
+        {"datasets": [_order_dataset(index) for index in range(20)]}
+    )
+    llm = _QueuedReplies([LLMServiceError("reply did not match the schema"), good])
 
-        def structured_generate(self, *, user, response_model, **kwargs):
-            self.calls += 1
-            if self.calls == 1:
-                raise LLMServiceError("LLM response did not match TestCaseDataBatchResponse")
-            return response_model.model_validate(
-                {"datasets": [_phone_dataset(f"invalid-{i}") for i in range(20)]}
-            )
+    TestDataAgent(llm_service=llm).run(state)
 
-    llm_service = StubLLMService()
-    result = TestDataAgent(llm_service=llm_service).run(_phone_state())
-
-    assert llm_service.calls == 2
-    assert len(result.generated_test_cases[0].test_data_sets) == 20
-    assert any("LLM test-data attempt failed" in log for log in result.logs)
+    assert len(llm.prompts) == 2
+    assert len(test_case.test_data_sets) == 20
 
 
-def test_test_data_agent_raises_last_llm_error_when_every_attempt_fails():
+def test_rows_with_other_field_names_are_skipped():
+    state, test_case = _order_form_state()
+    rows = [_order_dataset(index) for index in range(20)]
+    rows.insert(5, {**_order_dataset(99), "test_data": {"drink": "Tea"}})
+    reply = TestCaseDataBatchResponse.model_validate({"datasets": rows})
+
+    TestDataAgent(llm_service=_QueuedReplies([reply])).run(state)
+
+    assert all(set(d) == {"coffee", "email"} for d in test_case.test_data_sets)
+    assert len(test_case.test_data_sets) == 20
+
+
+def test_gives_a_clear_error_when_every_request_fails():
     from backend.services.llm import LLMServiceError
 
-    class StubLLMService:
-        calls = 0
+    state, _ = _order_form_state()
+    llm = _QueuedReplies([LLMServiceError("bad reply")] * 4)
 
-        def structured_generate(self, **kwargs):
-            self.calls += 1
-            raise LLMServiceError("bad shape")
-
-    llm_service = StubLLMService()
-    with pytest.raises(LLMServiceError, match="bad shape"):
-        TestDataAgent(llm_service=llm_service).run(_phone_state())
-    assert llm_service.calls == 3
+    with pytest.raises(ValueError, match="after 4 requests.*try again"):
+        TestDataAgent(llm_service=llm).run(state)
+    assert len(llm.prompts) == 4
 
 
-def test_test_data_agent_collects_short_replies_until_20():
-    """The live failure: a reply with only 18 datasets rejected the request.
-    Short replies now add up across attempts."""
-    replies = [
-        [_phone_dataset(f"invalid-{i}") for i in range(18)],
-        # Overlaps the first reply; only invalid-18 and invalid-19 are new.
-        [_phone_dataset(f"invalid-{i}") for i in range(10, 20)],
+def test_unquoted_numbers_and_label_variants_are_kept_not_dropped():
+    """Live failure: follow-up replies kept 0 items because zip codes were JSON numbers."""
+    reply = TestCaseDataBatchResponse.model_validate({"datasets": [
+        {**_order_dataset(1), "test_data": {"coffee": "Latte", "email": None, "zip": 12345}},
+        {**_order_dataset(2), "test_type": "Negative", "expected_outcome": " Rejected "},
+        {**_order_dataset(3), "test_type": "Edge Case"},
+        {**_order_dataset(4), "test_type": "nonsense"},
+    ]})
+
+    assert [d.test_type for d in reply.datasets] == ["positive", "invalid", "boundary"]
+    assert reply.datasets[0].test_data == {"coffee": "Latte", "email": "", "zip": "12345"}
+    assert reply.datasets[1].expected_outcome == "rejected"
+
+
+def test_datasets_sent_as_json_strings_are_decoded():
+    import json
+
+    reply = TestCaseDataBatchResponse.model_validate(
+        {"datasets": [json.dumps(_order_dataset(1)), "not json", _order_dataset(2)]}
+    )
+
+    assert [d.test_data["coffee"] for d in reply.datasets] == ["Blend 1", "Blend 2"]
+
+
+def test_datasets_wrapped_in_an_extra_list_or_joined_in_one_string_are_unwrapped():
+    import json
+
+    one, two, three = (_order_dataset(i) for i in (1, 2, 3))
+    reply = TestCaseDataBatchResponse.model_validate({"datasets": [
+        [one, two],
+        f"{json.dumps(three)}, {json.dumps(_order_dataset(4))}",
+    ]})
+
+    assert [d.test_data["coffee"] for d in reply.datasets] == [
+        "Blend 1", "Blend 2", "Blend 3", "Blend 4",
     ]
-
-    class StubLLMService:
-        prompts = []
-
-        def structured_generate(self, *, user, response_model, **kwargs):
-            self.prompts.append(user)
-            return response_model.model_validate({"datasets": replies.pop(0)})
-
-    llm_service = StubLLMService()
-    result = TestDataAgent(llm_service=llm_service).run(_phone_state())
-
-    rows = result.generated_test_cases[0].test_data_sets
-    assert [row["phone"] for row in rows] == [f"invalid-{i}" for i in range(20)]
-    # The second prompt tells the model which datasets it already produced.
-    assert TestDataAgent._dataset_fingerprint({"phone": "invalid-0"}) in llm_service.prompts[1]

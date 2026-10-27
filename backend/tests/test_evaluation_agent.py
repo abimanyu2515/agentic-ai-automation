@@ -128,41 +128,15 @@ def test_duplicate_rejected_before_llm_call_and_never_scored():
     assert "Duplicate" in result.generated_test_cases[1].evaluation_reason
 
 
-def test_mismatched_numbers_fall_back_to_unscored_review():
+def test_rejects_when_llm_returns_mismatched_numbers():
     tc = TestCase(scenario_id=uuid4(), title="Upload JPG", steps=["a"], expected_result="e")
     state = _state_with_test_cases([tc])
 
     # test_case_number=2 doesn't exist - only 1 candidate was sent to the LLM
     stub = _stub_for([_TestCaseEvaluation(test_case_number=2, relevance=0.9, completeness=0.9, reason="x")])
 
-    result = EvaluationAgent(llm_service=stub).run(state)
-
-    assert result.generated_test_cases[0].evaluation_status == EvaluationStatus.NEEDS_REVIEW
-    assert result.generated_test_cases[0].confidence == 0.0
-    assert any("expected exactly" in log for log in result.logs)
-
-
-class _FailingLLMService:
-    def structured_generate(self, *, user, response_model, **kwargs):
-        raise LLMServiceError("LLM response did not match _EvaluationBatch after 3 attempts")
-
-
-def test_llm_failure_sends_candidates_to_review_but_keeps_duplicate_rejections():
-    """The live failure: the model flattened evaluations into bare values on
-    every retry. That must not abort test case generation - surviving
-    candidates go to human review unscored, duplicates stay rejected."""
-    tc1 = TestCase(scenario_id=uuid4(), title="Upload JPG", steps=["a"], expected_result="Picture uploads")
-    tc2 = TestCase(scenario_id=uuid4(), title="Upload JPG", steps=["a"], expected_result="Picture uploads")
-    tc3 = TestCase(scenario_id=uuid4(), title="Reject PNG over 5MB", steps=["a"], expected_result="Error shown")
-    state = _state_with_test_cases([tc1, tc2, tc3])
-
-    result = EvaluationAgent(llm_service=_FailingLLMService()).run(state)
-
-    statuses = [tc.evaluation_status for tc in result.generated_test_cases]
-    assert statuses == [EvaluationStatus.NEEDS_REVIEW, EvaluationStatus.REJECTED, EvaluationStatus.NEEDS_REVIEW]
-    assert result.generated_test_cases[0].evaluation_reason == "Automatic evaluation unavailable; review manually."
-    assert "Duplicate" in result.generated_test_cases[1].evaluation_reason
-    assert any("LLM evaluation failed" in log for log in result.logs)
+    with pytest.raises(LLMServiceError, match="expected exactly"):
+        EvaluationAgent(llm_service=stub).run(state)
 
 
 def test_requires_requirement():

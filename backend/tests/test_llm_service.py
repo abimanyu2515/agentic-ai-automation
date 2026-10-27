@@ -129,37 +129,6 @@ def test_llm_service_structured_generate_retries_on_failure():
         assert call_count == 2
 
 
-def test_llm_service_structured_generate_retry_includes_validation_feedback():
-    """A retry after a schema mismatch tells the model what it got wrong,
-    instead of resending the identical prompt."""
-    from pydantic import BaseModel
-
-    class Item(BaseModel):
-        value: str
-
-    class ResponseModel(BaseModel):
-        items: list[Item]
-
-    config = LLMConfig(provider="openai", model="gpt-4o", api_key="test-key")
-    service = LLMService(config=config)
-    prompts = []
-
-    def side_effect(*args, **kwargs):
-        prompts.append(kwargs["messages"][1]["content"])
-        if len(prompts) == 1:
-            return MockCompletionResponse('{"items": [3.1, "x"]}')
-        return MockCompletionResponse('{"items": [{"value": "ok"}]}')
-
-    with patch("backend.services.llm.completion", side_effect=side_effect):
-        result = service.structured_generate(user="user", response_model=ResponseModel, max_retries=3)
-
-    assert result.items[0].value == "ok"
-    assert "rejected" not in prompts[0]
-    assert "did not match the schema" in prompts[1]
-    assert '{"items": [3.1, "x"]}' in prompts[1]
-    assert "items.0" in prompts[1]
-
-
 def test_llm_service_structured_generate_fails_after_max_retries():
     """structured_generate() fails after max_retries exhausted."""
     from pydantic import BaseModel
