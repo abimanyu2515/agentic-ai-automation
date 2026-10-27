@@ -91,7 +91,7 @@ def test_playwright_script_generation_uses_extended_llm_timeout():
 
     PlaywrightAgent(llm_service=llm_service).run(state)
 
-    assert llm_service.timeout == 120
+    assert llm_service.timeout == 180
 
 
 def test_grounded_generation_uses_evidence_without_project_credentials():
@@ -124,6 +124,9 @@ def test_grounded_generation_uses_evidence_without_project_credentials():
             assert project_id == project.id
             return project
 
+        def get_scenario(self, scenario_id):
+            return None
+
     llm_service = PromptCaptureLLM()
     state = WorkflowState(
         project_id=project.id,
@@ -152,6 +155,59 @@ def test_grounded_generation_uses_evidence_without_project_credentials():
     assert "handle null explicitly with a guard" in llm_service.prompt
     assert "private-user" not in llm_service.prompt
     assert "private-password" not in llm_service.prompt
+
+
+def test_prompt_carries_feature_context_and_locator_object_rules():
+    requirement = Requirement(
+        title="Checkout",
+        description="Shoppers buy the items in their cart.",
+        acceptance_criteria=["The order confirmation heading is shown after Finish."],
+    )
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Complete checkout",
+        description="A logged-in shopper completes checkout.",
+    )
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Checkout succeeds",
+        preconditions=["The user is logged in"],
+        steps=["Open the cart", "Click Checkout"],
+        expected_result="The order is confirmed.",
+        evaluation_status=EvaluationStatus.APPROVED,
+    )
+
+    class CaptureLLM:
+        def generate(self, *, system, user, **kwargs):
+            self.system, self.user = system, user
+            return "import { test, expect } from '@playwright/test';\ntest('x', async () => {});"
+
+    project = Project(
+        name="Shop",
+        target_url="https://shop.example.test",
+        requirements=[requirement.id],
+    )
+
+    class ScenarioRepository:
+        def list_projects(self):
+            return [project]
+
+        def get_scenario(self, scenario_id):
+            return scenario if scenario_id == scenario.id else None
+
+    llm = CaptureLLM()
+    PlaywrightAgent(llm_service=llm, repo=ScenarioRepository()).run(WorkflowState(
+        requirement=requirement,
+        generated_test_cases=[test_case],
+        human_approved_test_case_ids=[test_case.id],
+    ))
+
+    assert "The order confirmation heading is shown after Finish." in llm.user
+    assert "Scenario: Complete checkout" in llm.user
+    assert "requires logging in first" in llm.user
+    assert "make the test fail clearly" not in llm.user
+    assert "ALWAYS use page.locator" not in llm.system
+    assert "never a getBy* call written as a string" in llm.system
 
 
 def test_script_generation_respects_configured_worker_limit():
@@ -427,6 +483,19 @@ def test_joined_data_driven_scripts_scope_declarations_and_hoist_imports():
     first, second = joined.split('test.describe("TD-02"')
     assert first.count("const BASE_URL") == 1
     assert second.count("const BASE_URL") == 1
+
+
+def test_missing_playwright_import_is_added():
+    code = (
+        "const BASE_URL = process.env.TARGET_URL || '';\n"
+        "test('x', async ({ page }) => { await expect(page).toHaveURL(BASE_URL); });"
+    )
+    agent = PlaywrightAgent(llm_service=StubLLMService(generate_response=code))
+    test_case = TestCase(scenario_id=uuid4(), title="x", steps=["a"], expected_result="b")
+
+    script = agent._generate_script(test_case, "playwright", "https://app.example.test")
+
+    assert script.startswith("import { test, expect } from '@playwright/test';")
 
 
 def test_template_values_cannot_break_out_of_template_literals():

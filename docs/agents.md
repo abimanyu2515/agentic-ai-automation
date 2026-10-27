@@ -174,8 +174,6 @@ Evaluates generated test cases for quality. Performs:
 
 **State writes**: Sets `tc.evaluation_status` and `tc.evaluation_reason` for each test case
 
-**LLM failure fallback**: If the scoring response is unusable (schema mismatch after retries, or test case numbers that don't match), the agent does not fail the workflow. Duplicate rejections stand, and every remaining candidate is set to `NEEDS_REVIEW` with confidence `0.0` and the reason "Automatic evaluation unavailable; review manually."
-
 **Operation**: `GENERATE_TESTCASES` (sub-step, always runs after TestCaseAgent)
 
 ---
@@ -191,9 +189,25 @@ Generates executable Playwright TypeScript scripts from approved test cases. Use
 - **API Automated** → Generates API test script with HTTP calls, payloads, response validation
 - **Manual Testing** → Returns human-readable step instructions instead of a script
 
+The prompt includes a feature context built from the requirement (title, description, acceptance criteria, business rules) and the test case's scenario. Live page evidence binds locators only on the pages it lists. On other pages, usually those behind the login, the agent builds accessible locators from the step wording and never writes a test that fails on purpose. Each test starts logged out, so a case that needs an authenticated user logs in first with `TARGET_USERNAME` and `TARGET_PASSWORD`.
+
+Before saving a data-driven script, `WorkflowService` regenerates it once when it finds a TODO or method name used as a selector (for example `page.locator('getByLabel')`), a `page.click(selector)` style action that skips step screenshots, a forced failure or skip, `waitForTimeout`, or no `expect` assertion. The 20 datasets and their one-test-per-dataset layout are unchanged.
+
 **State writes**: `tc.playwright_script`, `tc.execution_type`, `tc.automation_framework`
 
 **Operation**: `GENERATE_PLAYWRIGHT`
+
+#### Live-verified script generation (Generate Script)
+
+**Files**: `backend/agents/script_generator_agent.py`, `backend/agents/dom_distiller.py`
+
+When **Generate Script** (`POST /api/v1/projects/{project_id}/testcases/{test_case_id}/generate-script`) is called for a Playwright project that has a `target_url`, `WorkflowService` calls `generate_accurate_test_script(target_url, steps, test_title)` instead of the data-driven path. That function:
+
+1. Opens a headless Chromium browser in Python Playwright (set `HEADLESS_AGENT=false` to watch it) and navigates to the project's target URL.
+2. For each test case step, runs up to 6 micro-actions. Each one reads the live ARIA snapshot and visible interactive elements (with a recommended selector each, never raw HTML), asks the LLM for an `AgentDecision` (`click`, `fill`, `select_option`, `press`, `assert_visible`, `assert_text` or `done`), and runs it on the page with a 5000 ms timeout. Actions that work go into the verified trace. When an action fails, its error is sent back to the LLM so it picks another locator.
+3. Closes the browser, then asks the LLM to write a TypeScript `@playwright/test` file that uses only the selectors from the verified trace.
+
+The script is saved to `tc.playwright_script` with `script_validation_status = unverified`. Projects without a `target_url` keep the data-driven path described above. LLM calls go through `LLMService`, and tests inject a fake generator through `WorkflowService(script_generator=...)`.
 
 ---
 

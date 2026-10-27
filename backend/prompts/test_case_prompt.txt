@@ -14,8 +14,6 @@ Below are the numbered scenarios to write test cases for. Write exactly one test
 
 $scenarios
 
-There are exactly $count scenarios. Return every scenario number from 1 through $count exactly once, with one and only one test case per number.
-
 For each test case, write realistic preconditions, a clear ordered list of concrete steps, and one specific expected result. The "scenario_number" you return for each test case must be the exact number shown next to the scenario above.
 
 Respond with ONLY a JSON object in exactly this shape, with no extra text before or after it:

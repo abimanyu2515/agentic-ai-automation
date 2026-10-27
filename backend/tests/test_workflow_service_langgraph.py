@@ -181,7 +181,9 @@ def test_generate_playwright_script_adds_20_datasets_and_one_test_each():
 
     with mock.patch.object(LLMService, "structured_generate", return_value=_coupon_datasets()), \
          mock.patch.object(LLMService, "generate", side_effect=llm.generate):
-        updated_tc = ws.generate_playwright_script(project.id, tc.id)
+        updated_tc = ws._generate_data_driven_script(
+            project.id, ws.repo.get_scenario(tc.scenario_id).requirement_id, tc, "Playwright"
+        )
 
     script = updated_tc.playwright_script
     assert len(updated_tc.test_data_sets) == 20
@@ -214,7 +216,7 @@ def test_generate_playwright_script_uses_read_only_evidence_and_repairs_once():
     ws = WorkflowService(inspector=inspector)
     project, tc = _data_driven_case(ws, safe=True)
     llm = _TemplateLLM()
-    issues = iter([["Label locator 'Coupon' is not uniquely observed"], []])
+    issues = iter([["TypeScript compilation failed"], []])
 
     with mock.patch.object(LLMService, "structured_generate", return_value=_coupon_datasets()), \
          mock.patch.object(LLMService, "generate", side_effect=llm.generate), \
@@ -222,13 +224,35 @@ def test_generate_playwright_script_uses_read_only_evidence_and_repairs_once():
              "backend.services.workflow_service.validate_playwright_script",
              side_effect=lambda script, dom_context: next(issues),
          ):
-        updated_tc = ws.generate_playwright_script(project.id, tc.id)
+        updated_tc = ws._generate_data_driven_script(
+            project.id, ws.repo.get_scenario(tc.scenario_id).requirement_id, tc, "Playwright"
+        )
 
     assert inspector.calls == [False]
     assert all("LIVE PAGE EVIDENCE" in prompt for prompt in llm.prompts)
     assert any("REPAIR FEEDBACK" in prompt for prompt in llm.prompts)
     assert updated_tc.playwright_script.count("test(") == 20
     assert updated_tc.script_validation_status == "unverified"
+
+
+def test_generate_playwright_script_uses_live_verified_generator_for_target_url():
+    calls = []
+
+    async def fake_generator(target_url, steps, test_title):
+        calls.append((target_url, steps, test_title))
+        return "import { test, expect } from '@playwright/test';\ntest('live', async () => {});"
+
+    ws = WorkflowService(script_generator=fake_generator)
+    project, tc = _data_driven_case(ws)
+
+    updated_tc = ws.generate_playwright_script(project.id, tc.id)
+
+    assert calls == [("https://coupons.example.test", list(tc.steps), tc.title)]
+    assert updated_tc.playwright_script.startswith("import { test, expect }")
+    assert updated_tc.script_validation_status == "unverified"
+    assert ws.repo.get_test_case(tc.id).playwright_script == updated_tc.playwright_script
+    # The live path does not generate datasets.
+    assert updated_tc.test_data_sets == []
 
 
 def test_run_execution_and_stream_via_langgraph(mock_llm_service, fake_playwright_runner):
@@ -258,3 +282,48 @@ def test_run_execution_and_stream_via_langgraph(mock_llm_service, fake_playwrigh
     results = ws.repo.get_execution_results(project.id)
     assert len(results) == 1, active_execution_events[str(tc.id)][-1]
     assert results[0].status.value == "passed"
+
+
+def test_script_issues_ignore_unobserved_locators_but_catch_placeholders():
+    """Live failure: repairing against login-page-only evidence produced
+    locator('// TODO: locator for FirstName field') in every test."""
+    evidence = {"pages": [{"url": "https://app.example.test/", "forms": [], "elements": []}]}
+    unobserved = ["Selector locator '#first-name' is not uniquely observed"]
+
+    with mock.patch(
+        "backend.services.workflow_service.validate_playwright_script",
+        return_value=unobserved,
+    ):
+        good = WorkflowService._script_issues("await page.locator('#first-name').fill('A');", evidence)
+        bad = WorkflowService._script_issues(
+            "await page.locator('// TODO: locator for FirstName field').fill('A');", evidence
+        )
+
+    assert good == []
+    assert len(bad) == 1 and "TODO" in bad[0]
+    # Placeholders are caught even when no page evidence was collected.
+    assert WorkflowService._script_issues("page.getByText('TODO confirm text')", None)
+    assert WorkflowService._script_issues("page.locator('//button')", None) == []
+
+
+def test_script_issues_catch_scripts_that_cannot_test_the_app():
+    """Live failure: page.locator('getByLabel') timed out in every checkout test."""
+    good = (
+        "test('checkout', async ({ page }) => {\n"
+        "  await page.getByLabel('First Name').fill('A');\n"
+        "  await page.locator('#continue').click();\n"
+        "  await expect(page.getByText('Thank you')).toBeVisible();\n"
+        "});"
+    )
+    assert WorkflowService._script_issues(good, None) == []
+
+    def issues(snippet):
+        return " ".join(WorkflowService._script_issues(snippet, None))
+
+    assert "method name" in issues("await page.locator('getByLabel').fill('A');")
+    assert "method name" in issues("await page.locator(\"page.getByRole('button')\").click();")
+    assert "selector string" in issues("await page.click('#continue');")
+    assert "on purpose" in issues("expect(false).toBeTruthy();")
+    assert "on purpose" in issues("test.skip(true, 'locator not observed');")
+    assert "waitForTimeout" in issues("await page.waitForTimeout(3000);")
+    assert "does not assert" in issues("test('x', async ({ page }) => { await page.goto('/'); });")

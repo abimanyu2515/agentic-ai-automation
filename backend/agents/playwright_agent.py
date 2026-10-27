@@ -83,20 +83,30 @@ _SYSTEM_PROMPT = (
     "the ONLY source of truth. Use supplied test_data values for inputs; "
     "never invent test data or rely on prior knowledge of any specific "
     "demo site, and never hardcode selectors, URLs, or credentials from memory.\n"
-    "2. When live page evidence is provided, derive every locator only from it: prefer uniquely "
-    "observed accessible locators (getByRole, getByLabel, getByPlaceholder, getByText); use an "
-    "observed CSS selector only when the evidence includes it. If a locator is absent, emit a "
-    "`// TODO: locator not specified in inputs` comment instead of fabricating one.\n"
+    "2. Live page evidence, when provided, covers only the pages it lists (usually the pages "
+    "reachable before login). On those pages derive every locator from it: prefer uniquely "
+    "observed accessible locators (getByRole, getByLabel, getByPlaceholder, getByText), and use "
+    "an observed CSS selector only when the evidence includes it. For pages the evidence does not "
+    "list, use the accessible locator the step wording implies: getByRole with the control's "
+    "visible name (e.g. getByRole('button', { name: 'Continue' })), getByLabel or getByPlaceholder "
+    "with the field's name, or getByText with text quoted in the step. Every locator "
+    "string must be a real selector or accessible name: never put a comment, a TODO, a "
+    "description, or a Playwright method name such as 'getByLabel' inside locator(), "
+    "getByText(), or any other locator call.\n"
     "3. Match the control type to the wording: `<select>` dropdowns use selectOption({ label: '...' }); "
     "text inputs use fill(); buttons/links use click(). Never call selectOption on a text input.\n"
-    "4. Do NOT perform pre-login actions unless explicitly specified in the Preconditions or Steps. "
-    "Start directly by navigating to the base URL (goto(BASE_URL)) and then execute the steps in order.\n"
+    "4. Start every test with `await page.goto(BASE_URL)`. Each test runs in a fresh, logged-out "
+    "browser, so log in first only when the preconditions or steps need an authenticated user; "
+    "otherwise do not add login or other setup the case does not ask for. Then execute the steps "
+    "in order.\n"
     "5. After submitting a login form, wait for the post-login landing to complete (e.g. wait for a URL "
     "change or for a dashboard/home element named in the steps to become visible) before executing "
     "subsequent steps. Do NOT navigate to arbitrary deep URLs right after login.\n"
-    "6. ALWAYS use page.locator('selector').click() and page.locator('selector').fill('text') instead of "
-    "page.click('selector') or page.fill('selector'). This is required by the platform to capture "
-    "step-by-step screenshots and timeline reports.\n"
+    "6. Act through Locator objects, for example `await page.getByRole('button', { name: 'Login' }).click()`, "
+    "`await page.getByLabel('Email').fill(value)`, or `await page.locator('#observed-id').click()`. "
+    "Never call page.click(), page.fill(), page.type(), page.check(), or page.selectOption() with a "
+    "selector string: the platform captures step screenshots only from Locator actions. "
+    "page.locator() takes a CSS selector, never a getBy* call written as a string.\n"
     "7. Do NOT use `const text = await locator.textContent(); expect(text).toContain('val')`. This does not "
     "auto-wait and causes race conditions. ALWAYS use Playwright's auto-waiting assertions, e.g. "
     "`await expect(page.locator('selector')).toContainText('val')` or "
@@ -118,6 +128,12 @@ _SYSTEM_PROMPT = (
     "13. Every locator you act on or assert must match exactly ONE element (Playwright strict "
     "mode). A class or text that can repeat (list items, cards, images, prices) must be narrowed "
     "with a more specific selector, a role with a name, filter({ hasText }), or .first().\n"
+    "14. Turn every step into real Playwright actions. Never write a test that fails on purpose "
+    "(expect(false), an unconditional throw, test.skip, test.fixme, test.fail) or one that only "
+    "navigates. When a locator is uncertain, use the best accessible locator from rule 2.\n"
+    "15. When a step moves to another page, wait for something the steps, expected result, or "
+    "evidence name on that page (a heading, button, or URL fragment) before the next step, so a "
+    "failure points at the step that broke.\n"
 )
 
 
@@ -308,6 +324,7 @@ class PlaywrightAgent(BaseAgent):
                 target_url,
                 dom_context=state.dom_context,
                 repair_feedback=state.repair_feedback,
+                feature_context=self._feature_context(state.requirement, test_case),
             )
 
         if self.max_workers == 1 or len(approved) == 1:
@@ -330,6 +347,7 @@ class PlaywrightAgent(BaseAgent):
         target_url: str | None,
         state: WorkflowState,
     ) -> str:
+        feature_context = self._feature_context(state.requirement, template_case)
         template_script = self._generate_script(
             template_case,
             framework,
@@ -337,6 +355,7 @@ class PlaywrightAgent(BaseAgent):
             test_data_template=True,
             dom_context=state.dom_context,
             repair_feedback=state.repair_feedback,
+            feature_context=feature_context,
         )
         missing_markers = [
             marker for marker in markers.values()
@@ -361,6 +380,7 @@ class PlaywrightAgent(BaseAgent):
                 ),
                 dom_context=state.dom_context,
                 repair_feedback=state.repair_feedback,
+                feature_context=feature_context,
             )
             missing_markers = [
                 marker for marker in markers.values()
@@ -440,6 +460,28 @@ class PlaywrightAgent(BaseAgent):
                 f"datasets of '{test_case.title}'"
             )
         return self._join_data_driven_scripts(scripts)
+
+    def _feature_context(self, requirement, test_case: TestCase) -> str:
+        """Requirement and scenario summary, so the model knows the feature under test."""
+        lines = []
+        if requirement is not None:
+            lines.append(f"Requirement: {requirement.title}")
+            lines.append(f"Description: {requirement.description[:1500]}")
+            for label, items in (
+                ("Acceptance criteria", requirement.acceptance_criteria),
+                ("Business rules", requirement.business_rules),
+            ):
+                if items:
+                    lines.append(f"{label}:")
+                    lines.extend(f"- {item}" for item in items[:10])
+        scenario = (
+            self.repo.get_scenario(test_case.scenario_id)
+            if self.repo else None
+        )
+        if scenario is not None:
+            lines.append(f"Scenario: {scenario.scenario_name} ({scenario.path_type})")
+            lines.append(f"Scenario description: {scenario.description[:800]}")
+        return "\n".join(lines)
 
     @staticmethod
     def _case_outcome(profiles: list[dict[str, str]], path_type: str) -> str:
@@ -577,6 +619,7 @@ class PlaywrightAgent(BaseAgent):
         template_feedback: str | None = None,
         dom_context: dict | None = None,
         repair_feedback: str | None = None,
+        feature_context: str | None = None,
     ) -> str:
         import os
         base_url = target_url or ""
@@ -623,6 +666,7 @@ class PlaywrightAgent(BaseAgent):
                 test_data=json.dumps(test_case.test_data, ensure_ascii=False),
                 base_url=base_url,
                 framework_context=framework_context_str,
+                feature_context=feature_context or "None specified",
                 target_username="",
                 target_password=""
             )
@@ -642,6 +686,7 @@ class PlaywrightAgent(BaseAgent):
                 test_data=json.dumps(test_case.test_data, ensure_ascii=False),
                 base_url=base_url,
                 framework_context=framework_context_str,
+                feature_context=feature_context or "None specified",
                 target_username="",
                 target_password=""
             )
@@ -658,6 +703,7 @@ class PlaywrightAgent(BaseAgent):
                 test_data=json.dumps(test_case.test_data, ensure_ascii=False),
                 base_url=base_url,
                 framework_context=framework_context_str,
+                feature_context=feature_context or "None specified",
                 target_username="",
                 target_password=""
             )
@@ -698,15 +744,22 @@ class PlaywrightAgent(BaseAgent):
             "\n\nProject credentials are never included in this prompt. For a valid login, "
             "use process.env.TARGET_USERNAME and process.env.TARGET_PASSWORD without "
             "fallback values. For an invalid login, use only explicit test_data values. "
-            "Do not add a login step unless the case asks for one."
+            "Every test runs in a fresh, logged-out browser with no saved session. When the "
+            "preconditions or steps need an authenticated user (including wording such as "
+            "'logged in' or 'existing session'), start by logging in on the login page with "
+            "those environment variables, wait for the post-login page, then follow the steps. "
+            "Never navigate straight to a page behind the login. Do not add a login step when "
+            "the case does not need an authenticated user."
         )
         if dom_context is not None:
             prompt += (
-                "\n\nLIVE PAGE EVIDENCE (the only allowed source for locators and observed text):\n"
+                "\n\nLIVE PAGE EVIDENCE (binding for the pages listed below; other pages were "
+                "not inspected):\n"
                 + json.dumps(dom_context, ensure_ascii=False, separators=(",", ":"))
-                + "\nUse only uniquely observed labels, accessible names, visible text, and selectors. "
-                "Do not invent locators. Assert the stated expected_result with an observed "
-                "visible result or an outcome explicitly named by the test case."
+                + "\nOn the listed pages use only uniquely observed labels, accessible names, "
+                "visible text, and selectors. On pages that are not listed, follow rule 2. "
+                "Assert the stated expected_result with an observed visible result or an "
+                "outcome explicitly named by the test case."
             )
         if repair_feedback:
             prompt += (
@@ -718,13 +771,16 @@ class PlaywrightAgent(BaseAgent):
         raw_output = self.llm_service.generate(
             system=system_prompt,
             user=prompt,
-            timeout=120,
+            timeout=180,
         )
         code = _strip_code_fences(raw_output)
 
         # Post-process generated code to guarantee required environment variables are defined
         # and that expect is always imported
         if framework == "playwright":
+            # Models sometimes drop the import line; it is always the same one.
+            if "test(" in code and "@playwright/test" not in code:
+                code = "import { test, expect } from '@playwright/test';\n\n" + code
             # Fix import to always include expect
             lines = code.split("\n")
             for idx, line in enumerate(lines):

@@ -1,4 +1,5 @@
 import logging
+import re
 import threading
 from uuid import UUID
 
@@ -21,6 +22,23 @@ from backend.repository.project_repository import get_project_repository
 from backend.services.playwright_script_validation import validate_playwright_script
 
 logger = logging.getLogger(__name__)
+
+# A locator call whose argument is a comment or TODO note instead of a selector.
+_PLACEHOLDER_LOCATOR = re.compile(
+    r"""\.(?:locator|getByText|getByLabel|getByPlaceholder|getByTestId|getByRole)\(\s*"""
+    r"""(['"`])\s*(?://\s|TODO\b)[^'"`]*\1"""
+)
+# page.locator('getByLabel') - a locator method name passed as a CSS selector.
+_METHOD_AS_SELECTOR = re.compile(
+    r"""\.locator\(\s*(['"`])\s*(?:page\.)?(?:getBy\w+|locator)\b"""
+)
+# Selector-string actions bypass the runner's Locator screenshot hooks.
+_PAGE_SELECTOR_ACTION = re.compile(
+    r"""\bpage\.(?:click|fill|type|check|uncheck|selectOption|press)\(\s*['"`]"""
+)
+_FORCED_FAILURE = re.compile(
+    r"""expect\(\s*false\s*\)|\btest\.(?:skip|fixme|fail)\("""
+)
 
 
 _test_data_generation_locks: dict[UUID, threading.Lock] = {}
@@ -52,9 +70,11 @@ def _test_case_generation_lock(
 
 
 class WorkflowService:
-    def __init__(self, inspector=None):
+    def __init__(self, inspector=None, script_generator=None):
         # Read only page inspector for grounded script generation; injectable for tests.
         self.inspector = inspector
+        # Live-browser script generator coroutine; injectable so tests skip the browser and LLM.
+        self.script_generator = script_generator
 
     @property
     def repo(self):
@@ -380,7 +400,7 @@ class WorkflowService:
                 repair_feedback = (
                     "The first script did not pass these checks: "
                     + "; ".join(issues[:8])
-                    + ". Use only locators from the live page evidence."
+                    + ". Keep locators from the live page evidence on the pages it lists."
                 )
             # A new script has not been through grounded validation yet.
             test_case.script_validation_status = ScriptValidationStatus.UNVERIFIED
@@ -424,13 +444,54 @@ class WorkflowService:
 
     @staticmethod
     def _script_issues(script: str, dom_context: dict | None) -> list[str]:
+        """Defects worth one regeneration: placeholders, method names used as
+        selectors, selector-string actions, forced failures, fixed sleeps,
+        compile errors, and no assertion.
+
+        "Locator not observed" findings are not used here. Inspection never logs
+        in, so the evidence covers only pre-login pages; repairing against it
+        replaced valid checkout locators with TODO placeholders.
+        """
+        issues = []
+        placeholders = _PLACEHOLDER_LOCATOR.findall(script)
+        if placeholders:
+            issues.append(
+                f"{len(placeholders)} locator calls contain a comment or TODO instead of a "
+                "selector; replace each with the most likely real locator for that control"
+            )
+        misused = _METHOD_AS_SELECTOR.findall(script)
+        if misused:
+            issues.append(
+                f"{len(misused)} locator() calls receive a Playwright method name as the "
+                "selector; call page.getByRole/getByLabel/getByPlaceholder directly instead"
+            )
+        if _PAGE_SELECTOR_ACTION.search(script):
+            issues.append(
+                "Actions call page.click/page.fill with a selector string; act through "
+                "Locator objects such as page.getByRole(...).click()"
+            )
+        if _FORCED_FAILURE.search(script):
+            issues.append(
+                "The script fails or skips on purpose; perform every step with the best "
+                "accessible locator instead"
+            )
+        if "waitForTimeout(" in script:
+            issues.append("The script uses waitForTimeout; wait on the expected outcome instead")
+        if "test(" in script and "expect(" not in script:
+            issues.append("Script does not assert the expected result")
         if not dom_context:
-            return []
+            return issues
         try:
-            return validate_playwright_script(script, dom_context)
+            found = validate_playwright_script(script, dom_context)
         except RuntimeError:
-            # The local TypeScript compiler is unavailable; skip the repair pass.
-            return []
+            # The local TypeScript compiler is unavailable; skip those checks.
+            return issues
+        asserts_checked = any(issue.startswith("Script does not assert") for issue in issues)
+        return issues + sorted({
+            issue for issue in found
+            if issue.startswith("TypeScript")
+            or (issue.startswith("Script does not assert") and not asserts_checked)
+        })
 
     def _generate_test_data_test_cases(
         self,
@@ -646,6 +707,10 @@ class WorkflowService:
             and (automation_framework or "").lower() == "playwright"
             and (project.framework or "playwright").lower() == "playwright"
         ):
+            if project.target_url:
+                return self._generate_live_verified_script(
+                    project.target_url, test_case, automation_framework
+                )
             return self._generate_data_driven_script(
                 project_id, requirement.id, test_case, automation_framework
             )
@@ -660,6 +725,34 @@ class WorkflowService:
         updated_tc = state.generated_test_cases[0]
         self.repo.save_test_cases([updated_tc])
         return updated_tc
+
+    def _generate_live_verified_script(
+        self,
+        target_url: str,
+        test_case: TestCase,
+        automation_framework: str,
+    ) -> TestCase:
+        """Build a TypeScript Playwright script by running the steps on the live target app."""
+        import asyncio
+
+        script_generator = self.script_generator
+        if script_generator is None:
+            from backend.agents.script_generator_agent import generate_accurate_test_script
+
+            script_generator = generate_accurate_test_script
+
+        script = asyncio.run(
+            script_generator(target_url, list(test_case.steps), test_case.title)
+        )
+        test_case.automation_framework = automation_framework
+        test_case.playwright_script = script
+        # A new script has not been through grounded validation yet.
+        test_case.script_validation_status = ScriptValidationStatus.UNVERIFIED
+        test_case.script_validation_attempts = 0
+        test_case.script_validation_completed_at = None
+        test_case.script_validation_diagnostic = None
+        self.repo.save_test_cases([test_case])
+        return test_case
 
     def _generate_data_driven_script(
         self,
