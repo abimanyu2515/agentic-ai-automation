@@ -393,9 +393,10 @@ export const API = {
 
   // Playwright Code Generation
   async generatePlaywrightScript(projectId, testCaseId, framework) {
+    // Playwright scripts also generate the case's 20 datasets first when missing.
     const options = {
       method: 'POST',
-      signal: AbortSignal.timeout(150000)
+      signal: AbortSignal.timeout(600000)
     };
     if (framework) {
       options.body = JSON.stringify({ framework });

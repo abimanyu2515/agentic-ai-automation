@@ -45,6 +45,7 @@ Feature documentation is stored in `docs/`. Architecture specifications may be a
 * Use dependency injection in `backend/graph/workflow.py` so agent and runner tests do not require live LLM or browser calls.
 * Use pytest for Python tests and Playwright tests for browser behavior. Keep generated artifacts and local databases out of source changes.
 * After any SQLAlchemy database error, roll back and clear the session before another database operation. Do not reuse a failed transaction.
+* Settings load from `.env` first, then `backend/config/default_config.yaml`. Keep secrets and per machine values in `.env`.
 * Update the relevant documentation when an API route, workflow stage, project setting, or execution behavior changes.
 
 ## Agent skills
@@ -60,5 +61,7 @@ Declined: vercel React best practices, Next.js best practices, web design guidel
 * [backend/tests/AGENTS.md](backend/tests/AGENTS.md): Backend test doubles and project configuration fixtures
 * [backend/agents/AGENTS.md](backend/agents/AGENTS.md): Workflow agents, prompts, and state contract
 * [backend/playwrightt/AGENTS.md](backend/playwrightt/AGENTS.md): Next.js and Playwright execution workspace conventions
+* [backend/graph/AGENTS.md](backend/graph/AGENTS.md): LangGraph construction, node registration, and routing
+* [backend/services/AGENTS.md](backend/services/AGENTS.md): Business services, execution, credentials, and grounded script generation
 
 _Drafted by /audit from the repo, worth a quick human pass. Edit freely: once a line stops matching this draft, later runs treat it as curated and will flag rather than overwrite it._

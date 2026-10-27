@@ -63,8 +63,10 @@ Design Decision:
     opt into bounded parallel generation when creating larger test suites.
 """
 
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 import json
+import re
 from uuid import UUID
 
 from backend.agents.base import BaseAgent
@@ -113,6 +115,16 @@ _SYSTEM_PROMPT = (
     "12. For async operations (e.g. form submissions that process server-side), wait with an adequate timeout "
     "on the expected outcome (e.g. `await expect(page).toHaveURL(/confirm/, { timeout: 15000 });`) instead of "
     "fixed sleeps. Rely on Playwright auto-waiting; never use waitForTimeout().\n"
+    "13. Every locator you act on or assert must match exactly ONE element (Playwright strict "
+    "mode). A class or text that can repeat (list items, cards, images, prices) must be narrowed "
+    "with a more specific selector, a role with a name, filter({ hasText }), or .first().\n"
+)
+
+
+# A whole import statement, including ones split over several lines.
+_IMPORT_STATEMENT = re.compile(
+    r"""^[ \t]*import\b[^;'"]*?(['"])[^'"]+\1[ \t]*;?[ \t]*$""",
+    re.MULTILINE,
 )
 
 
@@ -212,52 +224,9 @@ class PlaywrightAgent(BaseAgent):
                 )
 
             state.add_log(
-                f"{self.name}: generating one reusable template for "
-                f"{len(approved)} test-data cases"
+                f"{self.name}: generating reusable templates for "
+                f"{len(approved)} test-data case(s)"
             )
-            template_case, markers = self._test_data_template_case(approved[0])
-            template_script = self._generate_script(
-                template_case,
-                framework,
-                target_url,
-                test_data_template=True,
-                dom_context=state.dom_context,
-                repair_feedback=state.repair_feedback,
-            )
-            missing_markers = [
-                marker for marker in markers.values()
-                if marker not in template_script
-            ]
-            if missing_markers:
-                state.add_log(
-                    f"{self.name}: template omitted {len(missing_markers)} "
-                    "required data marker(s); retrying template generation once"
-                )
-                template_script = self._generate_script(
-                    template_case,
-                    framework,
-                    target_url,
-                    test_data_template=True,
-                    template_feedback=(
-                        "Your previous script template was rejected because it omitted "
-                        "these exact required markers: "
-                        f"{', '.join(missing_markers)}. Regenerate the complete script "
-                        "and preserve every required marker exactly as provided in the "
-                        "test_data, title, and expected result. Do not omit fields."
-                    ),
-                    dom_context=state.dom_context,
-                    repair_feedback=state.repair_feedback,
-                )
-                missing_markers = [
-                    marker for marker in markers.values()
-                    if marker not in template_script
-                ]
-            if missing_markers:
-                raise ValueError(
-                    f"{self.name}: generated test-data template omitted required "
-                    f"data markers: {', '.join(missing_markers)}"
-                )
-
             expected_fields = set(approved[0].test_data)
             for test_case in approved:
                 if set(test_case.test_data) != expected_fields:
@@ -277,35 +246,23 @@ class PlaywrightAgent(BaseAgent):
                             f"{self.name}: test-data fields differ within "
                             f"'{test_case.title}'"
                         )
-                    scenario = (
-                        self.repo.get_scenario(test_case.scenario_id)
-                        if self.repo else None
-                    )
-                    if scenario is None:
-                        raise ValueError(
-                            f"{self.name}: scenario for '{test_case.title}' was not found"
-                        )
-                    scripts = []
-                    for index, dataset in enumerate(test_case.test_data_sets, start=1):
-                        replacements = {
-                            "__TEST_DATA_ID__": (
-                                f"TD-{test_case.id.hex[:8].upper()}-{index:02d}"
-                            ),
-                            "__TEST_TYPE__": scenario.path_type,
-                            "__EXPECTED_RESULT__": self._escape_js_string_content(
-                                test_case.expected_result
-                            ),
-                        }
-                        replacements.update({
-                            markers[key]: self._escape_js_string_content(str(value))
-                            for key, value in dataset.items()
-                        })
-                        scripts.append(
-                            self._apply_template_values(template_script, replacements)
-                        )
-                    test_case.playwright_script = self._join_data_driven_scripts(scripts)
-                    continue
 
+            if approved[0].test_data_sets:
+                test_case = approved[0]
+                test_case.playwright_script = self._generate_multi_dataset_script(
+                    test_case, framework, target_url, state
+                )
+                state.add_log(
+                    f"{self.name} finished: generated {len(test_case.test_data_sets)} "
+                    f"data-driven Playwright tests for '{test_case.title}'"
+                )
+                return state
+
+            template_case, markers = self._test_data_template_case(approved[0])
+            template_script = self._generate_template(
+                template_case, markers, framework, target_url, state
+            )
+            for test_case in approved:
                 scenario = (
                     self.repo.get_scenario(test_case.scenario_id)
                     if self.repo else None
@@ -365,22 +322,208 @@ class PlaywrightAgent(BaseAgent):
         state.add_log(f"{self.name} finished: generated {len(approved)} {framework.capitalize()} script(s)")
         return state
 
+    def _generate_template(
+        self,
+        template_case: TestCase,
+        markers: dict[str, str],
+        framework: str,
+        target_url: str | None,
+        state: WorkflowState,
+    ) -> str:
+        template_script = self._generate_script(
+            template_case,
+            framework,
+            target_url,
+            test_data_template=True,
+            dom_context=state.dom_context,
+            repair_feedback=state.repair_feedback,
+        )
+        missing_markers = [
+            marker for marker in markers.values()
+            if marker not in template_script
+        ]
+        if missing_markers:
+            state.add_log(
+                f"{self.name}: template omitted {len(missing_markers)} "
+                "required data marker(s); retrying template generation once"
+            )
+            template_script = self._generate_script(
+                template_case,
+                framework,
+                target_url,
+                test_data_template=True,
+                template_feedback=(
+                    "Your previous script template was rejected because it omitted "
+                    "these exact required markers: "
+                    f"{', '.join(missing_markers)}. Regenerate the complete script "
+                    "and preserve every required marker exactly as provided in the "
+                    "test_data, title, and expected result. Do not omit fields."
+                ),
+                dom_context=state.dom_context,
+                repair_feedback=state.repair_feedback,
+            )
+            missing_markers = [
+                marker for marker in markers.values()
+                if marker not in template_script
+            ]
+        if missing_markers:
+            raise ValueError(
+                f"{self.name}: generated test-data template omitted required "
+                f"data markers: {', '.join(missing_markers)}"
+            )
+        return template_script
+
+    def _generate_multi_dataset_script(
+        self,
+        test_case: TestCase,
+        framework: str,
+        target_url: str | None,
+        state: WorkflowState,
+    ) -> str:
+        """Expand one test case into one Playwright test per dataset.
+
+        Datasets the application should treat differently from the test
+        case's own expected result (a valid row in a negative case, or the
+        reverse) get their own template, so each test asserts its real outcome.
+        """
+        scenario = self.repo.get_scenario(test_case.scenario_id) if self.repo else None
+        if scenario is None:
+            raise ValueError(
+                f"{self.name}: scenario for '{test_case.title}' was not found"
+            )
+        datasets = test_case.test_data_sets
+        profiles = (
+            test_case.test_data_profiles
+            if len(test_case.test_data_profiles) == len(datasets)
+            else [{} for _ in datasets]
+        )
+        case_outcome = self._case_outcome(profiles, scenario.path_type)
+
+        templates: dict[str, tuple[str, dict[str, str]]] = {}
+        scripts = []
+        for index, (dataset, profile) in enumerate(zip(datasets, profiles), start=1):
+            outcome = profile.get("expected_outcome") or case_outcome
+            group = "case" if outcome == case_outcome else outcome
+            expected_result = (
+                test_case.expected_result
+                if group == "case"
+                else self._outcome_expected_result(outcome)
+            )
+            if group not in templates:
+                template_case, markers = self._dataset_template_case(
+                    test_case, expected_result
+                )
+                templates[group] = (
+                    self._generate_template(
+                        template_case, markers, framework, target_url, state
+                    ),
+                    markers,
+                )
+            template_script, markers = templates[group]
+
+            data_id = f"TD-{test_case.id.hex[:8].upper()}-{index:02d}"
+            replacements = {
+                "__TEST_DATA_ID__": data_id,
+                "__TEST_TYPE__": profile.get("test_type") or scenario.path_type,
+                "__EXPECTED_RESULT__": self._escape_js_string_content(expected_result),
+            }
+            replacements.update({
+                markers[key]: self._escape_js_string_content(str(value))
+                for key, value in dataset.items()
+            })
+            scripts.append(
+                (data_id, self._apply_template_values(template_script, replacements))
+            )
+        if len(templates) > 1:
+            state.add_log(
+                f"{self.name}: used separate templates for accepted and rejected "
+                f"datasets of '{test_case.title}'"
+            )
+        return self._join_data_driven_scripts(scripts)
+
     @staticmethod
-    def _join_data_driven_scripts(scripts: list[str]) -> str:
-        imports: set[str] = set()
-        test_bodies = []
-        for script in scripts:
-            body_lines = []
-            for line in script.splitlines():
-                stripped = line.strip()
-                if stripped.startswith("import "):
-                    if stripped in imports:
-                        continue
-                    imports.add(stripped)
+    def _case_outcome(profiles: list[dict[str, str]], path_type: str) -> str:
+        counts = Counter(
+            profile.get("expected_outcome")
+            for profile in profiles
+            if profile.get("expected_outcome") in {"accepted", "rejected"}
+        )
+        if not counts:
+            return ""
+        if counts["accepted"] != counts["rejected"]:
+            return "accepted" if counts["accepted"] > counts["rejected"] else "rejected"
+        positive_path = any(term in (path_type or "").lower() for term in ("happy", "positive"))
+        return "accepted" if positive_path else "rejected"
+
+    @staticmethod
+    def _outcome_expected_result(outcome: str) -> str:
+        if outcome == "accepted":
+            return (
+                "The application accepts the supplied values: the step completes "
+                "and no validation or error message is shown."
+            )
+        return (
+            "The application rejects the supplied values: a validation or error "
+            "message is shown, or the form is not submitted and the user stays on "
+            "the same page."
+        )
+
+    @staticmethod
+    def _dataset_template_case(
+        test_case: TestCase,
+        expected_result: str,
+    ) -> tuple[TestCase, dict[str, str]]:
+        """Template input that keeps the real steps, with data values as markers."""
+        markers = {
+            key: f"__TEST_DATA_{index:02d}__"
+            for index, key in enumerate(test_case.test_data, start=1)
+        }
+
+        def mark(text: str) -> str:
+            for key, value in test_case.test_data.items():
+                value = str(value)
+                if len(value.strip()) < 2:
                     continue
-                body_lines.append(line)
-            test_bodies.append("\n".join(body_lines))
-        return "\n".join([*sorted(imports), *test_bodies])
+                for open_quote, close_quote in (('"', '"'), ("'", "'"), ("“", "”")):
+                    text = text.replace(
+                        f"{open_quote}{value}{close_quote}",
+                        f"{open_quote}{markers[key]}{close_quote}",
+                    )
+            return text
+
+        template_case = test_case.model_copy(update={
+            "title": f"__TEST_DATA_ID__ [__TEST_TYPE__] {test_case.title}",
+            "preconditions": [mark(item) for item in test_case.preconditions],
+            "steps": [mark(item) for item in test_case.steps],
+            "expected_result": expected_result,
+            "test_data": {
+                key: markers[key] for key in test_case.test_data
+            },
+        })
+        markers.update({
+            "__TEST_DATA_ID__": "__TEST_DATA_ID__",
+            "__TEST_TYPE__": "__TEST_TYPE__",
+        })
+        return template_case, markers
+
+    @staticmethod
+    def _join_data_driven_scripts(scripts: list[tuple[str, str]]) -> str:
+        """Combine per dataset scripts into one spec file.
+
+        Each dataset's code is wrapped in its own test.describe block so
+        top level declarations such as `const BASE_URL` stay scoped and
+        do not collide across the 20 copies.
+        """
+        imports: list[str] = []
+        blocks = []
+        for data_id, script in scripts:
+            for match in _IMPORT_STATEMENT.finditer(script):
+                statement = " ".join(match.group(0).split())
+                if statement not in imports:
+                    imports.append(statement)
+            body = _IMPORT_STATEMENT.sub("", script).strip()
+            blocks.append(f"test.describe({json.dumps(data_id)}, () => {{\n{body}\n}});")
+        return "\n".join(imports) + "\n\n" + "\n\n".join(blocks) + "\n"
 
     @staticmethod
     def _test_data_template_case(test_case: TestCase) -> tuple[TestCase, dict[str, str]]:
@@ -417,6 +560,8 @@ class PlaywrightAgent(BaseAgent):
         return (
             json.dumps(value, ensure_ascii=False)[1:-1]
             .replace("'", "\\'")
+            .replace("`", "\\`")
+            .replace("${", "\\${")
             .replace("\u2028", "\\u2028")
             .replace("\u2029", "\\u2029")
         )
@@ -517,14 +662,35 @@ class PlaywrightAgent(BaseAgent):
                 target_password=""
             )
         if test_data_template:
+            expected_is_marker = "__EXPECTED_RESULT__" in test_case.expected_result
+            required_markers = [
+                "__TEST_DATA_ID__",
+                "__TEST_TYPE__",
+                *(["__EXPECTED_RESULT__"] if expected_is_marker else []),
+                *test_case.test_data.values(),
+            ]
             prompt += (
-                "\n\nThis is a reusable data-driven script template. Keep these exact "
-                "markers as literal values in the generated script, including in the "
-                "test title, input values, and expected-result assertion: "
-                "__TEST_DATA_ID__, __TEST_TYPE__, __EXPECTED_RESULT__, and every "
-                "__TEST_DATA_NN__ marker provided in test_data. Do not replace markers "
-                "with examples or TODO values. The application workflow must use the "
-                "provided requirement and steps; only the marked values vary by case."
+                "\n\nThis is a reusable data-driven script template. The platform runs it "
+                "once per dataset and replaces every marker with that dataset's real value.\n"
+                "- Write exactly ONE test(...) block. Do not declare any other test.\n"
+                "- The test title must contain __TEST_DATA_ID__ so each generated test "
+                "has a unique name.\n"
+                f"- Keep these exact markers as literal string values: {', '.join(required_markers)}.\n"
+                "- Wherever a test_data field is typed, selected, or checked, use its "
+                "marker string, for example fill('__TEST_DATA_01__'). The steps may "
+                "mention example values; always use the marker for fields listed in test_data.\n"
+                "- A marker may hold an empty string to test a missing value. Still call "
+                "fill() with the marker so the empty value is applied.\n"
+                "- Do not branch on marker values and never replace a marker with an "
+                "example or a TODO value.\n"
+                "- Follow the steps in order; only the marked values vary between datasets.\n"
+                + (
+                    "- Use __EXPECTED_RESULT__ wherever the expected result is referenced.\n"
+                    if expected_is_marker else
+                    "- Assert the expected result with concrete, observable checks (URL, "
+                    "visible message, field or element state). Do not assert a whole "
+                    "sentence as page text unless the expected result quotes it.\n"
+                )
             )
         if template_feedback:
             prompt += f"\n\n{template_feedback}"

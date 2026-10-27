@@ -53,7 +53,7 @@ Design Decision:
 
 from concurrent.futures import ThreadPoolExecutor
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.agents.base import BaseAgent
 from backend.models.scenario import Scenario
@@ -65,6 +65,7 @@ from backend.utils.prompts import load_prompt
 
 _MAX_SCENARIOS_PER_LLM_CALL = 5
 _LLM_REQUEST_TIMEOUT_SECONDS = 120
+_MAX_INCOMPLETE_BATCH_RETRIES = 1
 
 
 # ==========================================================
@@ -88,6 +89,13 @@ class TestCaseResponse(BaseModel):
 class TestCaseListResponse(BaseModel):
     """Batch of test cases returned by LLM."""
     test_cases: list[TestCaseResponse] = Field(min_length=1)
+
+    @field_validator("test_cases", mode="before")
+    @classmethod
+    def remove_stray_scenario_numbers(cls, value: object) -> object:
+        if isinstance(value, list):
+            return [item for item in value if not isinstance(item, int)]
+        return value
 
 
 # ==========================================================
@@ -151,20 +159,21 @@ class TestCaseAgent(BaseAgent):
             
         Raises:
             ValueError: If state.requirement is None or no scenarios exist
-            LLMServiceError: If LLM returns invalid scenario_number correlation
+            LLMServiceError: If scenario_number correlation remains invalid after retrying omissions
             
         Process:
             1. Validate requirement and scenarios exist
             2. Format scenarios as numbered list
             3. Call LLM with structured output schema
-            4. Validate scenario_number correlation (must be exactly {1..N})
+            4. Validate scenario_number correlation and retry omitted scenarios once
             5. Map test cases to parent scenarios via index
             6. Inherit priority from parent scenario
             7. Append to state.generated_test_cases
             
         Correlation Validation:
             LLM must return test cases for scenario numbers {1, 2, ..., N}.
-            Missing or extra scenario numbers cause LLMServiceError.
+            Missing scenario numbers are requested again once. Extra or duplicate
+            numbers, or omissions that remain after the retry, cause LLMServiceError.
         """
         if state.requirement is None:
             raise ValueError(f"{self.name} requires state.requirement to be set")
@@ -188,26 +197,37 @@ class TestCaseAgent(BaseAgent):
                 count=str(len(scenario_batch)),
             )
 
-            batch = self.llm_service.structured_generate(
-                user=prompt,
-                response_model=TestCaseListResponse,
-                timeout=_LLM_REQUEST_TIMEOUT_SECONDS,
-                max_retries=2,
-            )
-
             expected_numbers = list(range(1, len(scenario_batch) + 1))
-            returned_numbers = [item.scenario_number for item in batch.test_cases]
-            if sorted(returned_numbers) != expected_numbers:
-                raise LLMServiceError(
-                    f"{self.name}: LLM returned test cases for scenario numbers {sorted(returned_numbers)}, "
-                    f"expected exactly {expected_numbers}"
-                )
+            cases_by_scenario: dict[int, TestCase] = {}
+            for attempt in range(_MAX_INCOMPLETE_BATCH_RETRIES + 1):
+                retry_prompt = prompt
+                missing_numbers = sorted(set(expected_numbers) - cases_by_scenario.keys())
+                if attempt:
+                    retry_prompt += (
+                        "\n\nYour previous response omitted scenario numbers "
+                        f"{missing_numbers}. Return test cases for those scenario numbers, "
+                        "using their original numbers from the scenario list."
+                    )
 
-            generated_batch = []
-            for item in batch.test_cases:
-                scenario = scenario_batch[item.scenario_number - 1]
-                generated_batch.append(
-                    TestCase(
+                batch = self.llm_service.structured_generate(
+                    user=retry_prompt,
+                    response_model=TestCaseListResponse,
+                    timeout=_LLM_REQUEST_TIMEOUT_SECONDS,
+                    max_retries=2,
+                )
+                returned_numbers = [item.scenario_number for item in batch.test_cases]
+                if (
+                    len(returned_numbers) != len(set(returned_numbers))
+                    or not set(returned_numbers).issubset(expected_numbers)
+                ):
+                    raise LLMServiceError(
+                        f"{self.name}: LLM returned test cases for scenario numbers {sorted(returned_numbers)}, "
+                        f"expected exactly {expected_numbers}"
+                    )
+
+                for item in batch.test_cases:
+                    scenario = scenario_batch[item.scenario_number - 1]
+                    cases_by_scenario[item.scenario_number] = TestCase(
                         scenario_id=scenario.id,
                         title=item.title,
                         preconditions=item.preconditions,
@@ -216,8 +236,14 @@ class TestCaseAgent(BaseAgent):
                         priority=scenario.priority,
                         test_data=item.test_data,
                     )
-                )
-            return generated_batch
+
+                if len(cases_by_scenario) == len(expected_numbers):
+                    return [cases_by_scenario[number] for number in expected_numbers]
+
+            raise LLMServiceError(
+                f"{self.name}: LLM returned test cases for scenario numbers "
+                f"{sorted(cases_by_scenario)}, expected exactly {expected_numbers}"
+            )
 
         if self.max_workers == 1 or len(scenario_batches) == 1:
             generated_batches = map(generate_batch, scenario_batches)

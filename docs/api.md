@@ -164,6 +164,8 @@ POST /api/v1/projects/{project_id}/requirements
 }
 ```
 
+Every call adds a new requirement. The server assigns the next unused `REQ-NNN` key in the project, so manual requirements never replace each other or imported ones.
+
 **Response**: `201` — `RequirementResponse`
 **Error**: `400` if validation fails, `404` if project not found.
 
@@ -182,6 +184,8 @@ release_id: (optional UUID query param)
 Supported file formats: PDF, DOCX, XLSX, CSV, TXT.
 
 Parses file into requirement blocks, creates draft requirements, then runs `INGEST` LangGraph workflow for LLM enrichment.
+
+Imports always add requirements and never replace existing ones. A block keeps its requirement ID from the file when that ID is unused in the project. A reused `REQ-NNN` ID (or a row with no ID) gets the next unused `REQ-NNN` key, and any other reused ID gets a numeric suffix such as `PAY-7-2`.
 
 **Response**: `200` — Array of `RequirementResponse`
 **Error**: `500` if parsing or ingestion fails.
@@ -406,6 +410,27 @@ DELETE /api/v1/projects/{project_id}/testcases/{test_case_id}
 ```
 
 **Response**: `200` — `{"detail": "Test case deleted successfully"}`
+
+---
+
+### Generate Script
+
+```
+POST /api/v1/projects/{project_id}/testcases/{test_case_id}/generate-script
+```
+
+**Request Body** (`GenerateScriptPayload`, optional): `{"framework": "Playwright"}`
+
+Requires an approved test case. For Playwright projects the script is data driven:
+
+1. If the test case does not yet hold 20 distinct datasets, `TestDataAgent` generates them first and stores them as `test_data_sets`, with a parallel `test_data_profiles` entry per dataset (`test_type`, `expected_outcome`, `targeted_validation_rule`).
+2. `PlaywrightAgent` writes a template from the case's real steps and expands it into one `test(...)` per dataset, each wrapped in `test.describe("TD-<id>-NN")`. Datasets whose expected outcome differs from the case's own (for example a valid row in a negative case) get a separate template, so each test asserts its real outcome.
+3. When the project is marked as a safe test environment, the target URL is inspected first with read only access (nothing is submitted), and the page evidence grounds the locators. If the generated script fails the locator and TypeScript checks, it is regenerated once with that feedback.
+
+The new script's `script_validation_status` is reset to `unverified`. Selenium and Cucumber keep single script generation.
+
+**Response**: `200` — `TestCaseResponse`
+**Error**: `400` if data or script generation fails, `404` if the test case, scenario, or requirement is not found, `500` on unexpected errors.
 
 ---
 

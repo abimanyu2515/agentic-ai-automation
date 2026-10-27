@@ -8,8 +8,9 @@ export class RecoveryManager {
 
     const errLower = errorMessage.toLowerCase();
 
-    // 1. Assertion failure
-    if (errLower.includes('expect') || errLower.includes('assertion') || errLower.includes('assert')) {
+    // 1. Assertion failure, or a locator matching several elements; both fail
+    // the same way on every retry.
+    if (errLower.includes('expect') || errLower.includes('assertion') || errLower.includes('assert') || errLower.includes('strict mode violation')) {
       return { action: 'fail', nextRetryCount: currentRetryCount };
     }
 

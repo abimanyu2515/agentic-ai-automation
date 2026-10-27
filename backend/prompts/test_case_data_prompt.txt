@@ -33,10 +33,12 @@ Instructions:
 - Keep the same field names in all 20 datasets. Use an empty string for a field deliberately testing a missing value.
 - Use synthetic values only. Do not include real personal information, credentials, or secrets.
 - Do not invent validation rules. State unknowns in assumptions.
+- Set "expected_outcome" for every dataset: "accepted" when the application should accept the values and complete the step, or "rejected" when it should refuse them (validation error, error message, or staying on the same form). Boundary values on the allowed side of a documented limit are "accepted"; values just outside it are "rejected".
 - Return only a JSON object with a "datasets" array containing exactly 20 objects. Each object must match:
 {
   "test_data": {"field_name": "synthetic value"},
   "targeted_validation_rule": "The exact rule exercised",
   "test_type": "positive, invalid, boundary, missing_required, or workflow",
+  "expected_outcome": "accepted or rejected",
   "assumptions": []
 }

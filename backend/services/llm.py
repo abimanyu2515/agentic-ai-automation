@@ -13,7 +13,7 @@ import logging
 from typing import TypeVar
 
 from litellm import completion
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from backend.config.settings import LLMConfig, get_settings
 
@@ -183,13 +183,17 @@ class LLMService:
         
         last_exception = None
         last_content = ""
-        
+        # Set after a schema mismatch so the next attempt tells the model what
+        # it got wrong. Resending the identical prompt reproduces the same
+        # malformed shape (seen live: evaluation objects flattened into bare values).
+        correction = ""
+
         for attempt in range(max_retries):
             try:
                 try:
                     schema_json = json.dumps(response_model.model_json_schema(), indent=2)
-                    user_prompt = f"{user}\n\nYou MUST respond with a JSON object that adheres strictly to this JSON Schema:\n{schema_json}\n\nDo not include any extra keys, markdown tags, or explanations outside the JSON object."
-                    
+                    user_prompt = f"{user}\n\nYou MUST respond with a JSON object that adheres strictly to this JSON Schema:\n{schema_json}\n\nDo not include any extra keys, markdown tags, or explanations outside the JSON object.{correction}"
+
                     response = completion(
                         model=self._model_string(),
                         messages=[{"role": "system", "content": system}, {"role": "user", "content": user_prompt}],
@@ -286,6 +290,14 @@ class LLMService:
                 return response_model.model_validate_json(content)
             except Exception as exc:
                 last_exception = exc
+                if isinstance(exc, ValidationError):
+                    correction = (
+                        "\n\nYour previous response was rejected because it did not match the schema.\n"
+                        f"Previous response:\n{last_content[:2000]}\n\n"
+                        f"Validation errors:\n{exc}\n\n"
+                        "Return a corrected JSON object. Every array item must have the exact "
+                        "type and fields the schema defines."
+                    )
                 retry_message = (
                     "Retrying..."
                     if attempt < max_retries - 1

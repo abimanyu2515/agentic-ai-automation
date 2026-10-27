@@ -1,11 +1,15 @@
+import logging
 import threading
 from uuid import UUID
+
+from sqlalchemy.exc import SQLAlchemyError
+
 from backend.agents.scenario_agent import ScenarioAgent
 from backend.agents.test_data_agent import TestDataAgent
 from backend.agents.evaluation_agent import EvaluationAgent
 from backend.models.state import WorkflowState
 from backend.models.scenario import Scenario
-from backend.models.test_case import EvaluationStatus, TestCase
+from backend.models.test_case import EvaluationStatus, ScriptValidationStatus, TestCase
 from backend.models.common import Priority
 from backend.agents.playwright_agent import PlaywrightAgent
 from backend.agents.execution_agent import ExecutionAgent
@@ -14,6 +18,9 @@ from backend.models.requirement import Requirement
 from backend.agents.execution_analysis_agent import ExecutionAnalysisAgent
 from backend.agents.defect_management_agent import DefectManagementAgent
 from backend.repository.project_repository import get_project_repository
+from backend.services.playwright_script_validation import validate_playwright_script
+
+logger = logging.getLogger(__name__)
 
 
 _test_data_generation_locks: dict[UUID, threading.Lock] = {}
@@ -45,6 +52,10 @@ def _test_case_generation_lock(
 
 
 class WorkflowService:
+    def __init__(self, inspector=None):
+        # Read only page inspector for grounded script generation; injectable for tests.
+        self.inspector = inspector
+
     @property
     def repo(self):
         return get_project_repository()
@@ -239,6 +250,7 @@ class WorkflowService:
                                 "targeted_validation_rule",
                                 "expected_result",
                                 "test_type",
+                                "expected_outcome",
                             }
                         })
                 reserved_test_data.extend(related_case.test_data_sets)
@@ -336,23 +348,89 @@ class WorkflowService:
                     "Generate 20 unique datasets for this test case before creating its script"
                 )
 
-            state = WorkflowState(
-                requirement=requirement,
-                generated_scenarios=[scenario],
-                generated_test_cases=[test_case],
-                human_approved_test_case_ids=[test_case.id],
-            )
-            PlaywrightAgent(
-                repo=repo,
-                max_workers=1,
-                test_data_template=True,
-            ).run(state)
-            if not test_case.playwright_script:
-                raise ValueError(
-                    f"PlaywrightAgent did not generate a script for '{test_case.title}'"
+            dom_context = self._read_only_page_evidence(project, test_case)
+            repair_feedback = None
+            for attempt in (1, 2):
+                state = WorkflowState(
+                    project_id=project_id,
+                    requirement=requirement,
+                    generated_scenarios=[scenario],
+                    generated_test_cases=[test_case],
+                    human_approved_test_case_ids=[test_case.id],
+                    dom_context=dom_context,
+                    repair_feedback=repair_feedback,
                 )
+                PlaywrightAgent(
+                    repo=repo,
+                    max_workers=1,
+                    test_data_template=True,
+                ).run(state)
+                if not test_case.playwright_script:
+                    raise ValueError(
+                        f"PlaywrightAgent did not generate a script for '{test_case.title}'"
+                    )
+                issues = self._script_issues(test_case.playwright_script, dom_context)
+                if not issues or attempt == 2:
+                    break
+                logger.info(
+                    "Repairing generated script: test_case_id=%s issue_count=%s",
+                    test_case.id,
+                    len(issues),
+                )
+                repair_feedback = (
+                    "The first script did not pass these checks: "
+                    + "; ".join(issues[:8])
+                    + ". Use only locators from the live page evidence."
+                )
+            # A new script has not been through grounded validation yet.
+            test_case.script_validation_status = ScriptValidationStatus.UNVERIFIED
+            test_case.script_validation_attempts = 0
+            test_case.script_validation_completed_at = None
+            test_case.script_validation_diagnostic = None
             repo.save_test_cases([test_case])
             return test_case
+
+    def _read_only_page_evidence(self, project, test_case: TestCase) -> dict | None:
+        """Inspect the project's target app without submitting anything.
+
+        Only projects marked as a safe test environment are inspected. When
+        inspection is not allowed or fails, scripts are generated without
+        evidence, as before.
+        """
+        if not getattr(project, "is_safe_test_environment", False):
+            return None
+        inspector = self.inspector
+        if inspector is None:
+            from backend.agents.application_reconnaissance_agent import (
+                ApplicationReconnaissanceAgent,
+            )
+            inspector = ApplicationReconnaissanceAgent(repo=self.repo)
+        try:
+            evidence = inspector.inspect_project(
+                project.id,
+                [test_case],
+                allow_invalid_login_probe=False,
+            )
+        except SQLAlchemyError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Page inspection for script generation failed: project_id=%s error=%s",
+                project.id,
+                type(exc).__name__,
+            )
+            return None
+        return evidence if evidence.get("pages") else None
+
+    @staticmethod
+    def _script_issues(script: str, dom_context: dict | None) -> list[str]:
+        if not dom_context:
+            return []
+        try:
+            return validate_playwright_script(script, dom_context)
+        except RuntimeError:
+            # The local TypeScript compiler is unavailable; skip the repair pass.
+            return []
 
     def _generate_test_data_test_cases(
         self,
@@ -562,6 +640,16 @@ class WorkflowService:
         if test_case.evaluation_status != "approved":
             raise ValueError("Playwright script generation rejected: Test case is not approved")
 
+        project = self.repo.get_project(project_id)
+        if (
+            project is not None
+            and (automation_framework or "").lower() == "playwright"
+            and (project.framework or "playwright").lower() == "playwright"
+        ):
+            return self._generate_data_driven_script(
+                project_id, requirement.id, test_case, automation_framework
+            )
+
         test_case.automation_framework = automation_framework
         state = WorkflowState(
             requirement=requirement,
@@ -572,6 +660,31 @@ class WorkflowService:
         updated_tc = state.generated_test_cases[0]
         self.repo.save_test_cases([updated_tc])
         return updated_tc
+
+    def _generate_data_driven_script(
+        self,
+        project_id: UUID,
+        requirement_id: UUID,
+        test_case: TestCase,
+        automation_framework: str,
+    ) -> TestCase:
+        """Build a Playwright script with one test per TestDataAgent dataset.
+
+        Runs TestDataAgent first when the case does not yet hold 20
+        distinct datasets, so every generated script carries them.
+        """
+        if test_case.automation_framework != automation_framework:
+            test_case.automation_framework = automation_framework
+            self.repo.save_test_cases([test_case])
+        fingerprints = {
+            tuple(sorted(dataset.items()))
+            for dataset in test_case.test_data_sets
+        }
+        if len(test_case.test_data_sets) != 20 or len(fingerprints) != 20:
+            self.generate_test_data_for_test_case(project_id, requirement_id, test_case.id)
+        return self.generate_test_data_script_for_test_case(
+            project_id, requirement_id, test_case.id
+        )
 
 
 # Global stream event log buffer

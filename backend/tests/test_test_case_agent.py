@@ -86,6 +86,39 @@ def test_llm_service_parses_stringified_test_case_entries():
     assert result.test_cases[1].test_data == second_case["test_data"]
 
 
+def test_test_case_agent_ignores_stray_scenario_number_in_response():
+    class MalformedEntryLLMService:
+        def structured_generate(self, *, response_model, **kwargs):
+            return response_model.model_validate(
+                {
+                    "test_cases": [
+                        3,
+                        {
+                            "scenario_number": 1,
+                            "title": "Verify first scenario",
+                            "steps": ["Complete the first scenario"],
+                            "expected_result": "The first scenario succeeds",
+                        },
+                        {
+                            "scenario_number": 2,
+                            "title": "Verify second scenario",
+                            "steps": ["Complete the second scenario"],
+                            "expected_result": "The second scenario succeeds",
+                        },
+                    ]
+                }
+            )
+
+    state = _state_with_scenarios()
+    state.generated_scenarios = state.generated_scenarios[:2]
+
+    result = TestCaseAgent(llm_service=MalformedEntryLLMService()).run(state)
+
+    assert [case.scenario_id for case in result.generated_test_cases] == [
+        scenario.id for scenario in state.generated_scenarios
+    ]
+
+
 def test_test_case_agent_batches_large_scenario_sets():
     class BatchLLMService:
         def __init__(self):
@@ -200,6 +233,67 @@ def test_test_case_agent_correlates_by_scenario_number_and_inherits_priority(stu
     matching_scenario = next(s for s in state.generated_scenarios if s.id == tc.scenario_id)
     assert tc.priority == matching_scenario.priority  # inherited, not re-invented by the LLM
     assert "TestCase Agent generated 3 test cases" in result.logs[-1]
+
+
+def test_test_case_agent_prompt_includes_all_scenarios():
+    class PromptCheckingLLMService:
+        def structured_generate(self, *, user, response_model, **kwargs):
+            assert "Requirement title: Login flow" in user
+            assert "Requirement description: User can log in with valid credentials" in user
+            assert "1. Valid Login" in user
+            assert "2. Invalid Login" in user
+            assert "3. Empty Password" in user
+            assert "There are exactly 3 scenarios" in user
+            assert "Return every scenario number from 1 through 3 exactly once" in user
+            return response_model(
+                test_cases=[
+                    {
+                        "scenario_number": number,
+                        "title": f"Case {number}",
+                        "steps": ["Complete the scenario"],
+                        "expected_result": "The scenario completes successfully",
+                    }
+                    for number in range(1, 4)
+                ]
+            )
+
+    state = _state_with_scenarios()
+
+    result = TestCaseAgent(llm_service=PromptCheckingLLMService()).run(state)
+
+    assert len(result.generated_test_cases) == 3
+
+
+def test_test_case_agent_retries_and_fills_omitted_scenarios():
+    class PartialResponseLLMService:
+        def __init__(self):
+            self.calls = []
+
+        def structured_generate(self, *, user, response_model, **kwargs):
+            self.calls.append(user)
+            number = 1 if len(self.calls) == 1 else 2
+            return response_model(
+                test_cases=[
+                    {
+                        "scenario_number": number,
+                        "title": f"Case {number}",
+                        "steps": ["Complete the scenario"],
+                        "expected_result": "The scenario completes successfully",
+                    }
+                ]
+            )
+
+    state = _state_with_scenarios()
+    state.generated_scenarios = state.generated_scenarios[:2]
+    llm_service = PartialResponseLLMService()
+
+    result = TestCaseAgent(llm_service=llm_service).run(state)
+
+    assert len(llm_service.calls) == 2
+    assert "omitted scenario numbers [2]" in llm_service.calls[1]
+    assert [case.scenario_id for case in result.generated_test_cases] == [
+        scenario.id for scenario in state.generated_scenarios
+    ]
 
 
 def test_test_case_agent_rejects_mismatched_scenario_numbers():

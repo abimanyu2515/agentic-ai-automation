@@ -52,6 +52,59 @@ class ProjectService:
             original_filename, requirement_id, requirement_title, release_id
         )
 
+    def add_requirement(
+        self,
+        project_id: UUID,
+        title: str,
+        description: str,
+        priority: str,
+        business_domain: str,
+        attachments: list[str] | None = None,
+        original_filename: str | None = None,
+        requirement_id: str | None = None,
+        requirement_title: str | None = None,
+        release_id: UUID | None = None
+    ) -> Requirement:
+        """Add a new requirement without replacing an existing one.
+
+        `create_requirement` updates the row that already holds the same
+        requirement key, so manual and file imports must never reuse a key.
+        A missing or taken key is replaced with one unused in the project.
+        """
+        taken = {
+            r.requirement_id
+            for r in self.repo.get_requirements(project_id, include_deleted=True)
+            if r.requirement_id
+        }
+        key = self._unique_requirement_key(requirement_id, taken)
+        if requirement_id and key != requirement_id and title.startswith(f"{requirement_id}:"):
+            title = f"{key}:{title[len(requirement_id) + 1:]}"
+        return self.create_requirement(
+            project_id, title, description, priority, business_domain, attachments,
+            original_filename, key, requirement_title, release_id
+        )
+
+    @staticmethod
+    def _unique_requirement_key(proposed: str | None, taken: set[str]) -> str:
+        import re
+
+        key = (proposed or "").strip()
+        if key.lower() in ("", "nan", "none"):
+            key = ""
+        if key and key not in taken:
+            return key
+        if key and not re.fullmatch(r"REQ-\d+", key):
+            suffix = 2
+            while f"{key}-{suffix}" in taken:
+                suffix += 1
+            return f"{key}-{suffix}"
+        numbers = [
+            int(match.group(1))
+            for match in (re.fullmatch(r"REQ-(\d+)", item) for item in taken)
+            if match
+        ]
+        return f"REQ-{max(numbers, default=0) + 1:03d}"
+
     def save_requirement(
         self,
         requirement: Requirement,

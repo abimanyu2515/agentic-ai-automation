@@ -411,6 +411,30 @@ test('Test data __TEST_DATA_ID__: __TEST_TYPE__', async ({ page }) => {
     assert PlaywrightAgent._escape_js_string_content("O'Brien") == "O\\'Brien"
 
 
+def test_joined_data_driven_scripts_scope_declarations_and_hoist_imports():
+    script = (
+        "import {\n  test,\n  expect,\n} from '@playwright/test';\n"
+        "const BASE_URL = process.env.TARGET_URL || '';\n"
+        "test('one', async ({ page }) => { await page.goto(BASE_URL); });"
+    )
+
+    joined = PlaywrightAgent._join_data_driven_scripts([("TD-01", script), ("TD-02", script)])
+
+    assert joined.startswith("import { test, expect, } from '@playwright/test';")
+    assert joined.count("import ") == 1
+    assert joined.count("test.describe(") == 2
+    # Each copy of the declaration sits inside its own describe block.
+    first, second = joined.split('test.describe("TD-02"')
+    assert first.count("const BASE_URL") == 1
+    assert second.count("const BASE_URL") == 1
+
+
+def test_template_values_cannot_break_out_of_template_literals():
+    escaped = PlaywrightAgent._escape_js_string_content("a`b${c}")
+
+    assert escaped == "a\\`b\\${c}"
+
+
 def test_no_approved_test_cases_is_not_an_error():
     requirement = Requirement(title="x", description="y")
     scenario = Scenario(requirement_id=requirement.id, scenario_name="s", description="d")

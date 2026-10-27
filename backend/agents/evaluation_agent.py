@@ -52,6 +52,9 @@ Evaluation Outcomes:
 LLM Correlation:
     Uses test_case_number (1-based index) instead of title echo-back.
     Validates LLM returned exactly {1, 2, ..., N} with no gaps or extras.
+    If the LLM response is unusable (schema mismatch after retries, or a
+    numbering mismatch), all candidates go to NEEDS_REVIEW unscored instead
+    of failing the workflow.
 
 Historical Context:
     This agent was added after production issues with auto-approved irrelevant test cases.
@@ -180,19 +183,34 @@ class EvaluationAgent(BaseAgent):
             test_cases=_format_test_cases_block(candidates),
         )
 
-        batch = self.llm_service.structured_generate(
-            user=prompt,
-            response_model=_EvaluationBatch,
-        )
-
-        expected_numbers = set(range(1, len(candidates) + 1))
-        valid_evaluations = [e for e in batch.evaluations if e.test_case_number in expected_numbers]
-        returned_numbers = {e.test_case_number for e in valid_evaluations}
-        if returned_numbers != expected_numbers:
-            raise LLMServiceError(
-                f"{self.name}: LLM returned evaluations for {sorted(returned_numbers)}, "
-                f"expected exactly {sorted(expected_numbers)}"
+        try:
+            batch = self.llm_service.structured_generate(
+                user=prompt,
+                response_model=_EvaluationBatch,
             )
+
+            expected_numbers = set(range(1, len(candidates) + 1))
+            valid_evaluations = [e for e in batch.evaluations if e.test_case_number in expected_numbers]
+            returned_numbers = {e.test_case_number for e in valid_evaluations}
+            if returned_numbers != expected_numbers:
+                raise LLMServiceError(
+                    f"{self.name}: LLM returned evaluations for {sorted(returned_numbers)}, "
+                    f"expected exactly {sorted(expected_numbers)}"
+                )
+        except LLMServiceError as exc:
+            # Evaluation is a quality gate, never an approver: every surviving
+            # candidate goes to human review anyway. An unusable LLM response
+            # shouldn't throw away the generated test cases, so fall back to
+            # review without scores instead of failing the workflow.
+            for test_case in candidates:
+                test_case.evaluation_status = EvaluationStatus.NEEDS_REVIEW
+                test_case.evaluation_reason = "Automatic evaluation unavailable; review manually."
+            state.add_log(f"{self.name}: LLM evaluation failed, sending candidates to review unscored: {exc}")
+            state.add_log(
+                f"{self.name} finished: {len(candidates)} need review (unscored), "
+                f"{duplicate_count} rejected ({duplicate_count} duplicates, 0 irrelevant)"
+            )
+            return state
 
         review_count = 0
         irrelevant_count = 0
