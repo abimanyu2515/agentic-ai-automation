@@ -174,6 +174,8 @@ Evaluates generated test cases for quality. Performs:
 
 **State writes**: Sets `tc.evaluation_status` and `tc.evaluation_reason` for each test case
 
+**LLM failure fallback**: If the scoring response is unusable (schema mismatch after retries, or test case numbers that don't match), the agent does not fail the workflow. Duplicate rejections stand, and every remaining candidate is set to `NEEDS_REVIEW` with confidence `0.0` and the reason "Automatic evaluation unavailable; review manually."
+
 **Operation**: `GENERATE_TESTCASES` (sub-step, always runs after TestCaseAgent)
 
 ---

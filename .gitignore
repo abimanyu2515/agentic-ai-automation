@@ -30,6 +30,8 @@ npm-debug.log*
 trace/
 playwright-report/
 test-results/
+backend/playwrightt/artifacts/
+backend/playwrightt/public/artifacts/
 
 # Reports and JUnit Outputs
 junit_*.xml
@@ -42,6 +44,7 @@ report_*.pdf
 # Databases
 *.db
 *.sqlite
+backend/database/vault.json
 
 # IDE & Editor Files
 .vscode/

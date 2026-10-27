@@ -192,6 +192,7 @@ class TestCaseDB(Base):
     jira_last_synced_at = Column(DateTime(timezone=True), nullable=True)
     test_data = Column(JSON, nullable=False, default=dict)
     test_data_sets = Column(JSON, nullable=False, default=list)
+    test_data_profiles = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
     script_validation_status = Column(String(30), nullable=False, default="unverified", server_default=text("'unverified'"))
     script_validation_attempts = Column(Integer, nullable=False, default=0, server_default=text("0"))
     script_validation_completed_at = Column(DateTime(timezone=True), nullable=True)

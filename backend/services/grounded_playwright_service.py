@@ -173,7 +173,7 @@ class GroundedPlaywrightScriptService:
                 dom_context=evidence,
                 repair_feedback=feedback,
             )
-            generated_state = self._agent().run(state)
+            generated_state = self._agent(test_case).run(state)
             test_case = generated_state.generated_test_cases[0]
             if not test_case.playwright_script:
                 latest_issues = ["No script was generated"]
@@ -263,9 +263,13 @@ class GroundedPlaywrightScriptService:
     def _inspector(self):
         return self.inspector or ApplicationReconnaissanceAgent(repo=self.repo)
 
-    def _agent(self):
+    def _agent(self, test_case: TestCase):
+        # Cases with TestDataAgent datasets keep one test per dataset.
         return (
             self.agent_factory()
             if self.agent_factory
-            else PlaywrightAgent(repo=self.repo)
+            else PlaywrightAgent(
+                repo=self.repo,
+                test_data_template=bool(test_case.test_data_sets),
+            )
         )

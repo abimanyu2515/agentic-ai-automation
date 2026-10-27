@@ -110,28 +110,125 @@ def test_generate_test_cases_preserves_existing_cases_when_generation_fails(mock
     assert ws.repo.get_test_cases(scenario.id) == [existing_case]
 
 
-def test_generate_playwright_script_uses_approved_test_case_agent(mock_llm_service):
-    ws = WorkflowService()
-    project = ws.repo.create_project("LangGraph Project", "Testing LangGraph integration")
-    req = ws.repo.create_requirement(project.id, "Req Title", "Req Description", "high", "finance")
-
-    sc = Scenario(requirement_id=req.id, scenario_name="Valid Login", description="desc", approved=True)
+def _data_driven_case(ws, *, safe=False):
+    project = ws.repo.create_project(
+        "LangGraph Project",
+        "Testing LangGraph integration",
+        target_url="https://coupons.example.test",
+    )
+    if safe:
+        project.is_safe_test_environment = True
+        ws.repo.update_project(project)
+    req = ws.repo.create_requirement(project.id, "Coupons", "Expired coupons are rejected.", "high", "retail")
+    sc = Scenario(
+        requirement_id=req.id,
+        scenario_name="Expired coupon",
+        description="Apply an expired coupon at checkout.",
+        path_type="negative",
+        approved=True,
+    )
     ws.repo.save_scenarios([sc])
-
     tc = TestCase(
         scenario_id=sc.id,
-        title="Verify Login",
-        steps=["Step 1"],
-        expected_result="LoggedIn",
+        title="Checkout rejects an expired coupon",
+        steps=["Open the checkout page", "Enter the coupon code 'OLD-2020'", "Apply the coupon"],
+        expected_result="The message 'Coupon expired' is shown",
         evaluation_status=EvaluationStatus.APPROVED,
-        confidence=0.9
+        confidence=0.9,
     )
     ws.repo.save_test_cases([tc])
+    return project, tc
 
-    updated_tc = ws.generate_playwright_script(project.id, tc.id)
-    assert updated_tc.playwright_script is not None
-    assert "test(" in updated_tc.playwright_script
-    assert updated_tc.execution_type == "UI Automation"
+
+def _coupon_datasets():
+    from backend.agents.test_data_agent import TestCaseDataBatchResponse, TestCaseDataResponse
+
+    return TestCaseDataBatchResponse(datasets=[
+        TestCaseDataResponse(
+            test_data={"coupon_code": f"OLD-{index:03d}"},
+            targeted_validation_rule="Expired coupons are rejected.",
+            test_type="invalid" if index < 18 else "positive",
+        )
+        for index in range(20)
+    ])
+
+
+class _TemplateLLM:
+    """Returns a marker template; tags the one written for the accepted rows."""
+
+    def __init__(self):
+        self.prompts = []
+
+    def generate(self, *, system, user, **kwargs):
+        self.prompts.append(user)
+        tag = "// accepted-template\n" if "accepts the supplied values" in user else ""
+        return (
+            "import { test, expect } from '@playwright/test';\n"
+            "const BASE_URL = process.env.TARGET_URL || 'https://coupons.example.test';\n"
+            f"{tag}"
+            "test('__TEST_DATA_ID__ [__TEST_TYPE__] coupon', async ({ page }) => {\n"
+            "  await page.goto(BASE_URL);\n"
+            "  await page.getByLabel('Coupon').fill('__TEST_DATA_01__');\n"
+            "  await expect(page.getByText('Coupon expired')).toBeVisible();\n"
+            "});"
+        )
+
+
+def test_generate_playwright_script_adds_20_datasets_and_one_test_each():
+    ws = WorkflowService()
+    project, tc = _data_driven_case(ws)
+    llm = _TemplateLLM()
+
+    with mock.patch.object(LLMService, "structured_generate", return_value=_coupon_datasets()), \
+         mock.patch.object(LLMService, "generate", side_effect=llm.generate):
+        updated_tc = ws.generate_playwright_script(project.id, tc.id)
+
+    script = updated_tc.playwright_script
+    assert len(updated_tc.test_data_sets) == 20
+    assert [p["expected_outcome"] for p in updated_tc.test_data_profiles].count("accepted") == 2
+    assert script.count("test(") == 20
+    assert script.count("test.describe(") == 20
+    assert script.count("import { test, expect }") == 1
+    assert all(f"OLD-{index:03d}" in script for index in range(20))
+    assert all(f"TD-{tc.id.hex[:8].upper()}-{index:02d}" in script for index in range(1, 21))
+    # Real steps reach the model, and the two valid rows get their own template.
+    assert "Enter the coupon code" in llm.prompts[0]
+    assert len(llm.prompts) == 2
+    assert script.count("// accepted-template") == 2
+    saved = ws.repo.get_test_case(tc.id)
+    assert saved.playwright_script == script
+
+
+def test_generate_playwright_script_uses_read_only_evidence_and_repairs_once():
+    evidence = {"pages": [{"url": "https://coupons.example.test/", "forms": [], "elements": []}]}
+
+    class Inspector:
+        def __init__(self):
+            self.calls = []
+
+        def inspect_project(self, project_id, test_cases, allow_invalid_login_probe):
+            self.calls.append(allow_invalid_login_probe)
+            return evidence
+
+    inspector = Inspector()
+    ws = WorkflowService(inspector=inspector)
+    project, tc = _data_driven_case(ws, safe=True)
+    llm = _TemplateLLM()
+    issues = iter([["Label locator 'Coupon' is not uniquely observed"], []])
+
+    with mock.patch.object(LLMService, "structured_generate", return_value=_coupon_datasets()), \
+         mock.patch.object(LLMService, "generate", side_effect=llm.generate), \
+         mock.patch(
+             "backend.services.workflow_service.validate_playwright_script",
+             side_effect=lambda script, dom_context: next(issues),
+         ):
+        updated_tc = ws.generate_playwright_script(project.id, tc.id)
+
+    assert inspector.calls == [False]
+    assert all("LIVE PAGE EVIDENCE" in prompt for prompt in llm.prompts)
+    assert any("REPAIR FEEDBACK" in prompt for prompt in llm.prompts)
+    assert updated_tc.playwright_script.count("test(") == 20
+    assert updated_tc.script_validation_status == "unverified"
 
 
 def test_run_execution_and_stream_via_langgraph(mock_llm_service, fake_playwright_runner):

@@ -1234,7 +1234,7 @@ def create_requirement(project_id: UUID, data: RequirementCreate):
         raise HTTPException(status_code=404, detail="Project not found")
     
     try:
-        r = project_service.create_requirement(
+        r = project_service.add_requirement(
             project_id=project_id,
             title=data.title,
             description=data.description,
@@ -1242,7 +1242,7 @@ def create_requirement(project_id: UUID, data: RequirementCreate):
             business_domain=data.business_domain,
             attachments=[],
             original_filename=None,
-            requirement_id="REQ-MANUAL",
+            requirement_id=None,
             requirement_title=data.title,
             release_id=data.release_id
         )
@@ -1283,7 +1283,7 @@ async def import_requirements(project_id: UUID, release_id: UUID | None = None, 
         finalized_requirements = []
         for block in parsed_blocks:
             # 1. Create a draft requirement in DB
-            req = project_service.create_requirement(
+            req = project_service.add_requirement(
                 project_id=project_id,
                 title=block["title"],
                 description=block["description"],
@@ -2029,7 +2029,9 @@ def generate_playwright_script(project_id: UUID, test_case_id: UUID, payload: Ge
             jira_last_synced_at=getattr(updated_tc, "jira_last_synced_at", None)
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        message = str(exc)
+        status_code = 404 if "not found" in message.lower() else 400
+        raise HTTPException(status_code=status_code, detail=message)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Script generation failed: {exc}")
 

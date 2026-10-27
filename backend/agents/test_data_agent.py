@@ -23,6 +23,7 @@ separate concern.
 from __future__ import annotations
 
 import ast
+from collections import Counter
 import csv
 import hashlib
 import io
@@ -31,7 +32,7 @@ import re
 from uuid import uuid4
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from backend.agents.base import BaseAgent
 from backend.models.requirement import Requirement
@@ -74,13 +75,42 @@ class TestCaseDataResponse(BaseModel):
         "missing_required",
         "workflow",
     ]
+    # Whether the application should accept or reject this dataset. Empty
+    # means "same outcome as the selected test case's expected result".
+    expected_outcome: Literal["accepted", "rejected", ""] = ""
     assumptions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _default_outcome(self) -> "TestCaseDataResponse":
+        if not self.expected_outcome:
+            if self.test_type == "positive":
+                self.expected_outcome = "accepted"
+            elif self.test_type in {"invalid", "missing_required"}:
+                self.expected_outcome = "rejected"
+        return self
 
 
 class TestCaseDataBatchResponse(BaseModel):
-    """Exactly 20 distinct datasets for the same selected test case."""
+    """Datasets for the same selected test case. The prompt asks for 20; the
+    agent collects unique ones across replies until it has 20."""
 
-    datasets: list[TestCaseDataResponse] = Field(min_length=20, max_length=20)
+    datasets: list[TestCaseDataResponse] = Field(min_length=1)
+
+    @field_validator("datasets", mode="before")
+    @classmethod
+    def _drop_malformed_items(cls, value):
+        # Seen live: a model returned 44 entries, some of them bare numbers.
+        # Malformed entries say nothing about the well-formed ones, so drop
+        # them here and let the agent collect unique datasets from the rest.
+        if not isinstance(value, list):
+            return value
+        kept = []
+        for item in value:
+            try:
+                kept.append(TestCaseDataResponse.model_validate(item))
+            except ValidationError:
+                continue
+        return kept
 
 
 class TestDataAgent(BaseAgent):
@@ -146,7 +176,14 @@ class TestDataAgent(BaseAgent):
             validation_rules=validation_rules,
             reserved_fingerprints=reserved_fingerprints,
         )
+        # Models rarely hit an exact count in one long reply (seen live: 44,
+        # then 18). Collect unique datasets across attempts until there are 20,
+        # instead of requiring any single reply to be exactly right.
+        collected: list[TestCaseDataResponse] = []
+        accepted_fingerprints: set[str] = set()
         collision_fingerprints: set[str] = set()
+        field_names: frozenset[str] | None = None
+        last_llm_error: LLMServiceError | None = None
         for _ in (range(3) if generated_datasets is None else []):
             application_context = context.get("application_context", {})
             if not isinstance(application_context, dict):
@@ -178,7 +215,7 @@ class TestDataAgent(BaseAgent):
                     ensure_ascii=False,
                 ),
                 reserved_dataset_fingerprints=json.dumps(
-                    sorted(reserved_fingerprints | collision_fingerprints)
+                    sorted(reserved_fingerprints | accepted_fingerprints | collision_fingerprints)
                 ),
                 uniqueness_nonce=uuid4().hex,
             )
@@ -189,47 +226,51 @@ class TestDataAgent(BaseAgent):
                     max_retries=1,
                     timeout=240,
                 )
-            except LLMServiceError:
-                generated_datasets = self._generate_deterministic_case_data(
-                    requirement=requirement,
-                    scenario=scenario,
-                    test_case=test_case,
-                    source_test_data=source_test_data,
-                    validation_rules=validation_rules,
-                    reserved_fingerprints=reserved_fingerprints,
-                )
-                if generated_datasets is None:
-                    raise
-                break
-            candidate_fingerprints = [
-                self._dataset_fingerprint(dataset.test_data)
-                for dataset in candidate.datasets
+            except LLMServiceError as exc:
+                # The deterministic generator already returned None for these
+                # inputs before the loop, so the only useful recovery is
+                # another LLM attempt with a fresh nonce.
+                last_llm_error = exc
+                state.add_log(f"{self.name}: LLM test-data attempt failed: {exc}")
+                continue
+            last_llm_error = None
+            usable = [
+                dataset for dataset in candidate.datasets
+                if all(key.strip() for key in dataset.test_data)
             ]
-            if any(
-                not dataset.test_data
-                or any(not key.strip() for key in dataset.test_data)
-                for dataset in candidate.datasets
-            ):
-                raise ValueError(
-                    f"{self.name} returned a dataset without usable input fields"
-                )
-            field_names = set(candidate.datasets[0].test_data)
-            if any(set(dataset.test_data) != field_names for dataset in candidate.datasets):
-                raise ValueError(
-                    f"{self.name} returned inconsistent fields across the 20 datasets"
-                )
-            if (
-                len(set(candidate_fingerprints)) == 20
-                and not reserved_fingerprints.intersection(candidate_fingerprints)
-            ):
-                generated_datasets = candidate.datasets
+            if not usable:
+                continue
+            # All 20 rows must share one field set. The first reply with usable
+            # data fixes it, using its most common field set, not its first row.
+            if field_names is None:
+                field_names = Counter(
+                    frozenset(dataset.test_data) for dataset in usable
+                ).most_common(1)[0][0]
+            for dataset in usable:
+                fingerprint = self._dataset_fingerprint(dataset.test_data)
+                if (
+                    frozenset(dataset.test_data) != field_names
+                    or fingerprint in accepted_fingerprints
+                    or fingerprint in reserved_fingerprints
+                ):
+                    collision_fingerprints.add(fingerprint)
+                    continue
+                accepted_fingerprints.add(fingerprint)
+                collected.append(dataset)
+            state.add_log(
+                f"{self.name}: collected {min(len(collected), 20)} of 20 unique datasets"
+            )
+            if len(collected) >= 20:
+                generated_datasets = collected[:20]
                 break
-            collision_fingerprints.update(candidate_fingerprints)
 
+        if generated_datasets is None and not collected and last_llm_error is not None:
+            raise last_llm_error
         if generated_datasets is None:
             raise ValueError(
                 f"{self.name} could not generate 20 unique datasets for "
-                f"'{test_case.title}' after three attempts"
+                f"'{test_case.title}' after three attempts "
+                f"(collected {len(collected)})"
             )
 
         input_datasets = [dataset.test_data for dataset in generated_datasets]
@@ -244,6 +285,7 @@ class TestDataAgent(BaseAgent):
                 "targeted_validation_rule": dataset.targeted_validation_rule,
                 "expected_result": test_case.expected_result,
                 "test_type": dataset.test_type,
+                "expected_outcome": dataset.expected_outcome,
             }
             for data_id, dataset in zip(data_ids, generated_datasets)
         ]
@@ -296,6 +338,14 @@ class TestDataAgent(BaseAgent):
         state.generated_test_data = rows
         test_case.test_data = input_datasets[0]
         test_case.test_data_sets = input_datasets
+        test_case.test_data_profiles = [
+            {
+                "test_type": dataset.test_type,
+                "expected_outcome": dataset.expected_outcome,
+                "targeted_validation_rule": dataset.targeted_validation_rule,
+            }
+            for dataset in generated_datasets
+        ]
         state.add_log(
             f"{self.name} generated {len(input_datasets)} unique datasets "
             f"for test case '{test_case.title}'"
@@ -318,6 +368,7 @@ class TestDataAgent(BaseAgent):
             "targeted_validation_rule",
             "expected_result",
             "test_type",
+            "expected_outcome",
         }
         base_data = {
             key: value
@@ -444,7 +495,7 @@ class TestDataAgent(BaseAgent):
                     ],
                 )
             )
-            if len(datasets) == 20:
+            if len(datasets) <= 20:
                 return datasets
         return None
 
@@ -562,7 +613,7 @@ class TestDataAgent(BaseAgent):
                     ],
                 )
             )
-            if len(datasets) == 20:
+            if len(datasets) <= 20:
                 return datasets
         return None
 

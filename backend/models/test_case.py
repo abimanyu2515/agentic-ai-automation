@@ -80,5 +80,7 @@ class TestCase(BaseModel):
     jira_last_synced_at: datetime | None = None
     test_data: dict[str, str] = Field(default_factory=dict)
     test_data_sets: list[dict[str, str]] = Field(default_factory=list)
+    # Parallel to test_data_sets: test_type, expected_outcome, targeted_validation_rule.
+    test_data_profiles: list[dict[str, str]] = Field(default_factory=list)
     execution_type: str = "UI Automation"
     automation_framework: str = "playwright"

@@ -13,6 +13,10 @@ Services contain backend business behavior that supports API routes and workflow
 | `backend/services/batch_queue_manager.py` | Batch execution queue behavior |
 | `backend/services/recovery_manager.py` | Execution recovery behavior |
 | `backend/services/vault_service.py` | Encrypted project credential storage |
+| `backend/services/grounded_playwright_service.py` | Inspects the target app, generates scripts from that evidence, and validates them |
+| `backend/services/playwright_script_validation.py` | Checks generated script locators against inspected page evidence |
+| `backend/services/locator_resolver.py` | Fallback locator strategy, used only when the primary locator fails |
+| `backend/services/navigation_planner.py` | Target agnostic navigation over generic states from `backend/config/app_states.json` |
 
 ## Conventions
 

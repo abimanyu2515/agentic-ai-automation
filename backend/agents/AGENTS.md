@@ -2,7 +2,7 @@
 
 ## Overview
 
-You are in the workflow agent area when you change how requirements become scenarios, test cases, scripts, results, or reports. This area owns the 17 agents in `backend/agents/` and their prompts in `backend/prompts/agents/`. You may start with `backend/graph/workflow.py` to see the order, then open the one agent you need.
+You are in the workflow agent area when you change how requirements become scenarios, test cases, scripts, results, or reports. This area owns the 18 agents in `backend/agents/` and their prompts in `backend/prompts/agents/`. You may start with `backend/graph/workflow.py` to see the order, then open the one agent you need.
 
 ## Key files
 
@@ -20,6 +20,8 @@ You are in the workflow agent area when you change how requirements become scena
 | `backend/agents/execution_analysis_agent.py` | Failure cause and flake insight |
 | `backend/agents/defect_management_agent.py` | Jira bug lifecycle for failures |
 | `backend/agents/report_agent.py` | Execution reports in JSON and JUnit form |
+| `backend/agents/test_data_agent.py` | Row by row test data for each test case |
+| `backend/agents/application_reconnaissance_agent.py` | Live, sanitized DOM inspection of the project target URL for grounded scripts |
 | `backend/prompts/agents/` | Prompt text for each agent, one folder per agent |
 
 ## Conventions
@@ -34,6 +36,7 @@ You are in the workflow agent area when you change how requirements become scena
 ## Gotchas
 
 * You may find `HumanApprovalAgent` used twice, once after scenarios and once after evaluation, with auto approval when human review is off
+* You may find `TestDataAgent` and `ApplicationReconnaissanceAgent` are not graph nodes. `WorkflowService` runs `TestDataAgent`, and `GroundedPlaywrightScriptService` runs reconnaissance before `PlaywrightAgent`
 * You may find `EvaluationAgent` marks duplicates by word overlap and low relevance items for review, then sorts the rest by confidence
 * You may find `PlaywrightAgent` branches into UI scripts, API scripts, or human readable steps through the automation orchestrator choice
 * You may find `docs/agents.md` holds the full per agent reference, while this file stays the short local guide you can trust first

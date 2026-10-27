@@ -656,6 +656,7 @@ class PostgresProjectRepository(ProjectRepository):
                     jira_last_synced_at=tc.jira_last_synced_at,
                     test_data=tc.test_data,
                     test_data_sets=tc.test_data_sets,
+                    test_data_profiles=tc.test_data_profiles,
                     script_validation_status=_get_val(tc.script_validation_status),
                     script_validation_attempts=tc.script_validation_attempts,
                     script_validation_completed_at=tc.script_validation_completed_at,
@@ -683,6 +684,7 @@ class PostgresProjectRepository(ProjectRepository):
                 db_tc.jira_last_synced_at = tc.jira_last_synced_at
                 db_tc.test_data = tc.test_data
                 db_tc.test_data_sets = tc.test_data_sets
+                db_tc.test_data_profiles = tc.test_data_profiles
                 db_tc.script_validation_status = _get_val(tc.script_validation_status)
                 db_tc.script_validation_attempts = tc.script_validation_attempts
                 db_tc.script_validation_completed_at = tc.script_validation_completed_at
@@ -716,6 +718,7 @@ class PostgresProjectRepository(ProjectRepository):
         db_tc.jira_last_synced_at = test_case.jira_last_synced_at
         db_tc.test_data = test_case.test_data
         db_tc.test_data_sets = test_case.test_data_sets
+        db_tc.test_data_profiles = test_case.test_data_profiles
         db_tc.script_validation_status = _get_val(test_case.script_validation_status)
         db_tc.script_validation_attempts = test_case.script_validation_attempts
         db_tc.script_validation_completed_at = test_case.script_validation_completed_at

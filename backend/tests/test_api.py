@@ -318,6 +318,22 @@ def test_create_and_get_requirements(client):
     assert reqs[0]["priority"] == "high"
 
 
+def test_creating_several_requirements_keeps_every_one(client):
+    response = client.post("/api/v1/projects", json={"name": "Many Reqs", "description": "Several manual requirements", "framework": "playwright", "target_url": "https://many-requirements.example.com"})
+    proj_id = response.json()["id"]
+
+    for title in ("Login", "Logout", "Search"):
+        response = client.post(
+            f"/api/v1/projects/{proj_id}/requirements",
+            json={"title": title, "description": f"{title} desc", "priority": "medium", "business_domain": "general"},
+        )
+        assert response.status_code == 201
+
+    reqs = client.get(f"/api/v1/projects/{proj_id}/requirements").json()
+    assert sorted(r["title"] for r in reqs) == ["Login", "Logout", "Search"]
+    assert len({r["requirement_id"] for r in reqs}) == 3
+
+
 def test_get_and_write_settings(client, monkeypatch):
     # Temporarily remove env overrides so PUT settings can be verified
     monkeypatch.delenv("LLM_PROVIDER", raising=False)

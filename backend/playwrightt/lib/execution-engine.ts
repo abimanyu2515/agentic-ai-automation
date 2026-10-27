@@ -206,7 +206,9 @@ export class ExecutionEngine {
 
             const launchOptions: any = {
               headless: headless,
-              slowMo: 1000,
+              // Slow motion only helps someone watching a headed browser. Headless it
+              // added a second to every command, turning one data run into minutes.
+              slowMo: headless ? 0 : 1000,
               args: ['--no-sandbox', '--disable-setuid-sandbox'],
             };
 
@@ -281,7 +283,7 @@ export class ExecutionEngine {
           // Start screenshot capture
           this.startScreenshotCapture(executionId, page, screenshotDir);
 
-          const testPromises: Promise<void>[] = [];
+          const queuedTests: { name: string; fn: any }[] = [];
           const screenshotPromises: Promise<void>[] = [];
 
           // Setup console listener
@@ -374,19 +376,9 @@ export class ExecutionEngine {
             },
             test: Object.assign(
               (name: string, fn: any) => {
-                const runPromise = (async () => {
-                  executionQueue.addTimelineEvent(executionId, `Running: ${name}`, 'info');
-                  await sendWebhook(projectId, {
-                    execution_id: executionId,
-                    test_case_id: testCaseId,
-                    event: 'updated',
-                    status: 'running',
-                    timeline_event: { event: `Running: ${name}`, type: 'info' }
-                  });
-                  await fn(executionContext);
-                })();
-                testPromises.push(runPromise);
-                return runPromise;
+                // Tests share one page, so they are queued here and run one at a
+                // time after the script body has declared them all.
+                queuedTests.push({ name, fn });
               },
               {
                 only: (name: string, fn: any) => {
@@ -772,8 +764,59 @@ export class ExecutionEngine {
           try {
             await asyncFunc(executionContext);
 
-            if (testPromises.length > 0) {
-              await Promise.all(testPromises);
+            // Run declared tests sequentially. Data driven scripts declare one test
+            // per dataset; running them concurrently on the shared page made every
+            // page.goto abort the previous one (net::ERR_ABORTED).
+            const failures: string[] = [];
+            let previousError = '';
+            let repeatedErrors = 0;
+            for (const [index, queued] of queuedTests.entries()) {
+              // Two tests in a row failing with the same error point at the script,
+              // not the data; the remaining datasets would only repeat it.
+              if (repeatedErrors >= 2) {
+                const skipped = queuedTests.length - index;
+                executionQueue.addTimelineEvent(
+                  executionId,
+                  `Skipped ${skipped} remaining tests: the same error repeated`,
+                  'warning'
+                );
+                failures.push(`${skipped} remaining tests skipped after a repeated error`);
+                break;
+              }
+              if (index > 0) {
+                // Give each later test a clean session, like Playwright's per test context.
+                await context.clearCookies().catch(() => {});
+                await activePage.evaluate(() => {
+                  try { localStorage.clear(); sessionStorage.clear(); } catch {}
+                }).catch(() => {});
+              }
+              executionQueue.addTimelineEvent(executionId, `Running: ${queued.name}`, 'info');
+              await sendWebhook(projectId, {
+                execution_id: executionId,
+                test_case_id: testCaseId,
+                event: 'updated',
+                status: 'running',
+                timeline_event: { event: `Running: ${queued.name}`, type: 'info' }
+              });
+              try {
+                await queued.fn(executionContext);
+                previousError = '';
+                repeatedErrors = 0;
+              } catch (err: any) {
+                if (queuedTests.length === 1) throw err;
+                const message = err?.message || String(err);
+                const errorKey = message.split('\n')[0];
+                repeatedErrors = errorKey === previousError ? repeatedErrors + 1 : 1;
+                previousError = errorKey;
+                failures.push(`${queued.name}: ${message}`);
+                await executionContext.screenshot(`failed-${String(index + 1).padStart(2, '0')}`).catch(() => {});
+                executionQueue.addTimelineEvent(executionId, `Failed: ${queued.name}`, 'error');
+              }
+            }
+            if (failures.length > 0) {
+              throw new Error(
+                `${failures.length} of ${queuedTests.length} tests failed. First failure: ${failures[0]}`
+              );
             }
             if (screenshotPromises.length > 0) {
               await Promise.all(screenshotPromises).catch(() => {});

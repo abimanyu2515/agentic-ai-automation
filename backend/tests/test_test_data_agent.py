@@ -163,7 +163,10 @@ def test_test_data_agent_retries_duplicate_llm_batches_for_unsupported_rule():
         TestDataAgent._dataset_fingerprint(dataset)
         for dataset in result.generated_test_cases[0].test_data_sets
     }) == 20
-    assert result.generated_test_data[0]["phone"] == "invalid-100"
+    # The reserved "invalid-phone" is skipped, the other 19 from the first
+    # reply are kept, and the second reply supplies the 20th.
+    phones = [row["phone"] for row in result.generated_test_data]
+    assert phones == [f"invalid-{i}" for i in range(1, 20)] + ["invalid-100"]
     assert result.test_data_report["context_understood"]["expected_result"] == test_case.expected_result
     assert result.test_data_report["context_understood"]["unique_for_test_case"] is True
 
@@ -479,3 +482,123 @@ def test_test_data_agent_fails_when_llm_cannot_generate_unique_unsupported_data(
 
     with pytest.raises(ValueError, match="could not generate 20 unique datasets"):
         TestDataAgent(llm_service=StubLLMService()).run(state)
+
+
+def _phone_state():
+    requirement = Requirement(title="User registration", description="Register a user.")
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Invalid phone",
+        description="Reject unsupported phone numbers.",
+    )
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Reject unsupported phone",
+        steps=["Enter an unsupported phone number", "Submit"],
+        expected_result="Phone validation error is shown",
+    )
+    return WorkflowState(
+        requirement=requirement,
+        generated_scenarios=[scenario],
+        generated_test_cases=[test_case],
+    )
+
+
+def _phone_dataset(value):
+    return {
+        "test_data": {"phone": value},
+        "targeted_validation_rule": "Phone number must use a supported format.",
+        "test_type": "invalid",
+    }
+
+
+def test_batch_response_drops_malformed_items_and_accepts_more_than_20():
+    """The live failure: 44 entries, some of them bare numbers, rejected
+    outright for exceeding 20 even though 20+ usable datasets were present."""
+    raw = [32995941, *[_phone_dataset(f"invalid-{i}") for i in range(43)]]
+
+    batch = TestCaseDataBatchResponse.model_validate({"datasets": raw})
+
+    assert len(batch.datasets) == 43
+
+
+def test_test_data_agent_keeps_20_unique_datasets_from_oversized_response():
+    raw = [
+        32995941,
+        *[_phone_dataset(f"invalid-{i}") for i in range(30)],
+        _phone_dataset("invalid-0"),
+        {"test_data": {"other": "x"}, "targeted_validation_rule": "r", "test_type": "invalid"},
+    ]
+
+    class StubLLMService:
+        def structured_generate(self, *, user, response_model, **kwargs):
+            return response_model.model_validate({"datasets": raw})
+
+    result = TestDataAgent(llm_service=StubLLMService()).run(_phone_state())
+
+    rows = result.generated_test_cases[0].test_data_sets
+    assert len(rows) == 20
+    assert [row["phone"] for row in rows] == [f"invalid-{i}" for i in range(20)]
+
+
+def test_test_data_agent_retries_llm_after_schema_failure():
+    from backend.services.llm import LLMServiceError
+
+    class StubLLMService:
+        calls = 0
+
+        def structured_generate(self, *, user, response_model, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise LLMServiceError("LLM response did not match TestCaseDataBatchResponse")
+            return response_model.model_validate(
+                {"datasets": [_phone_dataset(f"invalid-{i}") for i in range(20)]}
+            )
+
+    llm_service = StubLLMService()
+    result = TestDataAgent(llm_service=llm_service).run(_phone_state())
+
+    assert llm_service.calls == 2
+    assert len(result.generated_test_cases[0].test_data_sets) == 20
+    assert any("LLM test-data attempt failed" in log for log in result.logs)
+
+
+def test_test_data_agent_raises_last_llm_error_when_every_attempt_fails():
+    from backend.services.llm import LLMServiceError
+
+    class StubLLMService:
+        calls = 0
+
+        def structured_generate(self, **kwargs):
+            self.calls += 1
+            raise LLMServiceError("bad shape")
+
+    llm_service = StubLLMService()
+    with pytest.raises(LLMServiceError, match="bad shape"):
+        TestDataAgent(llm_service=llm_service).run(_phone_state())
+    assert llm_service.calls == 3
+
+
+def test_test_data_agent_collects_short_replies_until_20():
+    """The live failure: a reply with only 18 datasets rejected the request.
+    Short replies now add up across attempts."""
+    replies = [
+        [_phone_dataset(f"invalid-{i}") for i in range(18)],
+        # Overlaps the first reply; only invalid-18 and invalid-19 are new.
+        [_phone_dataset(f"invalid-{i}") for i in range(10, 20)],
+    ]
+
+    class StubLLMService:
+        prompts = []
+
+        def structured_generate(self, *, user, response_model, **kwargs):
+            self.prompts.append(user)
+            return response_model.model_validate({"datasets": replies.pop(0)})
+
+    llm_service = StubLLMService()
+    result = TestDataAgent(llm_service=llm_service).run(_phone_state())
+
+    rows = result.generated_test_cases[0].test_data_sets
+    assert [row["phone"] for row in rows] == [f"invalid-{i}" for i in range(20)]
+    # The second prompt tells the model which datasets it already produced.
+    assert TestDataAgent._dataset_fingerprint({"phone": "invalid-0"}) in llm_service.prompts[1]

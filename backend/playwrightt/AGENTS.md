@@ -45,6 +45,7 @@ pnpm lint
 * `next.config.mjs` currently allows TypeScript build errors. Do not treat a successful Next build as a complete type safety check.
 * The workspace uses a `pnpm-lock.yaml`. Prefer pnpm for dependency operations.
 * Generated artifacts under `public/artifacts/` can be large and should not be edited as source files.
+* `lib/execution-engine.ts` runs scripts with its own `test()` shim on one shared page, not the Playwright test runner. Declared tests are queued and run one at a time, with cookies and storage cleared between them; running them concurrently made every `page.goto` abort the others (`net::ERR_ABORTED`). After two consecutive tests fail with the same error, the rest are skipped. `slowMo` applies only to headed runs, and strict mode violations are not retried.
 * The execution API returns before the browser work finishes. Queue metadata is written to `public/artifacts/active_executions.json` for local recovery, and the active index is pruned.
 
 _Drafted by /audit from the repo, worth a quick human pass. Edit freely: once a line stops matching this draft, later runs treat it as curated and will flag rather than overwrite it._

@@ -2244,13 +2244,6 @@ class App {
       }
     };
 
-    const testDataAgentTestCasesBtn = document.getElementById('btn-run-testdata-agent-testcases');
-    const testDataAgentTestCasesStatus = document.getElementById('testdata-agent-testcases-status');
-    if (testDataAgentTestCasesBtn) {
-      testDataAgentTestCasesBtn.disabled = this.testDataAgentRunning || !this.currentProject;
-      testDataAgentTestCasesBtn.onclick = () => this.runTestDataAgent(testDataAgentTestCasesStatus);
-    }
-
     const approvedScenarioIds = new Set(approvedScenarios.map(s => s.id));
     const requirementTestCases = this.testCases.filter(tc => approvedScenarioIds.has(tc.scenario_id));
 
@@ -2587,7 +2580,6 @@ class App {
         : 'Generating 20 requirement-based test-data records, test cases, and Playwright scripts...';
     }
     const testDataAgentButton = document.getElementById('btn-run-testdata-agent');
-    const testDataAgentTestCasesButton = document.getElementById('btn-run-testdata-agent-testcases');
     const generatingLabel = runTests
       ? 'Generating Test Data, Cases & Scripts...'
       : 'Generating Test Data & Cases...';
@@ -2604,10 +2596,6 @@ class App {
     if (testDataAgentButton) {
       testDataAgentButton.disabled = true;
       testDataAgentButton.innerText = generatingLabel;
-    }
-    if (testDataAgentTestCasesButton) {
-      testDataAgentTestCasesButton.disabled = true;
-      testDataAgentTestCasesButton.innerText = generatingLabel;
     }
     if (status) {
       status.style.display = 'block';
@@ -2825,10 +2813,6 @@ class App {
       updateTestCaseButtons(false, 'Generate Test Data');
       if (testDataAgentButton) {
         testDataAgentButton.innerText = 'Run TestDataAgent';
-      }
-      if (testDataAgentTestCasesButton) {
-        testDataAgentTestCasesButton.disabled = !this.currentProject || !this.selectedRequirementId;
-        testDataAgentTestCasesButton.innerText = 'Run Test Data Agent';
       }
       this.renderTestDataAgent();
     }
