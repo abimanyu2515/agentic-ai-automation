@@ -238,16 +238,23 @@ def test_generate_playwright_script_uses_read_only_evidence_and_repairs_once():
 def test_generate_playwright_script_uses_live_verified_generator_for_target_url():
     calls = []
 
-    async def fake_generator(target_url, steps, test_title):
-        calls.append((target_url, steps, test_title))
+    async def fake_generator(target_url, steps, test_title, username=None, password=None):
+        calls.append((target_url, steps, test_title, username, password))
         return "import { test, expect } from '@playwright/test';\ntest('live', async () => {});"
+
+    class FakeVaultService:
+        def get_credentials(self, project_id):
+            return "vault-user", "vault-pass"
 
     ws = WorkflowService(script_generator=fake_generator)
     project, tc = _data_driven_case(ws)
 
-    updated_tc = ws.generate_playwright_script(project.id, tc.id)
+    with mock.patch("backend.services.vault_service.VaultService", FakeVaultService):
+        updated_tc = ws.generate_playwright_script(project.id, tc.id)
 
-    assert calls == [("https://coupons.example.test", list(tc.steps), tc.title)]
+    assert calls == [
+        ("https://coupons.example.test", list(tc.steps), tc.title, "vault-user", "vault-pass")
+    ]
     assert updated_tc.playwright_script.startswith("import { test, expect }")
     assert updated_tc.script_validation_status == "unverified"
     assert ws.repo.get_test_case(tc.id).playwright_script == updated_tc.playwright_script

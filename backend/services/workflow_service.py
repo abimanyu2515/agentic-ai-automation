@@ -709,7 +709,7 @@ class WorkflowService:
         ):
             if project.target_url:
                 return self._generate_live_verified_script(
-                    project.target_url, test_case, automation_framework
+                    project_id, project.target_url, test_case, automation_framework
                 )
             return self._generate_data_driven_script(
                 project_id, requirement.id, test_case, automation_framework
@@ -728,6 +728,7 @@ class WorkflowService:
 
     def _generate_live_verified_script(
         self,
+        project_id: UUID,
         target_url: str,
         test_case: TestCase,
         automation_framework: str,
@@ -735,14 +736,24 @@ class WorkflowService:
         """Build a TypeScript Playwright script by running the steps on the live target app."""
         import asyncio
 
+        from backend.services.vault_service import VaultService
+
         script_generator = self.script_generator
         if script_generator is None:
             from backend.agents.script_generator_agent import generate_accurate_test_script
 
             script_generator = generate_accurate_test_script
 
+        # Login steps need the project's credentials; the generator keeps them out of prompts.
+        username, password = VaultService().get_credentials(str(project_id))
         script = asyncio.run(
-            script_generator(target_url, list(test_case.steps), test_case.title)
+            script_generator(
+                target_url,
+                list(test_case.steps),
+                test_case.title,
+                username=username,
+                password=password,
+            )
         )
         test_case.automation_framework = automation_framework
         test_case.playwright_script = script

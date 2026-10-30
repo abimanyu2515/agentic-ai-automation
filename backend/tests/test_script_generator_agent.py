@@ -5,6 +5,7 @@ import pytest
 
 from backend.agents import script_generator_agent as agent
 from backend.agents.script_generator_agent import AgentDecision, generate_accurate_test_script
+from backend.services.llm import LLMServiceError
 
 
 class _FakeLocator:
@@ -76,15 +77,22 @@ class _FakePlaywright:
 
 
 class _ScriptedLLM:
+    """Returns scripted decisions in order; an Exception entry is raised instead."""
+
     def __init__(self, decisions, final_text):
         self.decisions = list(decisions)
         self.final_text = final_text
         self.prompts = []
+        self.timeouts = []
         self.synthesis_prompt = None
 
     def structured_generate(self, *, user, response_model, **kwargs):
         self.prompts.append(user)
-        return response_model(**self.decisions.pop(0))
+        self.timeouts.append(kwargs.get("timeout"))
+        decision = self.decisions.pop(0)
+        if isinstance(decision, Exception):
+            raise decision
+        return response_model(**decision)
 
     def generate(self, *, system, user, **kwargs):
         self.synthesis_prompt = user
@@ -105,13 +113,15 @@ def _decision(action, selector="", value=None):
     }
 
 
-def _run(llm, steps):
+def _run(llm, steps, **kwargs):
     page = _FakePage()
     browser = _FakeBrowser(page)
     with mock.patch.object(agent, "async_playwright", lambda: _FakePlaywright(browser)), \
          mock.patch.object(agent, "extract_page_state", _fake_page_state):
         script = asyncio.run(
-            generate_accurate_test_script("https://app.example.test/", steps, "Login", llm=llm)
+            generate_accurate_test_script(
+                "https://app.example.test/", steps, "Login", llm=llm, **kwargs
+            )
         )
     return script, page, browser
 
@@ -181,3 +191,79 @@ def test_requires_target_url_and_steps():
 def test_agent_decision_rejects_unknown_action():
     with pytest.raises(Exception):
         AgentDecision(**_decision("hover", "#x"))
+
+
+def test_agent_decision_accepts_done_without_selector():
+    # Many models send null or omit selector when a step is finished.
+    assert AgentDecision(action="done", selector=None).selector is None
+    assert AgentDecision(action="done").ts_playwright_code == ""
+
+
+def test_action_without_selector_is_fed_back_as_error():
+    llm = _ScriptedLLM(
+        [{"action": "click", "selector": None}, _decision("click", "#login"), _decision("done")],
+        "import { test } from '@playwright/test';",
+    )
+
+    _, page, _ = _run(llm, ["Click login"])
+
+    assert page.actions == [("click", "#login", None)]
+    assert 'Action "click" needs a selector' in llm.prompts[1]
+
+
+def test_step_calls_use_longer_timeout_and_compact_context():
+    llm = _ScriptedLLM([_decision("done")], "import { test } from '@playwright/test';")
+
+    _run(llm, ["Open page"])
+
+    assert llm.timeouts == [agent.STEP_LLM_TIMEOUT]
+    assert '{"recommendedSelector":"#login"}' in llm.prompts[0]
+
+
+def test_single_llm_failure_retries_the_step():
+    llm = _ScriptedLLM(
+        [LLMServiceError("rate limited"), _decision("click", "#login"), _decision("done")],
+        "import { test } from '@playwright/test';",
+    )
+
+    script, page, browser = _run(llm, ["Click login"])
+
+    assert page.actions == [("click", "#login", None)]
+    assert script.startswith("import")
+    assert browser.closed
+
+
+def test_step_raises_when_every_llm_call_fails():
+    llm = _ScriptedLLM([LLMServiceError("Unauthorized")] * 6, "unused")
+
+    with pytest.raises(LLMServiceError, match="step 1: every LLM call failed.*Unauthorized"):
+        _run(llm, ["Click login"])
+    assert llm.synthesis_prompt is None
+
+
+def test_credentials_are_filled_live_but_never_sent_to_the_llm():
+    llm = _ScriptedLLM(
+        [
+            _decision("fill", '[data-test="username"]', agent.USERNAME_PLACEHOLDER),
+            _decision("done"),
+        ],
+        "import { test } from '@playwright/test';",
+    )
+
+    _, page, _ = _run(llm, ["Enter username"], username="real-user", password="s3cret!")
+
+    assert page.actions == [("fill", '[data-test="username"]', "real-user")]
+    assert agent.USERNAME_PLACEHOLDER in llm.prompts[0]
+    assert "process.env.TARGET_USERNAME" in llm.synthesis_prompt
+    for prompt in llm.prompts + [llm.synthesis_prompt]:
+        assert "real-user" not in prompt
+        assert "s3cret!" not in prompt
+
+
+def test_no_credential_rule_without_credentials():
+    llm = _ScriptedLLM([_decision("done")], "import { test } from '@playwright/test';")
+
+    _run(llm, ["Open page"])
+
+    assert agent.USERNAME_PLACEHOLDER not in llm.prompts[0]
+    assert agent.USERNAME_PLACEHOLDER not in llm.synthesis_prompt
