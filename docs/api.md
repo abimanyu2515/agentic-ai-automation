@@ -421,11 +421,16 @@ POST /api/v1/projects/{project_id}/testcases/{test_case_id}/generate-script
 
 **Request Body** (`GenerateScriptPayload`, optional): `{"framework": "Playwright"}`
 
-Requires an approved test case. For Playwright projects the script is data driven:
+Requires an approved test case. For Playwright projects the path depends on the case's saved data:
+
+- If the test case already holds 20 distinct datasets, or the project has no `target_url`, the script is data driven, as described below.
+- Otherwise the project's `target_url` is set and the case has no datasets, so the script is generated live against the target app, with one test (see "Live-verified script generation" in `docs/agents.md`).
+
+The data-driven path:
 
 1. If the test case does not yet hold 20 distinct datasets, `TestDataAgent` generates them first and stores them as `test_data_sets`, with a parallel `test_data_profiles` entry per dataset (`test_type`, `expected_outcome`, `targeted_validation_rule`).
-2. `PlaywrightAgent` writes a template from the case's real steps and expands it into one `test(...)` per dataset, each wrapped in `test.describe("TD-<id>-NN")`. Datasets whose expected outcome differs from the case's own (for example a valid row in a negative case) get a separate template, so each test asserts its real outcome.
-3. When the project is marked as a safe test environment, the target URL is inspected first with read only access (nothing is submitted), and the page evidence grounds the locators. If the generated script fails the locator and TypeScript checks, it is regenerated once with that feedback.
+2. `PlaywrightAgent` writes one template test from the case's real steps. The script holds the datasets once as an array (`const datasets = [{ id, type, data }, ...]`) and runs the template in a `for (const row of datasets)` loop. Each iteration is wrapped in `test.describe(row.id)`, so every dataset still reports as its own `TD-<id>-NN` test. Datasets whose expected outcome differs from the case's own (for example a valid row in a negative case) get a separate template and array (`acceptedDatasets` or `rejectedDatasets`), so each test asserts its real outcome.
+3. When the project is marked as a safe test environment, each template is recorded on the live target app: the steps run in a headless browser with the group's first dataset, every action is verified on the page, and the expected result is checked live. This submits real forms. When recording fails or drops a data field, or the project is not marked safe, the template comes from one LLM call grounded on a read only inspection of the target URL (nothing is submitted). If the generated script fails the locator and TypeScript checks, it is regenerated once with that feedback.
 
 The new script's `script_validation_status` is reset to `unverified`. Selenium and Cucumber keep single script generation.
 

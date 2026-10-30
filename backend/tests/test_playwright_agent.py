@@ -459,30 +459,63 @@ test('Test data __TEST_DATA_ID__: __TEST_TYPE__', async ({ page }) => {
     ).run(state)
 
     generated_script = result.generated_test_cases[0].playwright_script
-    assert generated_script.count("test(") == 20
+    # One test body, run once per dataset in the array.
+    assert generated_script.count("test(") == 1
+    assert "for (const row of datasets)" in generated_script
     assert generated_script.count("import { test, expect }") == 1
+    assert generated_script.count('"password": "') == 20
     assert "00000000" in generated_script
     assert "00000019" in generated_script
     assert "user-19@example.test" in generated_script
+    assert "fill(row.data[\"password\"])" in generated_script
+    assert "getByText('Password validation error is shown')" in generated_script
+    assert "__TEST_DATA_" not in generated_script
     assert PlaywrightAgent._escape_js_string_content("O'Brien") == "O\\'Brien"
 
 
-def test_joined_data_driven_scripts_scope_declarations_and_hoist_imports():
+def test_data_driven_loop_script_hoists_imports_and_scopes_each_dataset():
     script = (
         "import {\n  test,\n  expect,\n} from '@playwright/test';\n"
         "const BASE_URL = process.env.TARGET_URL || '';\n"
-        "test('one', async ({ page }) => { await page.goto(BASE_URL); });"
+        "test('__TEST_DATA_ID__ one', async ({ page }) => { await page.goto(BASE_URL); });"
     )
+    rows = [{"id": "TD-01", "type": "invalid", "data": {}}]
+    expressions = {"__TEST_DATA_ID__": "row.id"}
 
-    joined = PlaywrightAgent._join_data_driven_scripts([("TD-01", script), ("TD-02", script)])
+    joined = PlaywrightAgent._data_driven_loop_script([
+        ("datasets", "first", script, expressions, rows),
+        ("rejectedDatasets", "second", script, expressions, rows),
+    ])
 
     assert joined.startswith("import { test, expect, } from '@playwright/test';")
     assert joined.count("import ") == 1
-    assert joined.count("test.describe(") == 2
-    # Each copy of the declaration sits inside its own describe block.
-    first, second = joined.split('test.describe("TD-02"')
-    assert first.count("const BASE_URL") == 1
-    assert second.count("const BASE_URL") == 1
+    # Each loop runs its datasets inside their own describe block.
+    assert joined.count("test.describe(row.id") == 2
+    assert "for (const row of rejectedDatasets)" in joined
+    assert "test(`${row.id} one`" in joined
+
+
+def test_bind_markers_to_row_handles_strings_comments_and_code():
+    expressions = {"__TEST_DATA_01__": 'row.data["pin"]', "__TEST_DATA_02__": 'row.data["name"]'}
+    script = (
+        "// doesn't show __TEST_DATA_01__; see https://app.test\n"
+        "await page.getByLabel('PIN').fill('__TEST_DATA_01__');\n"
+        "for (const d of [...\"__TEST_DATA_01__\"]) {}\n"
+        "await expect(page.getByText('Hi __TEST_DATA_02__ `x` ${y}')).toBeVisible();\n"
+        "const greeting = `Hello __TEST_DATA_02__`;\n"
+        "const raw = __TEST_DATA_02__;"
+    )
+
+    bound = PlaywrightAgent._bind_markers_to_row(script, expressions)
+
+    assert bound.split("\n") == [
+        '// doesn\'t show row.data["pin"]; see https://app.test',
+        "await page.getByLabel('PIN').fill(row.data[\"pin\"]);",
+        'for (const d of [...row.data["pin"]]) {}',
+        "await expect(page.getByText(`Hi ${row.data[\"name\"]} \\`x\\` \\${y}`)).toBeVisible();",
+        'const greeting = `Hello ${row.data["name"]}`;',
+        'const raw = row.data["name"];',
+    ]
 
 
 def test_missing_playwright_import_is_added():

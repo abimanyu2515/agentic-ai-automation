@@ -98,7 +98,7 @@ def test_generate_test_data_test_cases_creates_20_scripted_cases(monkeypatch):
             return state
 
     class StubPlaywrightAgent:
-        def __init__(self, repo, max_workers, test_data_template):
+        def __init__(self, repo, max_workers, test_data_template, template_recorder=None):
             self.repo = repo
             assert max_workers == 5
             assert test_data_template is True
@@ -197,7 +197,7 @@ def test_repeated_run_reuses_cases_and_generates_only_missing_scripts(monkeypatc
             return state
 
     class StubPlaywrightAgent:
-        def __init__(self, repo, max_workers, test_data_template):
+        def __init__(self, repo, max_workers, test_data_template, template_recorder=None):
             assert max_workers == 5
             assert test_data_template is True
 
@@ -321,7 +321,7 @@ def test_generate_unique_test_data_then_script_for_selected_case(monkeypatch):
             return state
 
     class StubPlaywrightAgent:
-        def __init__(self, repo, max_workers, test_data_template):
+        def __init__(self, repo, max_workers, test_data_template, template_recorder=None):
             assert repo is repository
             assert max_workers == 1
             assert test_data_template is True

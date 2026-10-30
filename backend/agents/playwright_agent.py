@@ -67,6 +67,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 import json
 import re
+from typing import Callable
 from uuid import UUID
 
 from backend.agents.base import BaseAgent
@@ -143,6 +144,20 @@ _IMPORT_STATEMENT = re.compile(
     re.MULTILINE,
 )
 
+# A comment or string literal. One left to right scan keeps a quote inside a
+# comment, or a // inside a string, from being misread.
+_JS_COMMENT_OR_STRING = re.compile(
+    r"//[^\n]*|/\*[\s\S]*?\*/"
+    r"|'(?:[^'\\\n]|\\.)*'|\"(?:[^\"\\\n]|\\.)*\"|`(?:[^`\\]|\\.)*`"
+)
+
+# Loop variable name and leading comment for each dataset outcome group.
+_DATASET_GROUPS = {
+    "case": ("datasets", "Datasets that follow the test case's expected result"),
+    "accepted": ("acceptedDatasets", "Datasets the application should accept"),
+    "rejected": ("rejectedDatasets", "Datasets the application should reject"),
+}
+
 
 def _strip_code_fences(text: str) -> str:
     """Models routinely wrap code in ```typescript ... ``` even when told
@@ -167,6 +182,33 @@ def _looks_like_valid_code(code: str, framework: str) -> bool:
         return "test(" in code and "import" in code
 
 
+def _normalize_playwright_code(code: str, base_url: str) -> str:
+    """Guarantee the @playwright/test import includes expect and BASE_URL is declared."""
+    # Models sometimes drop the import line; it is always the same one.
+    if "test(" in code and "@playwright/test" not in code:
+        code = "import { test, expect } from '@playwright/test';\n\n" + code
+    # Fix import to always include expect
+    lines = code.split("\n")
+    for idx, line in enumerate(lines):
+        if line.strip().startswith("import { test") and "expect" not in line:
+            lines[idx] = line.replace("import { test", "import { test, expect")
+            break
+    code = "\n".join(lines)
+
+    if "const BASE_URL" not in code and "BASE_URL" in code:
+        lines = code.split("\n")
+        insert_idx = 0
+        for idx, line in enumerate(lines):
+            if "import " in line:
+                insert_idx = idx + 1
+        lines.insert(
+            insert_idx,
+            f"\nconst BASE_URL = process.env.TARGET_URL || {json.dumps(base_url)};\n",
+        )
+        code = "\n".join(lines)
+    return code
+
+
 def _format_preconditions(preconditions: list[str]) -> str:
     if not preconditions:
         return "None specified"
@@ -186,13 +228,19 @@ class PlaywrightAgent(BaseAgent):
         repo=None,
         max_workers: int = 1,
         test_data_template: bool = False,
+        template_recorder: Callable[..., str] | None = None,
     ):
+        """template_recorder, when given, records each multi-dataset template
+        on the live target app (see script_generator_agent's
+        generate_data_driven_template). Without it, or when recording fails,
+        templates come from one LLM call grounded on state.dom_context."""
         self.llm_service = llm_service or LLMService()
         self.repo = repo
         if max_workers < 1:
             raise ValueError("max_workers must be at least 1")
         self.max_workers = max_workers
         self.test_data_template = test_data_template
+        self.template_recorder = template_recorder
 
     def run(self, state: WorkflowState) -> WorkflowState:
         if state.requirement is None:
@@ -393,6 +441,55 @@ class PlaywrightAgent(BaseAgent):
             )
         return template_script
 
+    def _record_template(
+        self,
+        template_case: TestCase,
+        markers: dict[str, str],
+        sample_data: dict[str, str],
+        target_url: str | None,
+        state: WorkflowState,
+    ) -> str | None:
+        """Template recorded on the live app with one dataset, or None to fall back."""
+        if self.template_recorder is None or not target_url:
+            return None
+        values = {markers[key]: str(value) for key, value in sample_data.items()}
+        try:
+            script = self.template_recorder(
+                target_url=target_url,
+                steps=[
+                    self._apply_template_values(step, values)
+                    for step in template_case.steps
+                ],
+                test_title=template_case.title,
+                expected_result=template_case.expected_result,
+                sample_data={key: str(value) for key, value in sample_data.items()},
+                markers={key: markers[key] for key in sample_data},
+                preconditions=[
+                    self._apply_template_values(item, values)
+                    for item in template_case.preconditions
+                ],
+                repair_feedback=state.repair_feedback,
+            )
+        except Exception as exc:
+            state.add_log(
+                f"{self.name}: live template recording failed ({type(exc).__name__}); "
+                "using page evidence instead"
+            )
+            return None
+
+        script = _normalize_playwright_code(_strip_code_fences(script), target_url)
+        missing_markers = [
+            marker for marker in markers.values() if marker not in script
+        ]
+        if missing_markers or not _looks_like_valid_code(script, "playwright"):
+            state.add_log(
+                f"{self.name}: live recorded template was incomplete; "
+                "using page evidence instead"
+            )
+            return None
+        state.add_log(f"{self.name}: recorded template on the live target app")
+        return script
+
     def _generate_multi_dataset_script(
         self,
         test_case: TestCase,
@@ -400,11 +497,12 @@ class PlaywrightAgent(BaseAgent):
         target_url: str | None,
         state: WorkflowState,
     ) -> str:
-        """Expand one test case into one Playwright test per dataset.
+        """Run one test case once per dataset, as a loop over a dataset array.
 
         Datasets the application should treat differently from the test
         case's own expected result (a valid row in a negative case, or the
-        reverse) get their own template, so each test asserts its real outcome.
+        reverse) get their own template and loop, so each test asserts its
+        real outcome.
         """
         scenario = self.repo.get_scenario(test_case.scenario_id) if self.repo else None
         if scenario is None:
@@ -419,47 +517,51 @@ class PlaywrightAgent(BaseAgent):
         )
         case_outcome = self._case_outcome(profiles, scenario.path_type)
 
-        templates: dict[str, tuple[str, dict[str, str]]] = {}
-        scripts = []
+        templates: dict[str, str] = {}
+        rows: dict[str, list[dict]] = {}
+        markers: dict[str, str] = {}
         for index, (dataset, profile) in enumerate(zip(datasets, profiles), start=1):
             outcome = profile.get("expected_outcome") or case_outcome
             group = "case" if outcome == case_outcome else outcome
-            expected_result = (
-                test_case.expected_result
-                if group == "case"
-                else self._outcome_expected_result(outcome)
-            )
             if group not in templates:
+                expected_result = (
+                    test_case.expected_result
+                    if group == "case"
+                    else self._outcome_expected_result(outcome)
+                )
                 template_case, markers = self._dataset_template_case(
                     test_case, expected_result
                 )
-                templates[group] = (
-                    self._generate_template(
-                        template_case, markers, framework, target_url, state
-                    ),
-                    markers,
+                template_script = self._record_template(
+                    template_case, markers, dataset, target_url, state
+                ) or self._generate_template(
+                    template_case, markers, framework, target_url, state
                 )
-            template_script, markers = templates[group]
-
-            data_id = f"TD-{test_case.id.hex[:8].upper()}-{index:02d}"
-            replacements = {
-                "__TEST_DATA_ID__": data_id,
-                "__TEST_TYPE__": profile.get("test_type") or scenario.path_type,
-                "__EXPECTED_RESULT__": self._escape_js_string_content(expected_result),
-            }
-            replacements.update({
-                markers[key]: self._escape_js_string_content(str(value))
-                for key, value in dataset.items()
+                templates[group] = self._apply_template_values(
+                    template_script,
+                    {"__EXPECTED_RESULT__": self._escape_js_string_content(expected_result)},
+                )
+                rows[group] = []
+            rows[group].append({
+                "id": f"TD-{test_case.id.hex[:8].upper()}-{index:02d}",
+                "type": profile.get("test_type") or scenario.path_type,
+                "data": {key: str(value) for key, value in dataset.items()},
             })
-            scripts.append(
-                (data_id, self._apply_template_values(template_script, replacements))
-            )
         if len(templates) > 1:
             state.add_log(
                 f"{self.name}: used separate templates for accepted and rejected "
                 f"datasets of '{test_case.title}'"
             )
-        return self._join_data_driven_scripts(scripts)
+
+        expressions = {"__TEST_DATA_ID__": "row.id", "__TEST_TYPE__": "row.type"}
+        expressions.update({
+            markers[key]: f"row.data[{json.dumps(key)}]"
+            for key in test_case.test_data
+        })
+        return self._data_driven_loop_script([
+            (*_DATASET_GROUPS[group], templates[group], expressions, rows[group])
+            for group in templates
+        ])
 
     def _feature_context(self, requirement, test_case: TestCase) -> str:
         """Requirement and scenario summary, so the model knows the feature under test."""
@@ -548,24 +650,86 @@ class PlaywrightAgent(BaseAgent):
         })
         return template_case, markers
 
-    @staticmethod
-    def _join_data_driven_scripts(scripts: list[tuple[str, str]]) -> str:
-        """Combine per dataset scripts into one spec file.
+    @classmethod
+    def _data_driven_loop_script(
+        cls,
+        groups: list[tuple[str, str, str, dict[str, str], list[dict]]],
+    ) -> str:
+        """Combine templates into one spec file that loops over each dataset array.
 
-        Each dataset's code is wrapped in its own test.describe block so
-        top level declarations such as `const BASE_URL` stay scoped and
-        do not collide across the 20 copies.
+        `groups` holds (array name, comment, template, marker expressions,
+        rows). Each iteration runs inside its own test.describe(row.id) block,
+        so top level declarations such as `const BASE_URL`, and any hooks,
+        stay scoped to one dataset.
         """
         imports: list[str] = []
-        blocks = []
-        for data_id, script in scripts:
-            for match in _IMPORT_STATEMENT.finditer(script):
+        sections = []
+        for name, comment, template_script, expressions, rows in groups:
+            for match in _IMPORT_STATEMENT.finditer(template_script):
                 statement = " ".join(match.group(0).split())
                 if statement not in imports:
                     imports.append(statement)
-            body = _IMPORT_STATEMENT.sub("", script).strip()
-            blocks.append(f"test.describe({json.dumps(data_id)}, () => {{\n{body}\n}});")
-        return "\n".join(imports) + "\n\n" + "\n\n".join(blocks) + "\n"
+            body = cls._bind_markers_to_row(
+                _IMPORT_STATEMENT.sub("", template_script).strip(),
+                expressions,
+            )
+            # Indenting would change the text of a multi-line template literal.
+            if not any(
+                token.startswith("`") and "\n" in token
+                for token in _JS_COMMENT_OR_STRING.findall(body)
+            ):
+                body = "\n".join(
+                    f"    {line}" if line.strip() else "" for line in body.split("\n")
+                )
+            row_lines = "\n".join(f"  {cls._js_literal(row)}," for row in rows)
+            sections.append(
+                f"// {comment}\n"
+                f"const {name} = [\n{row_lines}\n];\n\n"
+                f"for (const row of {name}) {{\n"
+                f"  test.describe(row.id, () => {{\n{body}\n  }});\n"
+                "}"
+            )
+        return "\n".join(imports) + "\n\n" + "\n\n".join(sections) + "\n"
+
+    @staticmethod
+    def _bind_markers_to_row(script: str, expressions: dict[str, str]) -> str:
+        """Replace template markers with expressions that read the loop's row.
+
+        A string that is exactly one marker becomes the expression. A string
+        that holds a marker among other text becomes a template literal.
+        """
+        if not expressions:
+            return script
+        marker_pattern = re.compile(
+            "|".join(re.escape(marker) for marker in sorted(expressions, key=len, reverse=True))
+        )
+
+        def bind(match: re.Match) -> str:
+            token = match.group(0)
+            if not marker_pattern.search(token):
+                return token
+            if token.startswith(("//", "/*")):
+                return marker_pattern.sub(lambda m: expressions[m.group(0)], token)
+            content = token[1:-1]
+            if token[0] != "`":
+                if content in expressions:
+                    return expressions[content]
+                content = content.replace("`", "\\`").replace("${", "\\${")
+            return "`" + marker_pattern.sub(
+                lambda m: "${" + expressions[m.group(0)] + "}", content
+            ) + "`"
+
+        script = _JS_COMMENT_OR_STRING.sub(bind, script)
+        # Any marker left sits in code, outside a string.
+        return marker_pattern.sub(lambda m: expressions[m.group(0)], script)
+
+    @staticmethod
+    def _js_literal(value) -> str:
+        return (
+            json.dumps(value, ensure_ascii=False)
+            .replace(" ", "\\u2028")
+            .replace(" ", "\\u2029")
+        )
 
     @staticmethod
     def _test_data_template_case(test_case: TestCase) -> tuple[TestCase, dict[str, str]]:
@@ -778,31 +942,7 @@ class PlaywrightAgent(BaseAgent):
         # Post-process generated code to guarantee required environment variables are defined
         # and that expect is always imported
         if framework == "playwright":
-            # Models sometimes drop the import line; it is always the same one.
-            if "test(" in code and "@playwright/test" not in code:
-                code = "import { test, expect } from '@playwright/test';\n\n" + code
-            # Fix import to always include expect
-            lines = code.split("\n")
-            for idx, line in enumerate(lines):
-                if line.strip().startswith("import { test") and "expect" not in line:
-                    lines[idx] = line.replace("import { test", "import { test, expect")
-                    break
-            code = "\n".join(lines)
-
-            decl_lines = []
-            if "const BASE_URL" not in code and "BASE_URL" in code:
-                decl_lines.append(
-                    f"const BASE_URL = process.env.TARGET_URL || {json.dumps(base_url)};"
-                )
-            
-            if decl_lines:
-                lines = code.split("\n")
-                insert_idx = 0
-                for idx, line in enumerate(lines):
-                    if "import " in line:
-                        insert_idx = idx + 1
-                lines.insert(insert_idx, "\n" + "\n".join(decl_lines) + "\n")
-                code = "\n".join(lines)
+            code = _normalize_playwright_code(code, base_url)
         elif framework == "selenium":
             decl_lines = []
             if "BASE_URL =" not in code and "BASE_URL" in code:

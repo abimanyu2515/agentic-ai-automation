@@ -5,6 +5,10 @@ a headless Python Playwright browser, verifies every locator on the live
 DOM, and synthesizes a TypeScript @playwright/test (.spec.ts) script that
 uses only the verified selectors.
 
+generate_data_driven_template records the same way with one dataset's
+values, then writes a template with data markers that PlaywrightAgent runs
+once per dataset.
+
 LLM calls go through LLMService; pass ``llm`` to use a test double.
 """
 
@@ -111,6 +115,24 @@ async def execute_live_playwright_action(
         raise ValueError(f"Unsupported action: {action}")
 
 
+def _credentials_script_rule(number: int, has_credentials: bool) -> str:
+    if not has_credentials:
+        return ""
+    return (
+        f"{number}. Write {USERNAME_PLACEHOLDER} as process.env.TARGET_USERNAME and "
+        f"{PASSWORD_PLACEHOLDER} as process.env.TARGET_PASSWORD, with no fallback values."
+    )
+
+
+def _clean_ts_code(text: Optional[str]) -> str:
+    clean_ts_code = re.sub(
+        r"^```(?:typescript|ts)?\n?|```$", "", (text or "").strip(), flags=re.IGNORECASE | re.MULTILINE
+    ).strip()
+    if not clean_ts_code:
+        raise ValueError("ScriptGeneratorAgent produced an empty TypeScript script")
+    return clean_ts_code
+
+
 async def generate_accurate_test_script(
     target_url: str,
     steps: List[Union[str, Dict[str, Any]]],
@@ -132,6 +154,156 @@ async def generate_accurate_test_script(
         raise ValueError("At least one test step is required for live script generation")
 
     llm = llm or LLMService()
+    has_credentials = bool(username or password)
+    logger.info(
+        "ScriptGeneratorAgent started: target_url=%s steps=%s", target_url, len(steps)
+    )
+    recorded_history = await _record_verified_trace(
+        target_url, steps, test_title, llm, username, password
+    )
+
+    # Final Phase: Synthesize the complete TypeScript @playwright/test (.spec.ts) file
+    synthesis_prompt = f"""
+Convert this live-verified Playwright execution trace into a clean, complete, production-ready TypeScript Playwright test script (`@playwright/test`).
+
+Target URL: {target_url}
+Test Title: {test_title}
+Original Input Steps:
+{json.dumps(steps, indent=2)}
+
+Live Verified Execution Trace (Selectors proven on live DOM):
+{json.dumps(recorded_history, indent=2)}
+
+Strict Requirements:
+1. Output MUST be written in TypeScript using `import {{ test, expect }} from '@playwright/test';`.
+2. Use ONLY the verified selectors from `Live Verified Execution Trace`. Never invent or hallucinate selectors.
+3. Group the code with clear step comments (`// --- Step 1: ... ---`).
+4. Include proper Playwright Web-First Assertions (`await expect(...).toBeVisible()`, `await expect(...).toHaveText(...)`, `await expect(page).toHaveURL(...)`) for all verification steps, plus dynamic sorting/math checks if required by a step.
+5. Return ONLY valid TypeScript code with no markdown fences or explanations.
+{_credentials_script_rule(6, has_credentials)}
+"""
+
+    final_text = await asyncio.to_thread(
+        llm.generate,
+        system="You are a senior QA automation engineer who writes TypeScript @playwright/test scripts.",
+        user=synthesis_prompt,
+        timeout=DEFAULT_LLM_TIMEOUT,
+        temperature=0.1,
+    )
+    clean_ts_code = _clean_ts_code(final_text)
+
+    logger.info(
+        "ScriptGeneratorAgent completed: verified_actions=%s", len(recorded_history)
+    )
+    return clean_ts_code
+
+
+async def generate_data_driven_template(
+    target_url: str,
+    steps: List[str],
+    test_title: str,
+    expected_result: str,
+    sample_data: Dict[str, str],
+    markers: Dict[str, str],
+    preconditions: Optional[List[str]] = None,
+    repair_feedback: Optional[str] = None,
+    llm: Optional[LLMService] = None,
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+) -> str:
+    """
+    Records one dataset's run on the live target app, then writes a reusable
+    @playwright/test template from the verified trace.
+
+    The steps run with sample_data's values. The template uses each field's
+    marker (from markers) in place of its value, so PlaywrightAgent can run
+    the one recorded test once per dataset. test_title must already contain
+    the dataset id and type markers.
+    """
+    if not target_url:
+        raise ValueError("target_url is required for live template recording")
+    if not steps:
+        raise ValueError("At least one test step is required for live template recording")
+
+    llm = llm or LLMService()
+    has_credentials = bool(username or password)
+    run_steps = [
+        *(f"Make sure this precondition holds: {item}" for item in preconditions or []),
+        *steps,
+        f"Verify the expected result: {expected_result}",
+    ]
+    run_context = (
+        "Test Data for this run (type these exact values wherever a step enters data): "
+        + json.dumps(sample_data, ensure_ascii=False)
+    )
+    logger.info(
+        "ScriptGeneratorAgent template recording started: target_url=%s steps=%s",
+        target_url,
+        len(run_steps),
+    )
+    recorded_history = await _record_verified_trace(
+        target_url, run_steps, test_title, llm, username, password, run_context
+    )
+
+    field_lines = "\n".join(
+        f"- {field}: recorded value {json.dumps(value, ensure_ascii=False)} "
+        f"is replaced by '{markers[field]}'"
+        for field, value in sample_data.items()
+    )
+    synthesis_prompt = f"""
+Convert this live-verified Playwright execution trace into a reusable, data-driven TypeScript `@playwright/test` template. The platform runs the template once per dataset and swaps each marker for that dataset's value.
+
+Target URL: {target_url}
+Test Title (use verbatim, including its markers): {test_title}
+Expected Result: {expected_result}
+Steps:
+{json.dumps(run_steps, indent=2, ensure_ascii=False)}
+
+Recorded test data and the marker that replaces each value:
+{field_lines}
+
+Live Verified Execution Trace (selectors proven on the live DOM, recorded with the values above):
+{json.dumps(recorded_history, indent=2, ensure_ascii=False)}
+
+Strict Requirements:
+1. Import with `import {{ test, expect }} from '@playwright/test';`, declare `const BASE_URL = process.env.TARGET_URL || {json.dumps(target_url)};`, and start the test with `await page.goto(BASE_URL);`.
+2. Write exactly ONE test(...) block, titled with the Test Title verbatim.
+3. Use ONLY the verified selectors from the trace. Never invent or hallucinate selectors.
+4. Wherever the trace typed, selected, or checked a recorded test data value, use that field's marker as a string literal instead, for example fill('__TEST_DATA_01__'). Every marker listed above must appear in the script. A marker may hold an empty string; still apply it.
+5. When the trace typed a value one character per input box (such as a PIN or OTP), loop over the marker's characters and fill box i with character i, for example `const boxes = [<the verified box selectors in order>]; for (const [i, ch] of [...'__TEST_DATA_01__'].entries()) {{ await page.locator(boxes[i]).fill(ch); }}`.
+6. Assert the Expected Result with web-first assertions (`await expect(...).toBeVisible()`, `toHaveText(...)`, `await expect(page).toHaveURL(...)`), based on what the trace verified. Never branch on marker values.
+7. Group the code with step comments (`// --- Step 1: ... ---`).
+8. Return ONLY valid TypeScript code with no markdown fences or explanations.
+{_credentials_script_rule(9, has_credentials)}
+{f"REPAIR FEEDBACK (fix these problems from the previous script): {repair_feedback[:2000]}" if repair_feedback else ""}
+"""
+
+    final_text = await asyncio.to_thread(
+        llm.generate,
+        system="You are a senior QA automation engineer who writes TypeScript @playwright/test scripts.",
+        user=synthesis_prompt,
+        timeout=DEFAULT_LLM_TIMEOUT,
+        temperature=0.1,
+    )
+    clean_ts_code = _clean_ts_code(final_text)
+
+    logger.info(
+        "ScriptGeneratorAgent template recording completed: verified_actions=%s",
+        len(recorded_history),
+    )
+    return clean_ts_code
+
+
+async def _record_verified_trace(
+    target_url: str,
+    steps: List[Union[str, Dict[str, Any]]],
+    test_title: str,
+    llm: LLMService,
+    username: Optional[str],
+    password: Optional[str],
+    run_context: str = "",
+) -> List[Dict[str, Any]]:
+    """Runs each step on the live page and returns the actions that worked."""
     headless = os.environ.get("HEADLESS_AGENT", "true").lower() != "false"
     recorded_history: List[Dict[str, Any]] = []
     has_credentials = bool(username or password)
@@ -142,9 +314,6 @@ async def generate_accurate_test_script(
         "values from the step's Test Data.\n"
         if has_credentials
         else ""
-    )
-    logger.info(
-        "ScriptGeneratorAgent started: target_url=%s steps=%s", target_url, len(steps)
     )
 
     async with async_playwright() as p:
@@ -184,6 +353,7 @@ Your job is to execute the Current Step on the live browser and record the equiv
 Test Title: "{test_title}"
 Current URL: {page.url}
 Current Step (#{idx}): {step_description}
+{run_context}
 
 Recent Verified Actions:
 {json.dumps(recorded_history[-5:], indent=2)}
@@ -280,43 +450,4 @@ Rules:
         finally:
             await browser.close()
 
-    # Final Phase: Synthesize the complete TypeScript @playwright/test (.spec.ts) file
-    synthesis_prompt = f"""
-Convert this live-verified Playwright execution trace into a clean, complete, production-ready TypeScript Playwright test script (`@playwright/test`).
-
-Target URL: {target_url}
-Test Title: {test_title}
-Original Input Steps:
-{json.dumps(steps, indent=2)}
-
-Live Verified Execution Trace (Selectors proven on live DOM):
-{json.dumps(recorded_history, indent=2)}
-
-Strict Requirements:
-1. Output MUST be written in TypeScript using `import {{ test, expect }} from '@playwright/test';`.
-2. Use ONLY the verified selectors from `Live Verified Execution Trace`. Never invent or hallucinate selectors.
-3. Group the code with clear step comments (`// --- Step 1: ... ---`).
-4. Include proper Playwright Web-First Assertions (`await expect(...).toBeVisible()`, `await expect(...).toHaveText(...)`, `await expect(page).toHaveURL(...)`) for all verification steps, plus dynamic sorting/math checks if required by a step.
-5. Return ONLY valid TypeScript code with no markdown fences or explanations.
-{f"6. Write {USERNAME_PLACEHOLDER} as process.env.TARGET_USERNAME and {PASSWORD_PLACEHOLDER} as process.env.TARGET_PASSWORD, with no fallback values." if has_credentials else ""}
-"""
-
-    final_text = await asyncio.to_thread(
-        llm.generate,
-        system="You are a senior QA automation engineer who writes TypeScript @playwright/test scripts.",
-        user=synthesis_prompt,
-        timeout=DEFAULT_LLM_TIMEOUT,
-        temperature=0.1,
-    )
-
-    clean_ts_code = re.sub(
-        r"^```(?:typescript|ts)?\n?|```$", "", (final_text or "").strip(), flags=re.IGNORECASE | re.MULTILINE
-    ).strip()
-
-    if not clean_ts_code:
-        raise ValueError("ScriptGeneratorAgent produced an empty TypeScript script")
-
-    logger.info(
-        "ScriptGeneratorAgent completed: verified_actions=%s", len(recorded_history)
-    )
-    return clean_ts_code
+    return recorded_history

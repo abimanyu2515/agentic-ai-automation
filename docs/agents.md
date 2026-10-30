@@ -193,6 +193,8 @@ The prompt includes a feature context built from the requirement (title, descrip
 
 Before saving a data-driven script, `WorkflowService` regenerates it once when it finds a TODO or method name used as a selector (for example `page.locator('getByLabel')`), a `page.click(selector)` style action that skips step screenshots, a forced failure or skip, `waitForTimeout`, or no `expect` assertion. The 20 datasets and their one-test-per-dataset layout are unchanged.
 
+A data-driven script holds its datasets once as an array and runs one template test in a `for (const row of datasets)` loop, each iteration inside `test.describe(row.id)`. Template markers (`__TEST_DATA_NN__`, `__TEST_DATA_ID__`, `__TEST_TYPE__`) become `row.data["field"]`, `row.id` and `row.type`. For projects marked as a safe test environment, `PlaywrightAgent` gets a `template_recorder` (`generate_data_driven_template` in `backend/agents/script_generator_agent.py`). It records each template on the live app with one sample dataset, then writes the template from the verified trace. If recording fails or omits a marker, the agent falls back to the single LLM call.
+
 **State writes**: `tc.playwright_script`, `tc.execution_type`, `tc.automation_framework`
 
 **Operation**: `GENERATE_PLAYWRIGHT`
@@ -201,7 +203,7 @@ Before saving a data-driven script, `WorkflowService` regenerates it once when i
 
 **Files**: `backend/agents/script_generator_agent.py`, `backend/agents/dom_distiller.py`
 
-When **Generate Script** (`POST /api/v1/projects/{project_id}/testcases/{test_case_id}/generate-script`) is called for a Playwright project that has a `target_url`, `WorkflowService` calls `generate_accurate_test_script(target_url, steps, test_title)` instead of the data-driven path. That function:
+When **Generate Script** (`POST /api/v1/projects/{project_id}/testcases/{test_case_id}/generate-script`) is called for a Playwright project that has a `target_url`, and the test case does not yet hold 20 distinct TestDataAgent datasets, `WorkflowService` calls `generate_accurate_test_script(target_url, steps, test_title)` instead of the data-driven path. A case that already holds its 20 datasets (from **Generate Test Data**) always takes the data-driven path, so its script keeps one test per dataset. That function:
 
 1. Opens a headless Chromium browser in Python Playwright (set `HEADLESS_AGENT=false` to watch it) and navigates to the project's target URL.
 2. For each test case step, runs up to 6 micro-actions. Each one reads the live ARIA snapshot and visible interactive elements (with a recommended selector each, never raw HTML), asks the LLM for an `AgentDecision` (`click`, `fill`, `select_option`, `press`, `assert_visible`, `assert_text` or `done`), and runs it on the page with a 5000 ms timeout. Actions that work go into the verified trace. When an action fails, its error is sent back to the LLM so it picks another locator.
