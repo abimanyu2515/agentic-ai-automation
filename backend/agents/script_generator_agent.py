@@ -18,11 +18,22 @@ from typing import Any, Dict, List, Literal, Optional, Union
 from playwright.async_api import Page, async_playwright
 from pydantic import BaseModel, Field
 
-from backend.services.llm import DEFAULT_LLM_TIMEOUT, LLMService
+from backend.services.llm import DEFAULT_LLM_TIMEOUT, LLMService, LLMServiceError
 
 from .dom_distiller import extract_page_state
 
 logger = logging.getLogger(__name__)
+
+# Each step call carries page context, so slow and reasoning models need more
+# than LLMService's 30s default.
+STEP_LLM_TIMEOUT = 120
+MAX_ARIA_CHARS = 3000
+MAX_INTERACTIVE_ELEMENTS = 80
+
+# The LLM only ever sees these placeholders; real credentials are swapped in
+# at fill time and never enter a prompt, the trace, or the generated script.
+USERNAME_PLACEHOLDER = "{{TARGET_USERNAME}}"
+PASSWORD_PLACEHOLDER = "{{TARGET_PASSWORD}}"
 
 
 class AgentDecision(BaseModel):
@@ -35,23 +46,48 @@ class AgentDecision(BaseModel):
         "assert_text",
         "done",
     ]
-    selector: str = Field(
-        description="Valid Playwright selector string passed to page.locator(selector)"
+    selector: Optional[str] = Field(
+        default=None,
+        description="Valid Playwright selector string passed to page.locator(selector); omit for done",
     )
     value: Optional[str] = Field(
         default=None,
         description="Text to fill, option value to select, key to press, or expected text",
     )
     ts_playwright_code: str = Field(
-        description="Equivalent TypeScript @playwright/test line of code for this action"
+        default="",
+        description="Equivalent TypeScript @playwright/test line of code for this action",
     )
-    reasoning: str
+    reasoning: str = ""
+
+
+def _compact_elements(elements: List[Dict[str, Any]]) -> str:
+    """One compact JSON line per element, without empty fields or the DOM index."""
+    lines = []
+    for element in elements[:MAX_INTERACTIVE_ELEMENTS]:
+        kept = {k: v for k, v in element.items() if k != "index" and v not in (None, "")}
+        lines.append(json.dumps(kept, separators=(",", ":")))
+    return "\n".join(lines)
+
+
+def _resolve_credential_placeholders(
+    value: Optional[str], username: Optional[str], password: Optional[str]
+) -> Optional[str]:
+    if not value:
+        return value
+    if username:
+        value = value.replace(USERNAME_PLACEHOLDER, username)
+    if password:
+        value = value.replace(PASSWORD_PLACEHOLDER, password)
+    return value
 
 
 async def execute_live_playwright_action(
-    page: Page, action: str, selector: str, value: Optional[str] = None
+    page: Page, action: str, selector: Optional[str], value: Optional[str] = None
 ) -> None:
     """Executes the decided action on the live Python Playwright page to verify the locator works."""
+    if not selector:
+        raise ValueError(f'Action "{action}" needs a selector from Live Interactive Elements')
     locator = page.locator(selector).first
 
     if action == "click":
@@ -80,10 +116,15 @@ async def generate_accurate_test_script(
     steps: List[Union[str, Dict[str, Any]]],
     test_title: str = "Generated End-to-End Test",
     llm: Optional[LLMService] = None,
+    username: Optional[str] = None,
+    password: Optional[str] = None,
 ) -> str:
     """
     Executes test steps against target_url in a live Python Playwright browser,
     verifies all selectors, and outputs a TypeScript @playwright/test (.spec.ts) script.
+
+    username and password come from the project vault. The LLM sees only
+    placeholders for them; they are substituted when a fill runs.
     """
     if not target_url:
         raise ValueError("target_url is required for live script generation")
@@ -93,6 +134,15 @@ async def generate_accurate_test_script(
     llm = llm or LLMService()
     headless = os.environ.get("HEADLESS_AGENT", "true").lower() != "false"
     recorded_history: List[Dict[str, Any]] = []
+    has_credentials = bool(username or password)
+    credentials_rule = (
+        f"6. For the project login, set value to {USERNAME_PLACEHOLDER} or {PASSWORD_PLACEHOLDER} "
+        "(never a real or invented credential) and use process.env.TARGET_USERNAME or "
+        "process.env.TARGET_PASSWORD in `ts_playwright_code`. For an invalid login, use only "
+        "values from the step's Test Data.\n"
+        if has_credentials
+        else ""
+    )
     logger.info(
         "ScriptGeneratorAgent started: target_url=%s steps=%s", target_url, len(steps)
     )
@@ -117,13 +167,15 @@ async def generate_accurate_test_script(
 
                 step_completed = False
                 sub_attempts = 0
+                llm_failures = 0
                 last_error = ""
+                last_llm_error: Optional[LLMServiceError] = None
 
                 while not step_completed and sub_attempts < 6:
                     sub_attempts += 1
                     page_state = await extract_page_state(page)
-                    aria_snapshot = page_state["aria_snapshot"][:5000]
-                    interactive_elements = page_state["interactive_elements"][:120]
+                    aria_snapshot = page_state["aria_snapshot"][:MAX_ARIA_CHARS]
+                    interactive_elements = _compact_elements(page_state["interactive_elements"])
 
                     prompt = f"""
 You are an autonomous Playwright QA Execution Agent.
@@ -141,32 +193,51 @@ Recent Verified Actions:
 Live ARIA Snapshot:
 {aria_snapshot}
 
-Live Interactive Elements:
-{json.dumps(interactive_elements, indent=2)}
+Live Interactive Elements (one JSON object per line):
+{interactive_elements}
 
 Rules:
-1. If Current Step (including its expected verification) is completely satisfied on the page, return action="done".
+1. If Current Step (including its expected verification) is completely satisfied on the page, return action="done" (selector may be omitted).
 2. Otherwise, return the NEXT single atomic Playwright action using a verified selector from Live Interactive Elements.
 3. Prefer [data-testid], [data-test], #id, or unique attribute selectors.
 4. For multi-box PIN/OTP inputs (e.g., 5 separate inputs with maxlength="1"), fill each box sequentially.
 5. `ts_playwright_code` MUST be valid TypeScript @playwright/test syntax (e.g. `await page.locator('...').click();`).
-"""
+{credentials_rule}"""
 
                     # LLMService is synchronous; keep the event loop free for the browser.
-                    decision = await asyncio.to_thread(
-                        llm.structured_generate,
-                        user=prompt,
-                        response_model=AgentDecision,
-                        temperature=0.1,
-                    )
+                    try:
+                        decision = await asyncio.to_thread(
+                            llm.structured_generate,
+                            user=prompt,
+                            response_model=AgentDecision,
+                            timeout=STEP_LLM_TIMEOUT,
+                            temperature=0.1,
+                        )
+                    except LLMServiceError as err:
+                        # One bad response should not end the whole script; try the step again.
+                        llm_failures += 1
+                        last_llm_error = err
+                        logger.warning(
+                            "ScriptGeneratorAgent LLM call failed: step=%s attempt=%s error=%s",
+                            idx,
+                            sub_attempts,
+                            err,
+                        )
+                        continue
 
                     if decision.action == "done":
                         step_completed = True
                         break
 
+                    action_value = decision.value
+                    if decision.action == "fill":
+                        action_value = _resolve_credential_placeholders(
+                            decision.value, username, password
+                        )
+
                     try:
                         await execute_live_playwright_action(
-                            page, decision.action, decision.selector, decision.value
+                            page, decision.action, decision.selector, action_value
                         )
                         await page.wait_for_timeout(600)  # Allow SPA state transitions
 
@@ -190,6 +261,14 @@ Rules:
                             sub_attempts,
                             decision.selector,
                         )
+
+                if llm_failures == sub_attempts and last_llm_error is not None:
+                    # Every attempt failed at the provider, so a script built from
+                    # this trace would silently miss the step. Surface the real error.
+                    raise LLMServiceError(
+                        f"Script generation stopped at step {idx}: every LLM call failed. "
+                        f"Last error: {last_llm_error}"
+                    ) from last_llm_error
 
                 if not step_completed:
                     logger.warning(
@@ -219,6 +298,7 @@ Strict Requirements:
 3. Group the code with clear step comments (`// --- Step 1: ... ---`).
 4. Include proper Playwright Web-First Assertions (`await expect(...).toBeVisible()`, `await expect(...).toHaveText(...)`, `await expect(page).toHaveURL(...)`) for all verification steps, plus dynamic sorting/math checks if required by a step.
 5. Return ONLY valid TypeScript code with no markdown fences or explanations.
+{f"6. Write {USERNAME_PLACEHOLDER} as process.env.TARGET_USERNAME and {PASSWORD_PLACEHOLDER} as process.env.TARGET_PASSWORD, with no fallback values." if has_credentials else ""}
 """
 
     final_text = await asyncio.to_thread(

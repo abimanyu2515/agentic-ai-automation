@@ -32,6 +32,7 @@ playwright-report/
 test-results/
 backend/playwrightt/artifacts/
 backend/playwrightt/public/artifacts/
+data/
 
 # Reports and JUnit Outputs
 junit_*.xml
