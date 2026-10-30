@@ -188,15 +188,19 @@ def test_generate_playwright_script_adds_20_datasets_and_one_test_each():
     script = updated_tc.playwright_script
     assert len(updated_tc.test_data_sets) == 20
     assert [p["expected_outcome"] for p in updated_tc.test_data_profiles].count("accepted") == 2
-    assert script.count("test(") == 20
-    assert script.count("test.describe(") == 20
+    # One loop per outcome group, each with a single test body.
+    assert script.count("test(") == 2
+    assert "for (const row of datasets)" in script
+    assert "for (const row of acceptedDatasets)" in script
     assert script.count("import { test, expect }") == 1
     assert all(f"OLD-{index:03d}" in script for index in range(20))
     assert all(f"TD-{tc.id.hex[:8].upper()}-{index:02d}" in script for index in range(1, 21))
     # Real steps reach the model, and the two valid rows get their own template.
     assert "Enter the coupon code" in llm.prompts[0]
     assert len(llm.prompts) == 2
-    assert script.count("// accepted-template") == 2
+    accepted_section = script.split("const acceptedDatasets")[1]
+    assert accepted_section.count('{"coupon_code"') == 2
+    assert "// accepted-template" in accepted_section
     saved = ws.repo.get_test_case(tc.id)
     assert saved.playwright_script == script
 
@@ -231,7 +235,7 @@ def test_generate_playwright_script_uses_read_only_evidence_and_repairs_once():
     assert inspector.calls == [False]
     assert all("LIVE PAGE EVIDENCE" in prompt for prompt in llm.prompts)
     assert any("REPAIR FEEDBACK" in prompt for prompt in llm.prompts)
-    assert updated_tc.playwright_script.count("test(") == 20
+    assert all(f"TD-{tc.id.hex[:8].upper()}-{index:02d}" in updated_tc.playwright_script for index in range(1, 21))
     assert updated_tc.script_validation_status == "unverified"
 
 
@@ -260,6 +264,118 @@ def test_generate_playwright_script_uses_live_verified_generator_for_target_url(
     assert ws.repo.get_test_case(tc.id).playwright_script == updated_tc.playwright_script
     # The live path does not generate datasets.
     assert updated_tc.test_data_sets == []
+
+
+def test_generate_playwright_script_uses_saved_datasets_over_live_generator():
+    async def fake_generator(*args, **kwargs):
+        raise AssertionError("A case with saved datasets must not use the live generator")
+
+    ws = WorkflowService(script_generator=fake_generator)
+    project, tc = _data_driven_case(ws)
+    requirement_id = ws.repo.get_scenario(tc.scenario_id).requirement_id
+    llm = _TemplateLLM()
+
+    with mock.patch.object(LLMService, "structured_generate", return_value=_coupon_datasets()), \
+         mock.patch.object(LLMService, "generate", side_effect=llm.generate):
+        ws.generate_test_data_for_test_case(project.id, requirement_id, tc.id)
+        updated_tc = ws.generate_playwright_script(project.id, tc.id)
+
+    script = updated_tc.playwright_script
+    assert all(f"TD-{tc.id.hex[:8].upper()}-{index:02d}" in script for index in range(1, 21))
+    assert all(f"OLD-{index:03d}" in script for index in range(20))
+    assert ws.repo.get_test_case(tc.id).playwright_script == script
+
+
+class _NoEvidenceInspector:
+    def inspect_project(self, project_id, test_cases, allow_invalid_login_probe):
+        return {"pages": []}
+
+
+class _FakeVaultService:
+    def get_credentials(self, project_id):
+        return "vault-user", "vault-pass"
+
+
+def test_safe_project_records_each_template_live_with_a_sample_dataset():
+    calls = []
+
+    async def fake_recorder(**kwargs):
+        calls.append(kwargs)
+        marker = kwargs["markers"]["coupon_code"]
+        return (
+            "import { test, expect } from '@playwright/test';\n"
+            f"test('{kwargs['test_title']}', async ({{ page }}) => {{\n"
+            "  await page.goto(BASE_URL);\n"
+            f"  await page.locator('#coupon').fill('{marker}');\n"
+            "  await expect(page.getByText('Coupon expired')).toBeVisible();\n"
+            "});"
+        )
+
+    ws = WorkflowService(inspector=_NoEvidenceInspector(), template_recorder=fake_recorder)
+    project, tc = _data_driven_case(ws, safe=True)
+    requirement_id = ws.repo.get_scenario(tc.scenario_id).requirement_id
+
+    with mock.patch.object(LLMService, "structured_generate", return_value=_coupon_datasets()), \
+         mock.patch.object(
+             LLMService, "generate",
+             side_effect=AssertionError("templates must come from the live recording"),
+         ), \
+         mock.patch("backend.services.vault_service.VaultService", _FakeVaultService):
+        ws.generate_test_data_for_test_case(project.id, requirement_id, tc.id)
+        updated_tc = ws.generate_playwright_script(project.id, tc.id)
+
+    # One recording per outcome group, each run with that group's first dataset.
+    assert [call["sample_data"] for call in calls] == [
+        {"coupon_code": "OLD-000"},
+        {"coupon_code": "OLD-018"},
+    ]
+    assert all(call["markers"] == {"coupon_code": "__TEST_DATA_01__"} for call in calls)
+    assert all(call["username"] == "vault-user" for call in calls)
+    assert calls[0]["expected_result"] == tc.expected_result
+    assert calls[0]["test_title"].startswith("__TEST_DATA_ID__ [__TEST_TYPE__]")
+
+    script = updated_tc.playwright_script
+    assert "const BASE_URL = process.env.TARGET_URL" in script
+    assert script.count("page.locator('#coupon').fill(row.data[\"coupon_code\"])") == 2
+    assert all(f"OLD-{index:03d}" in script for index in range(20))
+    assert "__TEST_DATA_" not in script
+
+
+def test_failed_live_recording_falls_back_to_page_evidence_template():
+    async def failing_recorder(**kwargs):
+        raise RuntimeError("browser crashed")
+
+    ws = WorkflowService(inspector=_NoEvidenceInspector(), template_recorder=failing_recorder)
+    project, tc = _data_driven_case(ws, safe=True)
+    requirement_id = ws.repo.get_scenario(tc.scenario_id).requirement_id
+    llm = _TemplateLLM()
+
+    with mock.patch.object(LLMService, "structured_generate", return_value=_coupon_datasets()), \
+         mock.patch.object(LLMService, "generate", side_effect=llm.generate), \
+         mock.patch("backend.services.vault_service.VaultService", _FakeVaultService):
+        ws.generate_test_data_for_test_case(project.id, requirement_id, tc.id)
+        updated_tc = ws.generate_playwright_script(project.id, tc.id)
+
+    assert len(llm.prompts) == 2
+    assert "getByLabel('Coupon').fill(row.data[\"coupon_code\"])" in updated_tc.playwright_script
+
+
+def test_unsafe_project_does_not_record_templates_live():
+    async def unexpected_recorder(**kwargs):
+        raise AssertionError("recording submits forms, so unsafe projects must not record")
+
+    ws = WorkflowService(template_recorder=unexpected_recorder)
+    project, tc = _data_driven_case(ws)
+    requirement_id = ws.repo.get_scenario(tc.scenario_id).requirement_id
+    llm = _TemplateLLM()
+
+    with mock.patch.object(LLMService, "structured_generate", return_value=_coupon_datasets()), \
+         mock.patch.object(LLMService, "generate", side_effect=llm.generate):
+        ws.generate_test_data_for_test_case(project.id, requirement_id, tc.id)
+        updated_tc = ws.generate_playwright_script(project.id, tc.id)
+
+    assert len(llm.prompts) == 2
+    assert updated_tc.playwright_script.count("test(") == 2
 
 
 def test_run_execution_and_stream_via_langgraph(mock_llm_service, fake_playwright_runner):

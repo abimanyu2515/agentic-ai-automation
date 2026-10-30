@@ -267,3 +267,42 @@ def test_no_credential_rule_without_credentials():
 
     assert agent.USERNAME_PLACEHOLDER not in llm.prompts[0]
     assert agent.USERNAME_PLACEHOLDER not in llm.synthesis_prompt
+
+
+def test_data_driven_template_records_sample_values_and_asks_for_markers():
+    llm = _ScriptedLLM(
+        [
+            _decision("fill", '[data-test="username"]', "locked_user"),
+            _decision("done"),
+            _decision("done"),
+        ],
+        "import { test, expect } from '@playwright/test';\ntest('__TEST_DATA_ID__', async () => {});",
+    )
+    page = _FakePage()
+    browser = _FakeBrowser(page)
+
+    with mock.patch.object(agent, "async_playwright", lambda: _FakePlaywright(browser)), \
+         mock.patch.object(agent, "extract_page_state", _fake_page_state):
+        script = asyncio.run(
+            agent.generate_data_driven_template(
+                "https://app.example.test/",
+                ["Enter the username 'locked_user'"],
+                "__TEST_DATA_ID__ [__TEST_TYPE__] Locked user is rejected",
+                "The message 'User is locked' is shown",
+                sample_data={"username": "locked_user"},
+                markers={"username": "__TEST_DATA_01__"},
+                llm=llm,
+            )
+        )
+
+    assert script.startswith("import { test, expect }")
+    # The steps run live with the sample values, then the expected result is verified live.
+    assert page.actions == [("fill", '[data-test="username"]', "locked_user")]
+    assert 'Test Data for this run' in llm.prompts[0]
+    assert '"username": "locked_user"' in llm.prompts[0]
+    assert "Verify the expected result: The message 'User is locked' is shown" in llm.prompts[2]
+    assert browser.closed
+    # The synthesis asks for the marker in place of the recorded value.
+    assert "Test Title (use verbatim, including its markers): __TEST_DATA_ID__ [__TEST_TYPE__]" in llm.synthesis_prompt
+    assert "username: recorded value \"locked_user\" is replaced by '__TEST_DATA_01__'" in llm.synthesis_prompt
+    assert '[data-test=\\"username\\"]' in llm.synthesis_prompt

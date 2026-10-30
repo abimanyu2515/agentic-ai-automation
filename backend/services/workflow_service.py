@@ -70,11 +70,13 @@ def _test_case_generation_lock(
 
 
 class WorkflowService:
-    def __init__(self, inspector=None, script_generator=None):
+    def __init__(self, inspector=None, script_generator=None, template_recorder=None):
         # Read only page inspector for grounded script generation; injectable for tests.
         self.inspector = inspector
         # Live-browser script generator coroutine; injectable so tests skip the browser and LLM.
         self.script_generator = script_generator
+        # Live-browser data-driven template coroutine; injectable for the same reason.
+        self.template_recorder = template_recorder
 
     @property
     def repo(self):
@@ -309,9 +311,9 @@ class WorkflowService:
         datasets_unchanged = (
             previous_test_data_sets == test_case.test_data_sets
         )
+        # Data-driven scripts loop over their datasets, so match on the dataset ids.
         script_matches_datasets = (
             bool(previous_playwright_script)
-            and previous_playwright_script.count("test(") == 20
             and all(
                 f"TD-{test_case.id.hex[:8].upper()}-{index:02d}"
                 in previous_playwright_script
@@ -369,6 +371,7 @@ class WorkflowService:
                 )
 
             dom_context = self._read_only_page_evidence(project, test_case)
+            template_recorder = self._live_template_recorder(project)
             repair_feedback = None
             for attempt in (1, 2):
                 state = WorkflowState(
@@ -384,6 +387,7 @@ class WorkflowService:
                     repo=repo,
                     max_workers=1,
                     test_data_template=True,
+                    template_recorder=template_recorder,
                 ).run(state)
                 if not test_case.playwright_script:
                     raise ValueError(
@@ -409,6 +413,32 @@ class WorkflowService:
             test_case.script_validation_diagnostic = None
             repo.save_test_cases([test_case])
             return test_case
+
+    def _live_template_recorder(self, project):
+        """Records data-driven templates by running one dataset on the target app.
+
+        Recording submits real forms, so only projects marked as a safe test
+        environment get a recorder. Returns None otherwise, and PlaywrightAgent
+        then writes templates from read only page evidence.
+        """
+        if not (getattr(project, "is_safe_test_environment", False) and project.target_url):
+            return None
+        import asyncio
+
+        from backend.services.vault_service import VaultService
+
+        recorder = self.template_recorder
+        if recorder is None:
+            from backend.agents.script_generator_agent import generate_data_driven_template
+
+            recorder = generate_data_driven_template
+        # Login steps need the project's credentials; the recorder keeps them out of prompts.
+        username, password = VaultService().get_credentials(str(project.id))
+
+        def record(**kwargs) -> str:
+            return asyncio.run(recorder(username=username, password=password, **kwargs))
+
+        return record
 
     def _read_only_page_evidence(self, project, test_case: TestCase) -> dict | None:
         """Inspect the project's target app without submitting anything.
@@ -707,7 +737,9 @@ class WorkflowService:
             and (automation_framework or "").lower() == "playwright"
             and (project.framework or "playwright").lower() == "playwright"
         ):
-            if project.target_url:
+            # Saved TestDataAgent datasets take the data-driven path, so the
+            # script keeps one test per dataset instead of LLM-chosen values.
+            if project.target_url and not self._has_full_test_data(test_case):
                 return self._generate_live_verified_script(
                     project_id, project.target_url, test_case, automation_framework
                 )
@@ -765,6 +797,15 @@ class WorkflowService:
         self.repo.save_test_cases([test_case])
         return test_case
 
+    @staticmethod
+    def _has_full_test_data(test_case: TestCase) -> bool:
+        """True when the case holds the 20 distinct TestDataAgent datasets."""
+        fingerprints = {
+            tuple(sorted(dataset.items()))
+            for dataset in test_case.test_data_sets
+        }
+        return len(test_case.test_data_sets) == 20 and len(fingerprints) == 20
+
     def _generate_data_driven_script(
         self,
         project_id: UUID,
@@ -780,11 +821,7 @@ class WorkflowService:
         if test_case.automation_framework != automation_framework:
             test_case.automation_framework = automation_framework
             self.repo.save_test_cases([test_case])
-        fingerprints = {
-            tuple(sorted(dataset.items()))
-            for dataset in test_case.test_data_sets
-        }
-        if len(test_case.test_data_sets) != 20 or len(fingerprints) != 20:
+        if not self._has_full_test_data(test_case):
             self.generate_test_data_for_test_case(project_id, requirement_id, test_case.id)
         return self.generate_test_data_script_for_test_case(
             project_id, requirement_id, test_case.id
