@@ -495,6 +495,24 @@ def test_data_driven_loop_script_hoists_imports_and_scopes_each_dataset():
     assert "test(`${row.id} one`" in joined
 
 
+def test_data_driven_loop_script_reads_vault_references_from_the_environment():
+    script = "test('__TEST_DATA_ID__ login', async ({ page }) => {});"
+    rows = [{"id": "TD-01", "type": "positive", "data": {
+        "username": "{{vault:TARGET_USERNAME}} run 01",
+        "password": "{{vault:TARGET_PASSWORD}}",
+        "note": "{{vault:OTHER}}",
+    }}]
+
+    joined = PlaywrightAgent._data_driven_loop_script([
+        ("datasets", "valid", script, {"__TEST_DATA_ID__": "row.id"}, rows),
+    ])
+
+    assert '"username": (process.env.TARGET_USERNAME ?? "")' in joined
+    assert '"password": (process.env.TARGET_PASSWORD ?? "")' in joined
+    assert "{{vault:TARGET_" not in joined
+    assert '"note": "{{vault:OTHER}}"' in joined
+
+
 def test_bind_markers_to_row_handles_strings_comments_and_code():
     expressions = {"__TEST_DATA_01__": 'row.data["pin"]', "__TEST_DATA_02__": 'row.data["name"]'}
     script = (

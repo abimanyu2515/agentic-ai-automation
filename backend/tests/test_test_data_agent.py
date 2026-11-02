@@ -1,14 +1,20 @@
+import json
+
 import pytest
 
 from backend.agents.test_data_agent import (
+    CASE_DATA_REQUESTS,
     TestCaseDataBatchResponse,
+    PriceCatalog,
     TestCaseDataResponse,
+    TestCaseFieldPlan,
     TestDataAgent,
 )
 from backend.models.requirement import Requirement
 from backend.models.scenario import Scenario
 from backend.models.state import WorkflowState
 from backend.models.test_case import TestCase
+from backend.services.llm import LLMServiceError
 
 
 def test_test_data_agent_requires_requirement():
@@ -131,6 +137,8 @@ def test_test_data_agent_retries_duplicate_llm_batches_for_unsupported_rule():
             self.options = []
 
         def structured_generate(self, *, user, response_model, **kwargs):
+            if response_model is TestCaseFieldPlan:
+                raise LLMServiceError("no field plan in this test")
             assert response_model is TestCaseDataBatchResponse
             self.prompts.append(user)
             self.options.append(kwargs)
@@ -353,6 +361,8 @@ def test_generic_invalid_login_does_not_assume_numeric_password_rule():
 
     class StubLLMService:
         def structured_generate(self, **kwargs):
+            if kwargs.get("response_model") is TestCaseFieldPlan:
+                raise LLMServiceError("no field plan in this test")
             return TestCaseDataBatchResponse(
                 datasets=[
                     TestCaseDataResponse(
@@ -473,6 +483,8 @@ def test_test_data_agent_fails_when_llm_cannot_generate_unique_unsupported_data(
         calls = 0
 
         def structured_generate(self, **kwargs):
+            if kwargs.get("response_model") is TestCaseFieldPlan:
+                raise LLMServiceError("no field plan in this test")
             self.calls += 1
             return duplicate
 
@@ -521,13 +533,30 @@ def _order_dataset(index, **overrides):
 
 
 class _QueuedReplies:
-    """Returns each reply in turn; a reply can be an exception to raise."""
+    """Returns each reply in turn; a reply can be an exception to raise.
 
-    def __init__(self, replies):
+    Field plan requests take from `plans`; with none left, they fail, and the
+    data request plans its own fields. Price list requests work the same way
+    with `catalog`.
+    """
+
+    def __init__(self, replies, plans=(), catalog=None):
         self.replies = list(replies)
+        self.plans = list(plans)
+        self.catalog = catalog
         self.prompts = []
+        self.plan_prompts = []
 
     def structured_generate(self, *, user, response_model, **kwargs):
+        if response_model is PriceCatalog:
+            if self.catalog is None:
+                raise LLMServiceError("no price list in this test")
+            return self.catalog
+        if response_model is TestCaseFieldPlan:
+            self.plan_prompts.append(user)
+            if not self.plans:
+                raise LLMServiceError("no field plan in this test")
+            return self.plans.pop(0)
         self.prompts.append(user)
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
@@ -604,14 +633,32 @@ def test_rows_with_other_field_names_are_skipped():
 
 
 def test_gives_a_clear_error_when_every_request_fails():
-    from backend.services.llm import LLMServiceError
-
     state, _ = _order_form_state()
-    llm = _QueuedReplies([LLMServiceError("bad reply")] * 4)
+    llm = _QueuedReplies([LLMServiceError("bad reply")] * CASE_DATA_REQUESTS)
 
-    with pytest.raises(ValueError, match="after 4 requests.*try again"):
+    with pytest.raises(
+        ValueError, match=f"after {CASE_DATA_REQUESTS} requests.*try again"
+    ):
         TestDataAgent(llm_service=llm).run(state)
-    assert len(llm.prompts) == 4
+    assert len(llm.prompts) == CASE_DATA_REQUESTS
+
+
+def test_follow_up_prompt_lists_accepted_datasets_as_values():
+    """A model cannot avoid a hash it cannot invert, so show the real values."""
+    state, _ = _order_form_state()
+    first = TestCaseDataBatchResponse.model_validate(
+        {"datasets": [_order_dataset(index) for index in range(15)]}
+    )
+    rest = TestCaseDataBatchResponse.model_validate(
+        {"datasets": [_order_dataset(index) for index in range(15, 20)]}
+    )
+    llm = _QueuedReplies([first, rest])
+
+    TestDataAgent(llm_service=llm).run(state)
+
+    follow_up = llm.prompts[1]
+    for dataset in first.datasets:
+        assert json.dumps(dataset.test_data, ensure_ascii=False, separators=(",", ":")) in follow_up
 
 
 def test_unquoted_numbers_and_label_variants_are_kept_not_dropped():
@@ -650,3 +697,444 @@ def test_datasets_wrapped_in_an_extra_list_or_joined_in_one_string_are_unwrapped
     assert [d.test_data["coffee"] for d in reply.datasets] == [
         "Blend 1", "Blend 2", "Blend 3", "Blend 4",
     ]
+
+
+def _booking_state():
+    requirement = Requirement(
+        title="Hotel booking",
+        description="Guests register, search rooms, book, and pay.",
+        business_rules=["Invalid card numbers are rejected."],
+    )
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="End-to-end hotel booking",
+        description="A new guest books and pays for a room.",
+    )
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Guest completes a booking from sign-up to payment",
+        steps=[
+            "Register a new account",
+            "Log in",
+            "Search rooms for the stay dates",
+            "Select a room and enter guest details",
+            "Pay by card",
+            "Confirm the booking",
+        ],
+        expected_result="Booking confirmation is shown",
+        test_data={"email": "guest@example.test", "password": "Secret1!"},
+    )
+    state = WorkflowState(
+        requirement=requirement,
+        generated_scenarios=[scenario],
+        generated_test_cases=[test_case],
+    )
+    return state, test_case
+
+
+_BOOKING_FIELDS = ["email", "password", "check_in_date", "check_out_date", "card_number"]
+
+
+def _booking_dataset(index, fields=_BOOKING_FIELDS):
+    values = {
+        "email": f"guest{index}@example.test",
+        "password": f"Secret{index}!",
+        "check_in_date": "2026-12-01",
+        "check_out_date": "2026-12-03",
+        "card_number": "4111111111111111",
+    }
+    return {
+        "test_data": {field: values[field] for field in fields},
+        "targeted_validation_rule": "A complete booking is confirmed.",
+        "test_type": "positive",
+        "expected_outcome": "accepted",
+        "assumptions": [],
+    }
+
+
+def test_end_to_end_case_is_sent_to_the_llm_not_the_password_shortcut():
+    state, test_case = _booking_state()
+    reply = TestCaseDataBatchResponse.model_validate({
+        "required_fields": _BOOKING_FIELDS,
+        "datasets": [_booking_dataset(index) for index in range(20)],
+    })
+    llm = _QueuedReplies([reply])
+
+    TestDataAgent(llm_service=llm).run(state)
+
+    assert len(llm.prompts) == 1
+    assert '"approved_test_data": {"email": "guest@example.test"' in llm.prompts[0]
+    assert all(list(d) == _BOOKING_FIELDS for d in test_case.test_data_sets)
+    assert not any(d["password"].isdigit() for d in test_case.test_data_sets)
+
+
+def test_datasets_missing_later_step_fields_are_not_accepted():
+    """A reply where most rows stop at the first form must not set the shape."""
+    state, test_case = _booking_state()
+    first_form_only = ["email", "password"]
+    first = TestCaseDataBatchResponse.model_validate({
+        "required_fields": _BOOKING_FIELDS,
+        "datasets": [
+            *(_booking_dataset(index, first_form_only) for index in range(12)),
+            *(_booking_dataset(index) for index in range(100, 108)),
+        ],
+    })
+    second = TestCaseDataBatchResponse.model_validate({
+        "datasets": [_booking_dataset(index) for index in range(200, 212)],
+    })
+    llm = _QueuedReplies([first, second])
+
+    TestDataAgent(llm_service=llm).run(state)
+
+    assert "Return exactly 12 NEW datasets" in llm.prompts[1]
+    assert json.dumps(_BOOKING_FIELDS) in llm.prompts[1]
+    assert len(test_case.test_data_sets) == 20
+    assert all(list(d) == _BOOKING_FIELDS for d in test_case.test_data_sets)
+
+
+_CHECKOUT_FIELDS = [
+    "sort_option", "selected_products", "expected_cart_count",
+    "first_name", "last_name", "postal_code",
+]
+
+
+def _checkout_dataset(index, **overrides):
+    data = {
+        "sort_option": "Price (low to high)",
+        "selected_products": "Sauce Labs Backpack; Sauce Labs Bike Light",
+        "expected_cart_count": "2",
+        "first_name": f"Buyer{index}",
+        "last_name": "Synthetic",
+        "postal_code": f"{10000 + index}",
+    }
+    data.update(overrides)
+    return {
+        "test_data": data,
+        "targeted_validation_rule": "A valid checkout completes.",
+        "test_type": "positive",
+        "expected_outcome": "accepted",
+        "assumptions": [],
+    }
+
+
+def test_positive_end_to_end_case_drops_rows_with_blank_or_negative_values():
+    """Live failure: a valid Swag Labs checkout got rows with a blank first or last name."""
+    requirement = Requirement(title="Swag Labs checkout", description="Buy products.")
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Complete purchase",
+        description="A user buys products and completes checkout.",
+        path_type="happy_path",
+    )
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Complete end-to-end purchase",
+        steps=[
+            "Navigate to the Products Page",
+            "Sort products by name and price",
+            "Add selected products to the cart",
+            "Verify the cart item count updates correctly",
+            "Proceed to checkout",
+            "Enter valid First Name, Last Name, and Zip/Postal Code",
+            "Click the Finish button",
+        ],
+        expected_result="The success confirmation message and image are shown",
+    )
+    state = WorkflowState(
+        requirement=requirement,
+        generated_scenarios=[scenario],
+        generated_test_cases=[test_case],
+    )
+    first = TestCaseDataBatchResponse.model_validate({
+        "required_fields": _CHECKOUT_FIELDS,
+        "datasets": [
+            *(_checkout_dataset(index) for index in range(16)),
+            _checkout_dataset(16, first_name=""),
+            _checkout_dataset(17, last_name=""),
+            {**_checkout_dataset(18), "test_type": "invalid", "expected_outcome": "rejected"},
+            {**_checkout_dataset(19), "test_type": "missing_required"},
+        ],
+    })
+    second = TestCaseDataBatchResponse.model_validate({
+        "datasets": [_checkout_dataset(index) for index in range(100, 104)],
+    })
+    llm = _QueuedReplies([first, second])
+
+    TestDataAgent(llm_service=llm).run(state)
+
+    assert "This is a positive (happy-path) case" in llm.prompts[0]
+    assert "Return exactly 4 NEW datasets" in llm.prompts[1]
+    assert len(test_case.test_data_sets) == 20
+    assert all(list(d) == _CHECKOUT_FIELDS for d in test_case.test_data_sets)
+    assert all(all(d.values()) for d in test_case.test_data_sets)
+    assert all(
+        profile["expected_outcome"] == "accepted"
+        for profile in test_case.test_data_profiles
+    )
+
+
+def _checkout_state():
+    requirement = Requirement(title="Swag Labs checkout", description="Buy products.")
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Complete purchase",
+        description="A user buys products and completes checkout.",
+        path_type="happy_path",
+    )
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Complete end-to-end purchase",
+        steps=[
+            "Navigate to the Products Page",
+            "Sort products by name and price",
+            "Add selected products to the cart",
+            "Verify the cart item count updates correctly",
+            "Proceed to checkout",
+            "Enter valid First Name, Last Name, and Zip/Postal Code",
+            "Click the Finish button",
+        ],
+        expected_result="The success confirmation message and image are shown",
+    )
+    state = WorkflowState(
+        requirement=requirement,
+        generated_scenarios=[scenario],
+        generated_test_cases=[test_case],
+    )
+    return state, test_case
+
+
+_CHECKOUT_PLAN = {
+    "steps": [
+        {"step_number": 1, "fields": []},
+        {"step_number": 2, "fields": ["sort_option"]},
+        {"step_number": 3, "fields": ["selected_products"]},
+        {"step_number": 4, "fields": ["expected_cart_count"]},
+        {"step_number": 5, "fields": []},
+        {"step_number": 6, "fields": ["first_name", "last_name", "postal_code"]},
+        {"step_number": 7, "fields": []},
+    ],
+}
+
+
+def test_field_plan_fixes_every_field_from_the_first_step_to_the_last():
+    state, test_case = _checkout_state()
+    plan = TestCaseFieldPlan.model_validate(_CHECKOUT_PLAN)
+    reply = TestCaseDataBatchResponse.model_validate(
+        {"datasets": [_checkout_dataset(index) for index in range(20)]}
+    )
+    llm = _QueuedReplies([reply], plans=[plan])
+
+    TestDataAgent(llm_service=llm).run(state)
+
+    assert len(llm.plan_prompts) == 1
+    assert json.dumps(_CHECKOUT_FIELDS) in llm.prompts[0]
+    assert (
+        "Step 6 (Enter valid First Name, Last Name, and Zip/Postal Code): "
+        "first_name, last_name, postal_code"
+    ) in llm.prompts[0]
+    assert all(list(d) == _CHECKOUT_FIELDS for d in test_case.test_data_sets)
+
+
+def test_field_plan_is_requested_again_when_an_input_step_has_no_fields():
+    state, test_case = _checkout_state()
+    stops_early = TestCaseFieldPlan.model_validate({"steps": _CHECKOUT_PLAN["steps"][:4]})
+    complete = TestCaseFieldPlan.model_validate(_CHECKOUT_PLAN)
+    reply = TestCaseDataBatchResponse.model_validate(
+        {"datasets": [_checkout_dataset(index) for index in range(20)]}
+    )
+    llm = _QueuedReplies([reply], plans=[stops_early, complete])
+
+    TestDataAgent(llm_service=llm).run(state)
+
+    assert len(llm.plan_prompts) == 2
+    assert "step 6: Enter valid First Name" in llm.plan_prompts[1]
+    assert set(test_case.test_data_sets[0]) == set(_CHECKOUT_FIELDS)
+
+
+def test_rows_missing_a_planned_field_are_dropped_and_names_are_normalized():
+    state, test_case = _checkout_state()
+    plan = TestCaseFieldPlan.model_validate(_CHECKOUT_PLAN)
+    rows = [_checkout_dataset(index) for index in range(20)]
+    # "Postal Code" is the planned postal_code; a row without it stops early.
+    rows[0]["test_data"]["Postal Code"] = rows[0]["test_data"].pop("postal_code")
+    for row in rows[1:6]:
+        del row["test_data"]["postal_code"]
+    first = TestCaseDataBatchResponse.model_validate({"datasets": rows})
+    rest = TestCaseDataBatchResponse.model_validate(
+        {"datasets": [_checkout_dataset(index) for index in range(100, 105)]}
+    )
+    llm = _QueuedReplies([first, rest], plans=[plan])
+
+    TestDataAgent(llm_service=llm).run(state)
+
+    assert "Return exactly 5 NEW datasets" in llm.prompts[1]
+    assert len(test_case.test_data_sets) == 20
+    assert all(set(d) == set(_CHECKOUT_FIELDS) for d in test_case.test_data_sets)
+
+
+def test_valid_login_gets_20_vault_datasets_without_calling_the_llm():
+    """Live failure: 19 invented "valid" accounts, including locked_out_user."""
+    requirement = Requirement(title="Login", description="Users log in.")
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Valid credentials successful login",
+        description="A user logs in with valid credentials.",
+        path_type="happy_path",
+    )
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Verify login with valid credentials",
+        preconditions=["User has a valid account registered in the system"],
+        steps=[
+            "Navigate to the application login page",
+            "Enter the valid username into the username field",
+            "Enter the valid password into the password field",
+            "Click the login button",
+        ],
+        expected_result="The user is redirected to the home page.",
+    )
+    state = WorkflowState(
+        requirement=requirement,
+        generated_scenarios=[scenario],
+        generated_test_cases=[test_case],
+    )
+    llm = _QueuedReplies([])
+
+    TestDataAgent(llm_service=llm).run(state)
+
+    assert llm.prompts == [] and llm.plan_prompts == []
+    assert len(test_case.test_data_sets) == 20
+    assert len({json.dumps(d, sort_keys=True) for d in test_case.test_data_sets}) == 20
+    assert test_case.test_data_sets[0] == {
+        "username": "{{vault:TARGET_USERNAME}} run 01",
+        "password": "{{vault:TARGET_PASSWORD}} run 01",
+    }
+    assert all(
+        profile["expected_outcome"] == "accepted"
+        for profile in test_case.test_data_profiles
+    )
+
+
+def test_positive_login_flow_gets_vault_credentials_plus_its_other_fields():
+    """A valid login followed by a checkout keeps every field; credentials
+    come from the vault, not from the model."""
+    state, test_case = _checkout_state()
+    test_case.steps = [
+        "Enter the valid username and password and click Login",
+        *test_case.steps,
+    ]
+    rows = [
+        _checkout_dataset(index, username=f"user_{index}", password=f"pw_{index}")
+        for index in range(20)
+    ]
+    reply = TestCaseDataBatchResponse.model_validate({"datasets": rows})
+
+    TestDataAgent(llm_service=_QueuedReplies([reply])).run(state)
+
+    assert len(test_case.test_data_sets) == 20
+    assert all(
+        list(d) == ["username", "password", *_CHECKOUT_FIELDS]
+        for d in test_case.test_data_sets
+    )
+    assert {d["username"] for d in test_case.test_data_sets} == {"{{vault:TARGET_USERNAME}}"}
+    assert {d["password"] for d in test_case.test_data_sets} == {"{{vault:TARGET_PASSWORD}}"}
+
+
+def test_checkout_drops_invented_login_fields_and_guessed_tax_values():
+    """Live failure: checkout rows carried user_a_01/pass_user_a and a guessed tax rate."""
+    state, test_case = _checkout_state()
+    test_case.preconditions = ["User is logged into the application"]
+    rows = [
+        _checkout_dataset(
+            index,
+            username=f"user_{index:02d}",
+            password=f"pass_{index:02d}",
+            expected_tax_rate="0.08",
+        )
+        for index in range(20)
+    ]
+    reply = TestCaseDataBatchResponse.model_validate({"datasets": rows})
+
+    TestDataAgent(llm_service=_QueuedReplies([reply])).run(state)
+
+    assert len(test_case.test_data_sets) == 20
+    assert all(list(d) == _CHECKOUT_FIELDS for d in test_case.test_data_sets)
+
+
+def test_rows_whose_expected_count_does_not_match_their_products_are_dropped():
+    state, test_case = _checkout_state()
+    plan = TestCaseFieldPlan.model_validate(_CHECKOUT_PLAN)
+    rows = [_checkout_dataset(index) for index in range(20)]
+    for row in rows[:3]:
+        row["test_data"]["expected_cart_count"] = "3"  # two products listed
+    first = TestCaseDataBatchResponse.model_validate({"datasets": rows})
+    rest = TestCaseDataBatchResponse.model_validate(
+        {"datasets": [_checkout_dataset(index) for index in range(100, 103)]}
+    )
+    llm = _QueuedReplies([first, rest], plans=[plan])
+
+    TestDataAgent(llm_service=llm).run(state)
+
+    assert "Return exactly 3 NEW datasets" in llm.prompts[1]
+    assert all(d["expected_cart_count"] == "2" for d in test_case.test_data_sets)
+
+
+_SAUCE_CATALOG = {
+    "products": [
+        {"name": "Sauce Labs Backpack", "price": "$29.99"},
+        {"name": "Sauce Labs Bike Light", "price": 9.99},
+        {"name": "Sauce Labs Onesie", "price": "7.99"},
+    ],
+    "tax_rate": "8%",
+    "source": "known application",
+}
+
+
+def test_checkout_rows_get_totals_computed_from_one_price_list():
+    """Live failure: a guessed tax rate that changed from row to row."""
+    state, test_case = _checkout_state()
+    test_case.steps = [*test_case.steps, "Verify item total, tax, and total"]
+    rows = [
+        _checkout_dataset(
+            index,
+            selected_products="sauce labs backpack; Sauce Labs Bike Light",
+            expected_tax_rate=f"0.0{index % 9}",
+        )
+        for index in range(20)
+    ]
+    rows[0]["test_data"]["selected_products"] = "Sauce Labs Backpack; Unknown Mug"
+    first = TestCaseDataBatchResponse.model_validate({"datasets": rows})
+    rest = TestCaseDataBatchResponse.model_validate(
+        {"datasets": [_checkout_dataset(100, selected_products="Sauce Labs Onesie; Sauce Labs Backpack")]}
+    )
+    llm = _QueuedReplies(
+        [first, rest], catalog=PriceCatalog.model_validate(_SAUCE_CATALOG)
+    )
+
+    TestDataAgent(llm_service=llm).run(state)
+
+    assert "Sauce Labs Backpack; Sauce Labs Bike Light; Sauce Labs Onesie" in llm.prompts[0]
+    first_row = test_case.test_data_sets[0]
+    assert first_row["selected_products"] == "Sauce Labs Backpack; Sauce Labs Bike Light"
+    assert list(first_row)[-3:] == ["expected_item_total", "expected_tax", "expected_total"]
+    # 29.99 + 9.99 = 39.98; 8% tax = 3.1984 -> 3.20; total 43.18
+    assert (first_row["expected_item_total"], first_row["expected_tax"], first_row["expected_total"]) == (
+        "39.98", "3.20", "43.18"
+    )
+    last_row = test_case.test_data_sets[-1]
+    assert (last_row["expected_item_total"], last_row["expected_tax"], last_row["expected_total"]) == (
+        "37.98", "3.04", "41.02"
+    )
+    assert "expected_tax_rate" not in first_row
+
+
+def test_checkout_without_a_known_price_list_gets_no_guessed_totals():
+    state, test_case = _checkout_state()
+    test_case.steps = [*test_case.steps, "Verify item total, tax, and total"]
+    reply = TestCaseDataBatchResponse.model_validate(
+        {"datasets": [_checkout_dataset(index, expected_total="99.99") for index in range(20)]}
+    )
+
+    TestDataAgent(llm_service=_QueuedReplies([reply])).run(state)
+
+    assert all(list(d) == _CHECKOUT_FIELDS for d in test_case.test_data_sets)

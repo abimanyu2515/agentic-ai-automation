@@ -151,6 +151,10 @@ _JS_COMMENT_OR_STRING = re.compile(
     r"|'(?:[^'\\\n]|\\.)*'|\"(?:[^\"\\\n]|\\.)*\"|`(?:[^`\\]|\\.)*`"
 )
 
+# A TestDataAgent vault reference as a JSON string, such as
+# "{{vault:TARGET_USERNAME}} run 01", for a valid login's credentials.
+_VAULT_REFERENCE = re.compile(r'"\{\{vault:(TARGET_USERNAME|TARGET_PASSWORD)\}\}(?: run \d+)?"')
+
 # Loop variable name and leading comment for each dataset outcome group.
 _DATASET_GROUPS = {
     "case": ("datasets", "Datasets that follow the test case's expected result"),
@@ -452,6 +456,9 @@ class PlaywrightAgent(BaseAgent):
         """Template recorded on the live app with one dataset, or None to fall back."""
         if self.template_recorder is None or not target_url:
             return None
+        # The recorder would type a vault reference literally and fail to log in.
+        if any(_VAULT_REFERENCE.fullmatch(json.dumps(str(value))) for value in sample_data.values()):
+            return None
         values = {markers[key]: str(value) for key, value in sample_data.items()}
         try:
             script = self.template_recorder(
@@ -681,7 +688,10 @@ class PlaywrightAgent(BaseAgent):
                 body = "\n".join(
                     f"    {line}" if line.strip() else "" for line in body.split("\n")
                 )
-            row_lines = "\n".join(f"  {cls._js_literal(row)}," for row in rows)
+            row_lines = "\n".join(
+                f"  {cls._resolve_vault_references(cls._js_literal(row))},"
+                for row in rows
+            )
             sections.append(
                 f"// {comment}\n"
                 f"const {name} = [\n{row_lines}\n];\n\n"
@@ -722,6 +732,14 @@ class PlaywrightAgent(BaseAgent):
         script = _JS_COMMENT_OR_STRING.sub(bind, script)
         # Any marker left sits in code, outside a string.
         return marker_pattern.sub(lambda m: expressions[m.group(0)], script)
+
+    @staticmethod
+    def _resolve_vault_references(row_literal: str) -> str:
+        """Read TestDataAgent's vault references from the runner's environment,
+        so a valid login types the project's credentials, never the reference."""
+        return _VAULT_REFERENCE.sub(
+            lambda match: f'(process.env.{match.group(1)} ?? "")', row_literal
+        )
 
     @staticmethod
     def _js_literal(value) -> str:
@@ -894,6 +912,8 @@ class PlaywrightAgent(BaseAgent):
                 "- Do not branch on marker values and never replace a marker with an "
                 "example or a TODO value.\n"
                 "- Follow the steps in order; only the marked values vary between datasets.\n"
+                "- When username or password fields are listed in test_data, fill them "
+                "with their markers too; at run time they hold the project's credentials.\n"
                 + (
                     "- Use __EXPECTED_RESULT__ wherever the expected result is referenced.\n"
                     if expected_is_marker else
