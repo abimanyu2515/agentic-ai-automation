@@ -306,3 +306,45 @@ def test_data_driven_template_records_sample_values_and_asks_for_markers():
     assert "Test Title (use verbatim, including its markers): __TEST_DATA_ID__ [__TEST_TYPE__]" in llm.synthesis_prompt
     assert "username: recorded value \"locked_user\" is replaced by '__TEST_DATA_01__'" in llm.synthesis_prompt
     assert '[data-test=\\"username\\"]' in llm.synthesis_prompt
+
+
+def test_data_driven_template_fills_vault_placeholders_and_passes_field_notes():
+    llm = _ScriptedLLM(
+        [
+            _decision("fill", '[data-test="username"]', agent.USERNAME_PLACEHOLDER),
+            _decision("done"),
+            _decision("done"),
+            _decision("done"),
+        ],
+        "import { test, expect } from '@playwright/test';\ntest('__TEST_DATA_ID__', async () => {});",
+    )
+    page = _FakePage()
+    notes = "- __TEST_DATA_02__ (tags): a list of items joined with '; '"
+
+    with mock.patch.object(agent, "async_playwright", lambda: _FakePlaywright(_FakeBrowser(page))), \
+         mock.patch.object(agent, "extract_page_state", _fake_page_state):
+        asyncio.run(
+            agent.generate_data_driven_template(
+                "https://app.example.test/",
+                ["Log in", "Add the tags"],
+                "__TEST_DATA_ID__ [__TEST_TYPE__] Tag a ticket",
+                "The ticket shows its tags",
+                sample_data={"username": agent.USERNAME_PLACEHOLDER, "tags": "urgent; billing"},
+                markers={"username": "__TEST_DATA_01__", "tags": "__TEST_DATA_02__"},
+                llm=llm,
+                username="real-user",
+                password="s3cret!",
+                field_notes=notes,
+            )
+        )
+
+    # The placeholder recorded from the dataset is filled with the vault credential.
+    assert page.actions == [("fill", '[data-test="username"]', "real-user")]
+    assert "act on each of them" in llm.prompts[0]
+    assert notes in llm.synthesis_prompt
+    assert "list joined with '; '" in llm.synthesis_prompt
+    # The credential field keeps its marker, whose dataset value resolves to the vault.
+    assert "use that field's marker instead" in llm.synthesis_prompt
+    for prompt in llm.prompts + [llm.synthesis_prompt]:
+        assert "real-user" not in prompt
+        assert "s3cret!" not in prompt

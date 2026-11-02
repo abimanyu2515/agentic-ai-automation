@@ -115,13 +115,22 @@ async def execute_live_playwright_action(
         raise ValueError(f"Unsupported action: {action}")
 
 
-def _credentials_script_rule(number: int, has_credentials: bool) -> str:
+def _credentials_script_rule(
+    number: int, has_credentials: bool, marked_fields: bool = False
+) -> str:
     if not has_credentials:
         return ""
-    return (
+    rule = (
         f"{number}. Write {USERNAME_PLACEHOLDER} as process.env.TARGET_USERNAME and "
         f"{PASSWORD_PLACEHOLDER} as process.env.TARGET_PASSWORD, with no fallback values."
     )
+    if marked_fields:
+        # The marker's dataset value already resolves to the vault credential.
+        rule += (
+            " Where a test data field above recorded one of these placeholders, "
+            "use that field's marker instead."
+        )
+    return rule
 
 
 def _clean_ts_code(text: Optional[str]) -> str:
@@ -153,7 +162,7 @@ async def generate_accurate_test_script(
     if not steps:
         raise ValueError("At least one test step is required for live script generation")
 
-    llm = llm or LLMService()
+    llm = llm or LLMService(role="generation")
     has_credentials = bool(username or password)
     logger.info(
         "ScriptGeneratorAgent started: target_url=%s steps=%s", target_url, len(steps)
@@ -210,6 +219,7 @@ async def generate_data_driven_template(
     llm: Optional[LLMService] = None,
     username: Optional[str] = None,
     password: Optional[str] = None,
+    field_notes: str = "",
 ) -> str:
     """
     Records one dataset's run on the live target app, then writes a reusable
@@ -218,14 +228,15 @@ async def generate_data_driven_template(
     The steps run with sample_data's values. The template uses each field's
     marker (from markers) in place of its value, so PlaywrightAgent can run
     the one recorded test once per dataset. test_title must already contain
-    the dataset id and type markers.
+    the dataset id and type markers. field_notes, one line per marker, says
+    how each field is used across all datasets (a list, a value to assert).
     """
     if not target_url:
         raise ValueError("target_url is required for live template recording")
     if not steps:
         raise ValueError("At least one test step is required for live template recording")
 
-    llm = llm or LLMService()
+    llm = llm or LLMService(role="generation")
     has_credentials = bool(username or password)
     run_steps = [
         *(f"Make sure this precondition holds: {item}" for item in preconditions or []),
@@ -236,6 +247,12 @@ async def generate_data_driven_template(
         "Test Data for this run (type these exact values wherever a step enters data): "
         + json.dumps(sample_data, ensure_ascii=False)
     )
+    if field_notes:
+        run_context += (
+            "\nA value joined with '; ' lists the exact items to use: act on each of "
+            "them, even when a step names a different number. Values of fields named "
+            "expected_... are what the page should show; check them, never type them."
+        )
     logger.info(
         "ScriptGeneratorAgent template recording started: target_url=%s steps=%s",
         target_url,
@@ -261,7 +278,7 @@ Steps:
 
 Recorded test data and the marker that replaces each value:
 {field_lines}
-
+{f"How each field is used across all datasets (other datasets hold other values and item counts):{chr(10)}{field_notes}{chr(10)}" if field_notes else ""}
 Live Verified Execution Trace (selectors proven on the live DOM, recorded with the values above):
 {json.dumps(recorded_history, indent=2, ensure_ascii=False)}
 
@@ -270,11 +287,11 @@ Strict Requirements:
 2. Write exactly ONE test(...) block, titled with the Test Title verbatim.
 3. Use ONLY the verified selectors from the trace. Never invent or hallucinate selectors.
 4. Wherever the trace typed, selected, or checked a recorded test data value, use that field's marker as a string literal instead, for example fill('__TEST_DATA_01__'). Every marker listed above must appear in the script. A marker may hold an empty string; still apply it.
-5. When the trace typed a value one character per input box (such as a PIN or OTP), loop over the marker's characters and fill box i with character i, for example `const boxes = [<the verified box selectors in order>]; for (const [i, ch] of [...'__TEST_DATA_01__'].entries()) {{ await page.locator(boxes[i]).fill(ch); }}`.
+5. When the trace typed a value one character per input box (such as a PIN or OTP), loop over the marker's characters and fill box i with character i, for example `const boxes = [<the verified box selectors in order>]; for (const [i, ch] of [...'__TEST_DATA_01__'].entries()) {{ await page.locator(boxes[i]).fill(ch); }}`. When a field is a list joined with '; ', the trace acted on each recorded item; write one loop over the marker instead, for example `for (const item of '__TEST_DATA_03__'.split('; ')) {{ await page.locator(<verified repeated container>).filter({{ hasText: item }}).locator(<verified control>).click(); }}`, deriving the container and control from the trace's selectors so the loop works for any item. Never keep a selector that hard-codes one item's name.
 6. Assert the Expected Result with web-first assertions (`await expect(...).toBeVisible()`, `toHaveText(...)`, `await expect(page).toHaveURL(...)`), based on what the trace verified. Never branch on marker values.
 7. Group the code with step comments (`// --- Step 1: ... ---`).
 8. Return ONLY valid TypeScript code with no markdown fences or explanations.
-{_credentials_script_rule(9, has_credentials)}
+{_credentials_script_rule(9, has_credentials, any(value in (USERNAME_PLACEHOLDER, PASSWORD_PLACEHOLDER) for value in sample_data.values()))}
 {f"REPAIR FEEDBACK (fix these problems from the previous script): {repair_feedback[:2000]}" if repair_feedback else ""}
 """
 

@@ -16,6 +16,7 @@ import time
 
 import pytest
 
+from backend.agents import playwright_agent as playwright_agent_module
 from backend.agents.playwright_agent import PlaywrightAgent
 from backend.config.settings import LLMConfig
 from backend.models.requirement import Requirement
@@ -471,6 +472,161 @@ test('Test data __TEST_DATA_ID__: __TEST_TYPE__', async ({ page }) => {
     assert "getByText('Password validation error is shown')" in generated_script
     assert "__TEST_DATA_" not in generated_script
     assert PlaywrightAgent._escape_js_string_content("O'Brien") == "O\\'Brien"
+
+
+def _ticket_case():
+    """A help desk case whose datasets mix every field shape TestDataAgent writes."""
+    requirement = Requirement(title="Tickets", description="Agents file support tickets.")
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="File a tagged ticket",
+        description="Log in, file a ticket, and tag it.",
+        path_type="happy_path",
+    )
+    datasets = [
+        {
+            "username": "{{vault:TARGET_USERNAME}}",
+            "password": "{{vault:TARGET_PASSWORD}}",
+            "subject": f"Printer jam {index}",
+            # The first dataset holds one tag, so list detection must look at all of them.
+            "tags": "urgent" if index == 0 else "urgent; billing; hardware"[: 6 + 9 * (index % 2)],
+            "notify_customer": "yes" if index % 2 else "no",
+            "expected_tag_count": "1" if index == 0 else str(1 + index % 2),
+        }
+        for index in range(20)
+    ]
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="File a tagged ticket",
+        steps=["Log in", "Enter the subject", "Add two tags", "Submit the ticket"],
+        expected_result="The ticket is listed with its tags",
+        test_data=datasets[0],
+        test_data_sets=datasets,
+        evaluation_status=EvaluationStatus.APPROVED,
+    )
+    project = Project(
+        name="Help desk",
+        target_url="https://helpdesk.example.test",
+        requirements=[requirement.id],
+    )
+    repo = type(
+        "TicketRepository",
+        (),
+        {
+            "list_projects": lambda self: [project],
+            "get_scenario": lambda self, scenario_id: scenario,
+        },
+    )()
+    state = WorkflowState(
+        requirement=requirement,
+        generated_scenarios=[scenario],
+        generated_test_cases=[test_case],
+    )
+    return state, repo, datasets
+
+
+_TICKET_TEMPLATE = """import { test, expect } from '@playwright/test';
+test('__TEST_DATA_ID__ [__TEST_TYPE__] File a tagged ticket', async ({ page }) => {
+  await page.goto(BASE_URL);
+  await page.getByLabel('Username').fill('__TEST_DATA_01__');
+  await page.getByLabel('Password').fill('__TEST_DATA_02__');
+  await page.getByLabel('Subject').fill('__TEST_DATA_03__');
+  for (const tag of '__TEST_DATA_04__'.split('; ')) {
+    await page.getByRole('option').filter({ hasText: tag }).click();
+  }
+  await page.getByLabel('Notify customer').setChecked(['true', 'yes'].includes('__TEST_DATA_05__'.toLowerCase()));
+  await expect(page.getByTestId('tag-count')).toContainText('__TEST_DATA_06__');
+});"""
+
+
+def test_describe_data_fields_names_each_field_shape_from_all_datasets():
+    _, _, datasets = _ticket_case()
+    markers = {field: f"__TEST_DATA_{index:02d}__" for index, field in enumerate(datasets[0], 1)}
+
+    notes = playwright_agent_module._describe_data_fields(markers, datasets)
+
+    assert "login credential" in notes["__TEST_DATA_01__"]
+    assert "login credential" in notes["__TEST_DATA_02__"]
+    assert "value to type or select" in notes["__TEST_DATA_03__"]
+    # Dataset 1 has a single tag; the others show it is a list of 1 to 2 items.
+    assert "list of items" in notes["__TEST_DATA_04__"]
+    assert "1 to 2 items" in notes["__TEST_DATA_04__"]
+    assert "'__TEST_DATA_04__'.split('; ')" in notes["__TEST_DATA_04__"]
+    assert "yes/no choice" in notes["__TEST_DATA_05__"]
+    assert "Assert it" in notes["__TEST_DATA_06__"]
+    assert "{{vault:" not in "".join(notes.values())
+
+
+def test_template_prompt_explains_list_and_assert_fields_and_loops_per_dataset():
+    state, repo, _ = _ticket_case()
+    prompts = []
+
+    class RecordingLLM:
+        def generate(self, *, system, user, **kwargs):
+            prompts.append(user)
+            return _TICKET_TEMPLATE
+
+    result = PlaywrightAgent(
+        llm_service=RecordingLLM(), repo=repo, test_data_template=True
+    ).run(state)
+
+    prompt = prompts[0]
+    assert "Every test_data marker must appear in the script" in prompt
+    assert "__TEST_DATA_04__ (tags): a list of items" in prompt
+    assert "__TEST_DATA_06__ (expected_tag_count): a value the page must show" in prompt
+    script = result.generated_test_cases[0].playwright_script
+    assert "for (const tag of row.data[\"tags\"].split('; '))" in script
+    assert "toContainText(row.data[\"expected_tag_count\"])" in script
+    assert '"tags": "urgent; billing"' in script
+    assert "__TEST_DATA_" not in script
+
+
+def test_template_retry_explains_how_to_use_each_missing_marker():
+    state, repo, _ = _ticket_case()
+    without_list = _TICKET_TEMPLATE.replace(
+        "  for (const tag of '__TEST_DATA_04__'.split('; ')) {\n"
+        "    await page.getByRole('option').filter({ hasText: tag }).click();\n"
+        "  }\n",
+        "",
+    )
+
+    class RetryingLLM:
+        def __init__(self):
+            self.prompts = []
+
+        def generate(self, *, system, user, **kwargs):
+            self.prompts.append(user)
+            return without_list if len(self.prompts) == 1 else _TICKET_TEMPLATE
+
+    llm = RetryingLLM()
+    PlaywrightAgent(llm_service=llm, repo=repo, test_data_template=True).run(state)
+
+    assert len(llm.prompts) == 2
+    retry_feedback = llm.prompts[1].split("rejected because it omitted", 1)[1]
+    assert "__TEST_DATA_04__ (tags): a list of items" in retry_feedback
+    assert "__TEST_DATA_03__ (subject)" not in retry_feedback
+
+
+def test_vault_login_datasets_are_recorded_live_with_credential_placeholders():
+    state, repo, _ = _ticket_case()
+    calls = []
+
+    def recorder(**kwargs):
+        calls.append(kwargs)
+        return _TICKET_TEMPLATE
+
+    PlaywrightAgent(
+        llm_service=StubLLMService(generate_response="unused"),
+        repo=repo,
+        test_data_template=True,
+        template_recorder=recorder,
+    ).run(state)
+
+    assert len(calls) == 1
+    assert calls[0]["sample_data"]["username"] == "{{TARGET_USERNAME}}"
+    assert calls[0]["sample_data"]["password"] == "{{TARGET_PASSWORD}}"
+    assert "__TEST_DATA_04__ (tags): a list of items" in calls[0]["field_notes"]
+    assert "{{vault:" not in str(calls[0])
 
 
 def test_data_driven_loop_script_hoists_imports_and_scopes_each_dataset():

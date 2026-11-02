@@ -1731,8 +1731,12 @@ def read_settings():
             "provider": settings.llm.provider,
             "model": settings.llm.model,
             "temperature": settings.llm.temperature,
-            "api_key": settings.llm.api_key,
             "api_base": settings.llm.api_base,
+        },
+        # Read only, from .env (spec 0003); API keys are never returned.
+        "llm_roles": {
+            role: config.model_dump(exclude={"api_key", "api_base"})
+            for role, config in settings.llm_roles.items()
         },
         "workflow": {
             "mode": settings.workflow.mode,
@@ -2528,9 +2532,14 @@ def get_activity_traces(project_id: UUID):
     total_tokens = input_tokens + output_tokens
     estimated_cost = (input_tokens * 0.00015 + output_tokens * 0.0006) / 100
 
+    analysis = settings.llm_roles["analysis"]
     return {
-        "model": settings.llm.model,
-        "provider": settings.llm.provider,
+        "model": analysis.models[0],
+        "provider": analysis.provider,
+        "llm_roles": {
+            role: {"provider": config.provider, "models": config.models}
+            for role, config in settings.llm_roles.items()
+        },
         "temperature": settings.llm.temperature,
         "total_calls": sc_count + tc_count,
         "input_tokens": input_tokens,

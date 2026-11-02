@@ -701,6 +701,12 @@
                     <input type="text" id="settings-llm-base" class="form-control" placeholder="NVIDIA NIM default or http://localhost:11434 for Ollama" />
                   </div>
                 </div>
+
+                <div class="settings-section">
+                  <div class="settings-section-title">LLM Roles (read only)</div>
+                  <p style="margin: 0 0 12px; color: var(--text-secondary); font-size: 0.8rem;">Set in .env with GENERATION_LLM_* and ANALYSIS_LLM_*. Unset values fall back to the settings above.</p>
+                  <div id="settings-llm-roles" aria-live="polite"></div>
+                </div>
                 
                 <div class="settings-section">
                   <div class="settings-section-title">Workflow & Review Settings</div>

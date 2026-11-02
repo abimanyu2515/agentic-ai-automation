@@ -91,6 +91,10 @@ export default defineConfig({{
 # guessed at.
 _KNOWN_STATUSES = {"passed", "failed", "skipped"}
 
+# Per-test cap on error text when a run has several tests, so 20 failing
+# datasets do not each contribute a full Playwright call log.
+_MAX_TEST_ERROR_CHARS = 1000
+
 
 class PlaywrightRunResult(BaseModel):
     """Raw result from actually running a script. No knowledge of which
@@ -186,49 +190,61 @@ import { test as __runnerTest } from '@playwright/test';
 import * as __runnerPath from 'path';
 import * as __runnerFs from 'fs';
 
+const __runnerScreenshotsDir = __runnerPath.join(__dirname, 'screenshots');
+
+// The Locator prototype and console.log are shared by every test in the
+// worker, so they are patched once and read the running test from here.
+// Patching them in each beforeEach stacked one wrapper per test.
+let __runnerCurrent: { page: any; stepIndex: number; lastTimelineMessage: string } | null = null;
+let __runnerPatched = false;
+
+const __runnerSanitizeFilename = (str) => {
+  return str.toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+};
+
+const __runnerTakeStepScreenshot = async (actionName: string) => {
+  const current = __runnerCurrent;
+  if (!current) return;
+  current.stepIndex++;
+  const cleanDesc = __runnerSanitizeFilename(current.lastTimelineMessage || actionName);
+  const filename = `step-${String(current.stepIndex).padStart(2, '0')}-${cleanDesc}.png`;
+  const filepath = __runnerPath.join(__runnerScreenshotsDir, filename);
+  try {
+    await current.page.waitForTimeout(300);
+    await current.page.screenshot({ path: filepath });
+    console.log(`[Timeline] Screenshot: ${filename}`);
+  } catch (e) {
+    // Ignore screenshot errors
+  }
+};
+
 __runnerTest.beforeEach(async ({ page }) => {
-  const screenshotsDir = __runnerPath.join(__dirname, 'screenshots');
-  if (!__runnerFs.existsSync(screenshotsDir)) {
-    __runnerFs.mkdirSync(screenshotsDir, { recursive: true });
+  if (!__runnerFs.existsSync(__runnerScreenshotsDir)) {
+    __runnerFs.mkdirSync(__runnerScreenshotsDir, { recursive: true });
   }
 
-  let stepIndex = 0;
-  let lastTimelineMessage = '';
+  __runnerCurrent = { page, stepIndex: 0, lastTimelineMessage: '' };
+
+  // Each test gets a new page, so goto is wrapped per test.
+  const origGoto = page.goto.bind(page);
+  page.goto = async (url, options) => {
+    const res = await origGoto(url, options);
+    await __runnerTakeStepScreenshot('goto');
+    return res;
+  };
+
+  if (__runnerPatched) return;
+  __runnerPatched = true;
 
   const origConsoleLog = console.log;
   console.log = function(...args) {
     origConsoleLog(...args);
     const msg = args.join(' ');
-    if (msg.startsWith('[Timeline]')) {
-      lastTimelineMessage = msg.replace('[Timeline]', '').trim();
+    if (msg.startsWith('[Timeline]') && __runnerCurrent) {
+      __runnerCurrent.lastTimelineMessage = msg.replace('[Timeline]', '').trim();
     }
-  };
-
-  const sanitizeFilename = (str) => {
-    return str.toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '');
-  };
-
-  const takeStepScreenshot = async (actionName: string) => {
-    stepIndex++;
-    const cleanDesc = sanitizeFilename(lastTimelineMessage || actionName);
-    const filename = `step-${String(stepIndex).padStart(2, '0')}-${cleanDesc}.png`;
-    const filepath = path.join(screenshotsDir, filename);
-    try {
-      await page.waitForTimeout(300);
-      await page.screenshot({ path: filepath });
-      console.log(`[Timeline] Screenshot: ${filename}`);
-    } catch (e) {
-      // Ignore screenshot errors
-    }
-  };
-
-  const origGoto = page.goto.bind(page);
-  page.goto = async (url, options) => {
-    const res = await origGoto(url, options);
-    await takeStepScreenshot('goto');
-    return res;
   };
 
   const LocatorProto = Object.getPrototypeOf(page.locator('body'));
@@ -236,21 +252,21 @@ __runnerTest.beforeEach(async ({ page }) => {
   const origLocClick = LocatorProto.click;
   LocatorProto.click = async function(options) {
     const res = await origLocClick.call(this, options);
-    await takeStepScreenshot('click');
+    await __runnerTakeStepScreenshot('click');
     return res;
   };
 
   const origLocFill = LocatorProto.fill;
   LocatorProto.fill = async function(value, options) {
     const res = await origLocFill.call(this, value, options);
-    await takeStepScreenshot('fill');
+    await __runnerTakeStepScreenshot('fill');
     return res;
   };
 
   const origLocSelectOption = LocatorProto.selectOption;
   LocatorProto.selectOption = async function(values, options) {
     const res = await origLocSelectOption.call(this, values, options);
-    await takeStepScreenshot('selectOption');
+    await __runnerTakeStepScreenshot('selectOption');
     return res;
   };
 });
@@ -380,10 +396,15 @@ __runnerTest.beforeEach(async ({ page }) => {
         return self._parse_report(report, stdout_lines)
 
     def _parse_report(self, report: dict, stdout_lines: list[str]) -> PlaywrightRunResult:
-        suites = report.get("suites", [])
-        specs = suites[0].get("specs", []) if suites else []
+        # Data-driven scripts wrap each dataset in test.describe(row.id),
+        # which nests its tests one suite deeper than the file's own suite.
+        tests = [
+            test
+            for file_suite in report.get("suites", [])
+            for test in _collect_tests(file_suite, ())
+        ]
 
-        if not specs:
+        if not tests:
             # The file loaded but no test() was found in it - almost
             # always a syntax error or malformed script, not a real
             # pass/fail verdict.
@@ -391,25 +412,64 @@ __runnerTest.beforeEach(async ({ page }) => {
             message = errors[0].get("message") if errors else "No test found in the generated script"
             return PlaywrightRunResult(status="error", error_message=_strip_ansi(str(message)), stdout_lines=stdout_lines)
 
-        test_result = specs[0]["tests"][0]["results"][0]
-        status = test_result["status"]
-
-        if status not in _KNOWN_STATUSES:
-            # e.g. "timedOut" or "interrupted" - real Playwright statuses
-            # this hasn't been specifically mapped for; don't guess.
+        statuses = [status for _, status, _ in tests]
+        if "failed" in statuses:
+            status = "failed"
+        elif "error" in statuses:
             status = "error"
+        elif all(item == "skipped" for item in statuses):
+            status = "skipped"
+        else:
+            status = "passed"
 
-        error_message = test_result.get("error", {}).get("message")
-        if error_message:
-            error_message = _strip_ansi(error_message)
-        attachments = {a["name"]: a["path"] for a in test_result.get("attachments", [])}
+        unsuccessful = [test for test in tests if test[1] in {"failed", "error"}]
+        if len(tests) == 1:
+            message = tests[0][2].get("error", {}).get("message")
+            error_message = _strip_ansi(message) if message else None
+        else:
+            # One line per failing dataset, so the run shows which rows failed.
+            error_message = "\n\n".join(
+                f"{' > '.join(title) or 'test'}: "
+                + _strip_ansi(
+                    result.get("error", {}).get("message") or f"status {result.get('status')}"
+                )[:_MAX_TEST_ERROR_CHARS]
+                for title, _, result in unsuccessful
+            ) or None
+            if error_message:
+                error_message = f"{len(unsuccessful)} of {len(tests)} tests did not pass.\n\n{error_message}"
+
+        # The evidence should match the error: take it from the first test that did not pass.
+        evidence = (unsuccessful or tests)[0][2]
+        attachments = {a["name"]: a.get("path") for a in evidence.get("attachments", [])}
 
         return PlaywrightRunResult(
             status=status,
-            duration_seconds=test_result.get("duration", 0) / 1000.0,
+            duration_seconds=sum(result.get("duration", 0) for _, _, result in tests) / 1000.0,
             error_message=error_message,
             screenshot_path=attachments.get("screenshot"),
             video_path=attachments.get("video"),
             trace_path=attachments.get("trace"),
             stdout_lines=stdout_lines,
         )
+
+
+def _collect_tests(suite: dict, titles: tuple[str, ...]) -> list[tuple[tuple[str, ...], str, dict]]:
+    """(title path, status, final result) for every test in suite and the
+    suites nested in it. titles excludes the file suite's own title."""
+    collected = []
+    for spec in suite.get("specs", []):
+        for test in spec.get("tests", []):
+            results = test.get("results", [])
+            if not results:
+                continue
+            # With retries, the last attempt is the verdict.
+            result = results[-1]
+            status = result.get("status")
+            if status not in _KNOWN_STATUSES:
+                # e.g. "timedOut" or "interrupted" - real Playwright statuses
+                # this hasn't been specifically mapped for; don't guess.
+                status = "error"
+            collected.append(((*titles, spec.get("title", "")), status, result))
+    for child in suite.get("suites", []):
+        collected.extend(_collect_tests(child, (*titles, child.get("title", ""))))
+    return collected

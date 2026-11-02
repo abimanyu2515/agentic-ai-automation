@@ -155,6 +155,65 @@ _JS_COMMENT_OR_STRING = re.compile(
 # "{{vault:TARGET_USERNAME}} run 01", for a valid login's credentials.
 _VAULT_REFERENCE = re.compile(r'"\{\{vault:(TARGET_USERNAME|TARGET_PASSWORD)\}\}(?: run \d+)?"')
 
+# TestDataAgent joins the items of one field (products, tags, files) with
+# "; " and prefixes values the page should show, rather than inputs, with
+# "expected_". A marker hides those shapes, so the template prompt names them.
+_LIST_SEPARATOR = "; "
+_BOOLEAN_VALUES = {"true", "false", "yes", "no"}
+
+
+def _describe_data_fields(
+    markers: dict[str, str], datasets: list[dict[str, str]]
+) -> dict[str, str]:
+    """marker -> one line telling the script writer how to use that field.
+
+    Judged from every dataset, because the first may hold a one-item list.
+    """
+    notes = {}
+    for field in datasets[0] if datasets else []:
+        marker = markers[field]
+        values = [str(dataset.get(field, "")) for dataset in datasets]
+        example = json.dumps(
+            next((value for value in values if value.strip()), ""), ensure_ascii=False
+        )
+        if any(_VAULT_REFERENCE.fullmatch(json.dumps(value)) for value in values):
+            notes[marker] = (
+                f"- {marker} ({field}): the project's login credential. Fill the "
+                "login field with the marker; it holds the real credential at run time."
+            )
+        elif any(_LIST_SEPARATOR in value for value in values):
+            sizes = sorted({
+                len([item for item in value.split(";") if item.strip()]) for value in values
+            })
+            size_text = (
+                str(sizes[0]) if sizes[0] == sizes[-1] else f"{sizes[0]} to {sizes[-1]}"
+            )
+            notes[marker] = (
+                f"- {marker} ({field}): a list of items joined with '{_LIST_SEPARATOR}', "
+                f"for example {example}. Datasets hold {size_text} items. "
+                f"Loop over '{marker}'.split('{_LIST_SEPARATOR}') and repeat the step's "
+                "action once per item, finding each item's control by the item's visible "
+                "name. Never hard-code item names or a fixed number of items."
+            )
+        elif field.lower().startswith("expected_"):
+            notes[marker] = (
+                f"- {marker} ({field}): a value the page must show, for example "
+                f"{example}. Assert it, for example toContainText('{marker}'); never type it."
+            )
+        elif values and all(value.strip().lower() in _BOOLEAN_VALUES for value in values):
+            notes[marker] = (
+                f"- {marker} ({field}): a yes/no choice, for example {example}. Apply it "
+                f"to the checkbox, switch, or option, for example "
+                f"setChecked(['true', 'yes'].includes('{marker}'.toLowerCase())). This "
+                "comparison is allowed."
+            )
+        else:
+            notes[marker] = (
+                f"- {marker} ({field}): a value to type or select, for example {example}."
+            )
+    return notes
+
+
 # Loop variable name and leading comment for each dataset outcome group.
 _DATASET_GROUPS = {
     "case": ("datasets", "Datasets that follow the test case's expected result"),
@@ -238,7 +297,7 @@ class PlaywrightAgent(BaseAgent):
         on the live target app (see script_generator_agent's
         generate_data_driven_template). Without it, or when recording fails,
         templates come from one LLM call grounded on state.dom_context."""
-        self.llm_service = llm_service or LLMService()
+        self.llm_service = llm_service or LLMService(role="generation")
         self.repo = repo
         if max_workers < 1:
             raise ValueError("max_workers must be at least 1")
@@ -328,7 +387,10 @@ class PlaywrightAgent(BaseAgent):
 
             template_case, markers = self._test_data_template_case(approved[0])
             template_script = self._generate_template(
-                template_case, markers, framework, target_url, state
+                template_case, markers, framework, target_url, state,
+                _describe_data_fields(
+                    markers, [test_case.test_data for test_case in approved]
+                ),
             )
             for test_case in approved:
                 scenario = (
@@ -398,6 +460,7 @@ class PlaywrightAgent(BaseAgent):
         framework: str,
         target_url: str | None,
         state: WorkflowState,
+        field_notes: dict[str, str] | None = None,
     ) -> str:
         feature_context = self._feature_context(state.requirement, template_case)
         template_script = self._generate_script(
@@ -408,6 +471,7 @@ class PlaywrightAgent(BaseAgent):
             dom_context=state.dom_context,
             repair_feedback=state.repair_feedback,
             feature_context=feature_context,
+            field_notes=field_notes,
         )
         missing_markers = [
             marker for marker in markers.values()
@@ -429,10 +493,16 @@ class PlaywrightAgent(BaseAgent):
                     f"{', '.join(missing_markers)}. Regenerate the complete script "
                     "and preserve every required marker exactly as provided in the "
                     "test_data, title, and expected result. Do not omit fields."
+                    + "".join(
+                        f"\n{field_notes[marker]}"
+                        for marker in missing_markers
+                        if field_notes and marker in field_notes
+                    )
                 ),
                 dom_context=state.dom_context,
                 repair_feedback=state.repair_feedback,
                 feature_context=feature_context,
+                field_notes=field_notes,
             )
             missing_markers = [
                 marker for marker in markers.values()
@@ -452,14 +522,23 @@ class PlaywrightAgent(BaseAgent):
         sample_data: dict[str, str],
         target_url: str | None,
         state: WorkflowState,
+        field_notes: dict[str, str] | None = None,
     ) -> str | None:
         """Template recorded on the live app with one dataset, or None to fall back."""
         if self.template_recorder is None or not target_url:
             return None
-        # The recorder would type a vault reference literally and fail to log in.
-        if any(_VAULT_REFERENCE.fullmatch(json.dumps(str(value))) for value in sample_data.values()):
-            return None
-        values = {markers[key]: str(value) for key, value in sample_data.items()}
+        # A vault reference becomes the recorder's {{TARGET_USERNAME}} or
+        # {{TARGET_PASSWORD}} placeholder, which it fills from the vault
+        # without showing the credential to the model.
+        sample_data = {
+            key: (
+                "{{" + match.group(1) + "}}"
+                if (match := _VAULT_REFERENCE.fullmatch(json.dumps(str(value))))
+                else str(value)
+            )
+            for key, value in sample_data.items()
+        }
+        values = {markers[key]: value for key, value in sample_data.items()}
         try:
             script = self.template_recorder(
                 target_url=target_url,
@@ -469,13 +548,14 @@ class PlaywrightAgent(BaseAgent):
                 ],
                 test_title=template_case.title,
                 expected_result=template_case.expected_result,
-                sample_data={key: str(value) for key, value in sample_data.items()},
+                sample_data=sample_data,
                 markers={key: markers[key] for key in sample_data},
                 preconditions=[
                     self._apply_template_values(item, values)
                     for item in template_case.preconditions
                 ],
                 repair_feedback=state.repair_feedback,
+                field_notes="\n".join((field_notes or {}).values()),
             )
         except Exception as exc:
             state.add_log(
@@ -539,10 +619,11 @@ class PlaywrightAgent(BaseAgent):
                 template_case, markers = self._dataset_template_case(
                     test_case, expected_result
                 )
+                field_notes = _describe_data_fields(markers, datasets)
                 template_script = self._record_template(
-                    template_case, markers, dataset, target_url, state
+                    template_case, markers, dataset, target_url, state, field_notes
                 ) or self._generate_template(
-                    template_case, markers, framework, target_url, state
+                    template_case, markers, framework, target_url, state, field_notes
                 )
                 templates[group] = self._apply_template_values(
                     template_script,
@@ -802,6 +883,7 @@ class PlaywrightAgent(BaseAgent):
         dom_context: dict | None = None,
         repair_feedback: str | None = None,
         feature_context: str | None = None,
+        field_notes: dict[str, str] | None = None,
     ) -> str:
         import os
         base_url = target_url or ""
@@ -920,6 +1002,14 @@ class PlaywrightAgent(BaseAgent):
                     "- Assert the expected result with concrete, observable checks (URL, "
                     "visible message, field or element state). Do not assert a whole "
                     "sentence as page text unless the expected result quotes it.\n"
+                )
+                + (
+                    "- Every test_data marker must appear in the script. How each field "
+                    "is used (examples come from one dataset; use the marker, never the "
+                    "example):\n" + "\n".join(field_notes.values()) + "\n"
+                    "- When a step names a fixed number of items but a list marker "
+                    "supplies them, follow the list.\n"
+                    if field_notes else ""
                 )
             )
         if template_feedback:
