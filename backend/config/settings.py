@@ -17,7 +17,7 @@ from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 CONFIG_DIR = Path(__file__).parent
@@ -32,6 +32,23 @@ class LLMConfig(BaseModel):
     temperature: float = 0.2
     api_key: str | None = None
     api_base: str | None = None  # required for ollama (e.g. http://localhost:11434); leave unset for cloud providers
+
+
+LLM_ROLES = ("generation", "analysis")
+
+
+class LLMRoleConfig(BaseModel):
+    """One LLM role (spec 0003). Every call made by a role goes through that
+    role's shared pool in llm.py, which reads these limits on each acquire.
+    Built from GENERATION_LLM_* / ANALYSIS_LLM_* env vars, falling back to llm.*."""
+    provider: str
+    models: list[str] = Field(min_length=1)
+    api_key: str | None = None
+    api_base: str | None = None
+    max_concurrent: int = Field(default=2, ge=1)
+    min_interval_seconds: float = Field(default=0, ge=0)
+    cooldown_seconds: float = Field(default=60, ge=0)
+    max_wait_seconds: float = Field(default=180, gt=0)
 
 
 class WorkflowConfig(BaseModel):
@@ -141,6 +158,14 @@ class Settings(BaseSettings):
     playwright: PlaywrightConfig = PlaywrightConfig()
     langsmith: LangSmithConfig = LangSmithConfig()
     jira: JiraConfig = JiraConfig()
+    # Read only from .env (never override.yaml); filled from llm.* when unset.
+    llm_roles: dict[str, LLMRoleConfig] = {}
+
+    @model_validator(mode="after")
+    def _fill_llm_roles(self) -> "Settings":
+        if not self.llm_roles:
+            self.llm_roles = _build_llm_roles(self.llm)
+        return self
 
     @classmethod
     def from_yaml(cls, path: Path = DEFAULT_CONFIG_PATH) -> "Settings":
@@ -228,6 +253,55 @@ def _override(raw: dict, section: str, field: str, env_key: str, cast=str) -> No
 
 def _bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_set(key: str) -> str | None:
+    """Env value with blank treated as unset (spec 0003, AC-9)."""
+    value = _env(key)
+    if value is None or not value.strip():
+        return None
+    return value.strip()
+
+
+def _parse_models(value: str | None) -> list[str]:
+    """Comma separated list: trim, drop blanks, drop duplicates keeping the first."""
+    models: list[str] = []
+    for item in (value or "").split(","):
+        item = item.strip()
+        if item and item not in models:
+            models.append(item)
+    return models
+
+
+def _build_llm_roles(llm: LLMConfig) -> dict[str, LLMRoleConfig]:
+    roles: dict[str, LLMRoleConfig] = {}
+    for role in LLM_ROLES:
+        prefix = f"{role.upper()}_LLM_"
+        provider = _env_set(prefix + "PROVIDER") or llm.provider
+        if role == "generation":
+            models = _parse_models(_env_set(prefix + "MODELS"))
+        else:
+            single = _env_set(prefix + "MODEL")
+            models = [single] if single else []
+        # An api_base belongs to one provider's endpoint (e.g. NVIDIA's), so a
+        # role only inherits LLM_API_BASE when it uses the same provider.
+        # Otherwise a Gemini role would be sent to the NVIDIA host.
+        same_provider = provider == llm.provider
+        fields = {
+            "provider": provider,
+            "models": models or [llm.model],
+            "api_key": _env_set(prefix + "API_KEY") or llm.api_key,
+            "api_base": _env_set(prefix + "API_BASE") or (llm.api_base if same_provider else None),
+        }
+        limits = ["MAX_CONCURRENT", "COOLDOWN_SECONDS", "MAX_WAIT_SECONDS"]
+        if role == "generation":
+            limits.append("MIN_INTERVAL_SECONDS")
+        for name in limits:
+            value = _env_set(prefix + name)
+            if value is not None:
+                fields[name.lower()] = value
+        roles[role] = LLMRoleConfig(**fields)
+    return roles
 
 
 @lru_cache

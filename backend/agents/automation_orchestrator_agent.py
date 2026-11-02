@@ -95,7 +95,7 @@ class QAAutomationOrchestratorAgent(BaseAgent):
         Args:
             llm_service: LLM service instance (injected for testing)
         """
-        self.llm_service = llm_service or LLMService()
+        self.llm_service = llm_service or LLMService(role="analysis")
 
     def run(self, state: WorkflowState) -> WorkflowState:
         """

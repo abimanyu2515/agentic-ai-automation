@@ -162,6 +162,16 @@ Key environment variables (`.env`):
 | `LLM_MODEL` | Model name | gpt-4o-mini |
 | `LLM_API_KEY` | API key | — |
 | `LLM_API_BASE` | API base URL (required for Ollama) | — |
+| `GENERATION_LLM_PROVIDER` | Provider for test data and script generation | `LLM_PROVIDER` |
+| `GENERATION_LLM_MODELS` | Comma separated models, used in turn | `LLM_MODEL` |
+| `GENERATION_LLM_API_KEY` / `GENERATION_LLM_API_BASE` | Key and base URL for generation | `LLM_API_KEY`; base only when the provider matches `LLM_PROVIDER` |
+| `GENERATION_LLM_MAX_CONCURRENT` | Generation calls in flight at once | 2 |
+| `GENERATION_LLM_MIN_INTERVAL_SECONDS` | Minimum gap between calls to one model | 0 |
+| `GENERATION_LLM_COOLDOWN_SECONDS` | Pause for a model after a 429 when the provider gives no `Retry-After` | 60 |
+| `GENERATION_LLM_MAX_WAIT_SECONDS` | Longest a call waits for a slot or model before failing | 180 |
+| `ANALYSIS_LLM_PROVIDER` / `ANALYSIS_LLM_MODEL` | Provider and model for every other agent | `LLM_PROVIDER` / `LLM_MODEL` |
+| `ANALYSIS_LLM_API_KEY` / `ANALYSIS_LLM_API_BASE` | Key and base URL for analysis | as for generation |
+| `ANALYSIS_LLM_MAX_CONCURRENT` / `_COOLDOWN_SECONDS` / `_MAX_WAIT_SECONDS` | Analysis limits | 2 / 60 / 180 |
 | `LANGSMITH_TRACING` | Enable LangSmith tracing | false |
 | `LANGSMITH_API_KEY` | LangSmith API key | — |
 | `RAG_ENABLED` | Enable RAG knowledge base | false |

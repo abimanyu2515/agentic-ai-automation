@@ -757,6 +757,26 @@ class App {
     }
   }
 
+  renderLlmRoles(roles) {
+    const container = document.getElementById('settings-llm-roles');
+    if (!container) return;
+    if (!roles) {
+      container.textContent = 'Role settings are not available.';
+      return;
+    }
+    const labels = { generation: 'Generation (test data and scripts)', analysis: 'Analysis (all other agents)' };
+    container.innerHTML = Object.entries(roles).map(([role, cfg]) => `
+      <p style="margin: 0 0 4px; font-weight: 600; font-size: 0.85rem; color: var(--text-primary);">${escapeHTML(labels[role] || role)}</p>
+      <dl style="margin: 0 0 16px; display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 0.85rem;">
+        <dt style="color: var(--text-secondary);">Provider</dt><dd style="margin: 0;">${escapeHTML(cfg.provider)}</dd>
+        <dt style="color: var(--text-secondary);">Models</dt><dd style="margin: 0;">${escapeHTML((cfg.models || []).join(', '))}</dd>
+        <dt style="color: var(--text-secondary);">Max concurrent</dt><dd style="margin: 0;">${escapeHTML(String(cfg.max_concurrent))}</dd>
+        <dt style="color: var(--text-secondary);">Min interval</dt><dd style="margin: 0;">${escapeHTML(String(cfg.min_interval_seconds))}s</dd>
+        <dt style="color: var(--text-secondary);">Cooldown after 429</dt><dd style="margin: 0;">${escapeHTML(String(cfg.cooldown_seconds))}s</dd>
+        <dt style="color: var(--text-secondary);">Max wait</dt><dd style="margin: 0;">${escapeHTML(String(cfg.max_wait_seconds))}s</dd>
+      </dl>`).join('');
+  }
+
   populateSettingsForm() {
     if (!this.settings) return;
     
@@ -771,6 +791,7 @@ class App {
     safeSetValue('settings-llm-temp', this.settings.llm.temperature || 0.2);
     safeSetValue('settings-llm-key', this.settings.llm.api_key || '');
     safeSetValue('settings-llm-base', this.settings.llm.api_base || '');
+    this.renderLlmRoles(this.settings.llm_roles);
 
     safeSetValue('settings-wf-mode', this.settings.workflow.mode || 'sequential');
     safeSetValue('settings-wf-review', String(this.settings.workflow.human_review_enabled));

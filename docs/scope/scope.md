@@ -14,6 +14,7 @@ _These recommendations keep the build orderly. You can skip any step that does n
 | 1 | Project management | Existing product | existing |
 | 2 | Requirement to execution workflow | Existing product | existing |
 | 3 | Project creation with target URL | Project setup | in-progress |
+| 4 | Role based LLM routing | LLM reliability | in-progress |
 
 ## Existing product
 
@@ -39,6 +40,22 @@ Let internal QA users provide the target application URL while creating a projec
   - [ ] Add rollback, logging, migration, and browser accessibility coverage, covering AC-8, AC-9, and AC-10
 - [ ] Verify it: `/check verify project creation with target URL`
 - [ ] Test it: `/test project creation with target URL`
+
+## LLM reliability
+
+### 4. Role based LLM routing · in-progress
+Send test data and script generation to Gemini (rotating between two models, at most two calls at a time, with a pause after rate limits) and every other agent to NVIDIA, so bursts finish instead of exhausting one provider's request limit.
+**Done when:** each caller reaches its role's provider, generation calls rotate, queue and recover from 429s without using up retries, unset role values fall back to `LLM_*`, and Master Settings shows both roles without keys.
+- [x] Design it (spec): `/architect role based LLM routing`
+- Spec: [0003](../specs/0003-role-based-llm-routing/index.md)
+- Code: `backend/services/llm.py`, `backend/config/settings.py`, `backend/agents/`, `backend/services/report_service.py`, `backend/services/execution_analyzer.py`, `backend/main.py`, `frontend/`
+- [x] Build it: `/develop role based LLM routing`
+  - [x] Role config with fallback, and TestDataAgent on Gemini end to end, covering AC-1 and AC-9
+  - [x] Every caller on its role, covering AC-1, AC-2 and AC-12
+  - [x] Shared role pool with rotation, cap, pacing, 429 failover and deadline, covering AC-3 through AC-8 and AC-13
+  - [x] Logging, LangSmith tags, settings endpoints and Master Settings display, covering AC-10 and AC-11
+- [ ] Verify it: `/check verify role based LLM routing`
+- [ ] Test it: `/test role based LLM routing`
 
 ## Legend
 

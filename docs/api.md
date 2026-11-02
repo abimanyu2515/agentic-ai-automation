@@ -638,10 +638,18 @@ Returns all configuration sections (LLM, Workflow, Browser, RAG, Generation, Eva
 ```json
 {
   "llm": { "provider": "ollama", "model": "llama3.1", ... },
+  "llm_roles": {
+    "generation": { "provider": "gemini", "models": ["model-a", "model-b"], "max_concurrent": 2,
+                    "min_interval_seconds": 4, "cooldown_seconds": 60, "max_wait_seconds": 180 },
+    "analysis": { "provider": "nvidia", "models": ["model-n"], "max_concurrent": 2,
+                  "min_interval_seconds": 0, "cooldown_seconds": 60, "max_wait_seconds": 180 }
+  },
   "workflow": { "mode": "sequential", "human_review_enabled": true, ... },
   ...
 }
 ```
+
+`llm_roles` is read only and comes from the `GENERATION_LLM_*` and `ANALYSIS_LLM_*` variables in `.env` (spec 0003). API keys and base URLs are never returned. `GET /api/v1/projects/{project_id}/traces` also returns `llm_roles` with each role's provider and models; its `model` and `provider` fields show the analysis role.
 
 ### Save Settings
 
@@ -651,7 +659,7 @@ PUT /api/v1/settings
 
 Persists overrides to `override.yaml` and clears settings cache.
 
-**Request Body**: Same shape as settings response, only sections to override.
+**Request Body**: Same shape as settings response, only sections to override. An `llm_roles` section is ignored.
 
 **Response**: `200` — `{"status": "success", "settings": {...}}`
 

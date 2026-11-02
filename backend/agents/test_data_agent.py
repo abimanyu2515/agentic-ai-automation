@@ -362,7 +362,7 @@ class TestDataAgent(BaseAgent):
     name = "TestData Agent"
 
     def __init__(self, llm_service: LLMService | None = None):
-        self.llm_service = llm_service or LLMService()
+        self.llm_service = llm_service or LLMService(role="generation")
 
     def run(self, state: WorkflowState) -> WorkflowState:
         if state.requirement is None:

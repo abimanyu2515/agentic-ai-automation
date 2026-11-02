@@ -208,6 +208,7 @@ Client receives JSON response
 - **Repository swap**: JSON → PostgreSQL migration requires no code changes beyond config
 - **Agent isolation**: Each agent can be independently scaled or replaced
 - **Multi-provider LLM**: Provider switch is a config change, no code modification needed
+- **Role based LLM routing** (spec 0003): `TestDataAgent`, `PlaywrightAgent` and the script generator use the generation role; every other agent and service uses the analysis role. Each role has an in process pool in `LLMService` that rotates models, caps concurrent calls, paces calls per model and cools a model down after a 429. Limits are per process, so several uvicorn workers multiply them
 
 ---
 

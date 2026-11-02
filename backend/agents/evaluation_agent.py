@@ -149,7 +149,7 @@ class EvaluationAgent(BaseAgent):
     name = "Evaluation Agent"
 
     def __init__(self, llm_service: LLMService | None = None):
-        self.llm_service = llm_service or LLMService()
+        self.llm_service = llm_service or LLMService(role="analysis")
         settings = get_settings()
         self.confidence_threshold = settings.workflow.evaluation_threshold
         self.duplicate_threshold = settings.evaluation.duplicate_similarity_threshold

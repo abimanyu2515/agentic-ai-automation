@@ -134,7 +134,7 @@ class TestCaseAgent(BaseAgent):
         Args:
             llm_service: LLM service instance (injected for testing)
         """
-        self.llm_service = llm_service or LLMService()
+        self.llm_service = llm_service or LLMService(role="analysis")
         if max_workers < 1:
             raise ValueError("max_workers must be at least 1")
         self.max_workers = max_workers

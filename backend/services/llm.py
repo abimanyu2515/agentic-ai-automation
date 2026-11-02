@@ -7,15 +7,25 @@ structured_generate() forwards **kwargs straight to litellm.completion(),
 which is deliberate: it means tests can pass mock_response=... through
 the real public method and exercise this exact code path, with no
 monkeypatching and no real API key. See test_scenario_agent.py.
+
+Role routing (spec 0003): LLMService() uses the "analysis" role and
+LLMService(role="generation") the "generation" role. Every role call goes
+through that role's shared _RolePool, which rotates models, caps concurrent
+calls, paces calls per model and cools a model down after a 429.
+LLMService(config=...) skips all of that.
 """
 
 import logging
-from typing import TypeVar
+import re
+import threading
+import time
+from typing import Callable, TypeVar
 
 from litellm import completion
+from litellm.exceptions import RateLimitError
 from pydantic import BaseModel
 
-from backend.config.settings import LLMConfig, get_settings
+from backend.config.settings import LLM_ROLES, LLMConfig, LLMRoleConfig, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -72,12 +82,168 @@ class LLMServiceError(Exception):
     provider SDK is underneath."""
 
 
+class LLMRateLimitTimeout(LLMServiceError):
+    """Every model of a role stayed unavailable past the role's max wait.
+    Not retried by structured_generate: the wait budget is already spent."""
+
+
+# A 429 cooldown is clamped to this range whatever the provider asks for.
+_MAX_COOLDOWN_SECONDS = 3600.0
+
+
+class _PoolWaitExceeded(Exception):
+    pass
+
+
+class _RolePool:
+    """Shared state for one role, across every LLMService instance and thread.
+
+    One threading.Condition guards everything (callers run in thread pools
+    and asyncio.to_thread, so never asyncio primitives). Limits come from
+    get_settings() on every acquire, so a settings reload changes them in
+    place while in-flight counts and cooldowns carry over.
+    """
+
+    def __init__(
+        self,
+        role: str,
+        clock: Callable[[], float] = time.monotonic,
+        wait: Callable[[threading.Condition, float], None] | None = None,
+    ):
+        self.role = role
+        self._clock = clock
+        self._wait = wait or (lambda cond, timeout: cond.wait(timeout))
+        self._cond = threading.Condition()
+        self._in_flight = 0
+        self._cursor = 0
+        self._next_allowed_at: dict[str, float] = {}
+        self._cooldown_until: dict[str, float] = {}
+
+    def config(self) -> LLMRoleConfig:
+        return get_settings().llm_roles[self.role]
+
+    def now(self) -> float:
+        return self._clock()
+
+    def _ready_at(self, model: str) -> float:
+        return max(self._next_allowed_at.get(model, 0.0), self._cooldown_until.get(model, 0.0))
+
+    def acquire(self, deadline: float) -> tuple[str, LLMRoleConfig]:
+        """Block until a slot is free and some model is ready, then take both.
+        Picks the first ready model at or after the cursor (strict list order,
+        skipping models that are cooling down or pacing)."""
+        with self._cond:
+            while True:
+                config = self.config()
+                models = config.models
+                now = self._clock()
+                wake_at = deadline
+                if self._in_flight < config.max_concurrent:
+                    start = self._cursor % len(models)
+                    for offset in range(len(models)):
+                        index = (start + offset) % len(models)
+                        model = models[index]
+                        if self._ready_at(model) <= now:
+                            self._cursor = index + 1
+                            self._in_flight += 1
+                            self._next_allowed_at[model] = now + config.min_interval_seconds
+                            return model, config
+                    wake_at = min(min(self._ready_at(m) for m in models), deadline)
+                # A full pool wakes on release(); a cooling pool wakes when the
+                # earliest model is ready. Either way, never past the deadline.
+                if now >= deadline:
+                    raise _PoolWaitExceeded()
+                self._wait(self._cond, max(wake_at - now, 0.0))
+
+    def release(self) -> None:
+        with self._cond:
+            self._in_flight = max(self._in_flight - 1, 0)
+            self._cond.notify_all()
+
+    def report_429(self, model: str, seconds: float) -> None:
+        with self._cond:
+            until = self._clock() + seconds
+            self._cooldown_until[model] = max(self._cooldown_until.get(model, 0.0), until)
+            self._cond.notify_all()
+
+
+_pools: dict[str, _RolePool] = {}
+_pools_lock = threading.Lock()
+
+
+def _get_pool(role: str) -> _RolePool:
+    with _pools_lock:
+        if role not in _pools:
+            _pools[role] = _RolePool(role)
+        return _pools[role]
+
+
+def reset_role_pools(**pool_kwargs) -> None:
+    """Drop all pool state. Tests use this, optionally passing clock= and wait=."""
+    with _pools_lock:
+        _pools.clear()
+        for role in LLM_ROLES:
+            _pools[role] = _RolePool(role, **pool_kwargs)
+
+
+def _cooldown_seconds(exc: Exception, default: float) -> float:
+    """Retry-After header (whole seconds), then Gemini's retryDelay or
+    "retry in N s" in the message, then the role default; clamped to 0..3600."""
+    seconds: float | None = None
+    response = getattr(exc, "response", None)
+    for headers in (getattr(exc, "headers", None), getattr(response, "headers", None)):
+        if not headers:
+            continue
+        for key, value in headers.items():
+            if str(key).lower() == "retry-after" and str(value).strip().isdigit():
+                seconds = float(str(value).strip())
+                break
+        if seconds is not None:
+            break
+    if seconds is None:
+        message = str(exc)
+        match = re.search(r"retryDelay\W*(\d+(?:\.\d+)?)s", message) or re.search(
+            r"retry in (\d+(?:\.\d+)?)\s*s", message, re.IGNORECASE
+        )
+        seconds = float(match.group(1)) if match else default
+    return min(max(seconds, 0.0), _MAX_COOLDOWN_SECONDS)
+
+
+class _WaitBudget:
+    """One max wait for a whole generate/structured_generate call: time spent
+    waiting in acquire counts, time spent inside completion does not."""
+
+    def __init__(self, max_wait_seconds: float):
+        self.remaining = max_wait_seconds
+        self.waited = 0.0
+
+
 class LLMService:
-    def __init__(self, config: LLMConfig | None = None):
-        self.config = config or get_settings().llm
-        
+    def __init__(self, config: LLMConfig | None = None, role: str | None = None):
+        if config is not None and role is not None:
+            raise ValueError("Pass either config or role to LLMService, not both")
+        if role is not None and role not in LLM_ROLES:
+            raise ValueError(f"Unknown LLM role {role!r}; expected one of {LLM_ROLES}")
+
+        # An explicit config skips role routing, queueing and pacing (AC-12).
+        self.role = None if config is not None else (role or "analysis")
+        if config is not None:
+            self.config = config
+        else:
+            role_config = get_settings().llm_roles[self.role]
+            self.config = self._config_for(role_config, role_config.models[0])
+
         # Enable LangSmith tracing for LiteLLM if configured
         self._init_langsmith_tracing()
+
+    @staticmethod
+    def _config_for(role_config: LLMRoleConfig, model: str) -> LLMConfig:
+        return LLMConfig(
+            provider=role_config.provider,
+            model=model,
+            api_key=role_config.api_key,
+            api_base=role_config.api_base,
+        )
     
     def _init_langsmith_tracing(self) -> None:
         """Initialize LangSmith tracing for LiteLLM if enabled.
@@ -104,60 +270,125 @@ class LLMService:
             logger.warning(f"Failed to enable LiteLLM LangSmith tracing: {e}")
 
 
-    def _model_string(self) -> str:
-        prefix = _PROVIDER_PREFIXES.get(self.config.provider, "")
-        return f"{prefix}{self.config.model}"
+    def _model_string(self, config: LLMConfig | None = None) -> str:
+        config = config or self.config
+        prefix = _PROVIDER_PREFIXES.get(config.provider, "")
+        return f"{prefix}{config.model}"
 
-    def _api_base(self) -> str | None:
-        return self.config.api_base or _DEFAULT_API_BASES.get(self.config.provider)
+    def _api_base(self, config: LLMConfig | None = None) -> str | None:
+        config = config or self.config
+        return config.api_base or _DEFAULT_API_BASES.get(config.provider)
 
-    def _json_mode_kwargs(self) -> dict:
-        return _JSON_MODE_KWARGS.get(self.config.provider, _DEFAULT_JSON_MODE_KWARGS)
-    
-    def _completion_kwargs(self) -> dict:
-        kwargs = {
-            "model": self._model_string(),
-            "temperature": self.config.temperature,
-        }
-
-        api_base = self._api_base()
-        if api_base:
-            kwargs["api_base"] = api_base
-
-        if self.config.api_key:
-            kwargs["api_key"] = self.config.api_key
-
-        return kwargs
+    def _json_mode_kwargs(self, config: LLMConfig | None = None) -> dict:
+        config = config or self.config
+        return _JSON_MODE_KWARGS.get(config.provider, _DEFAULT_JSON_MODE_KWARGS)
 
     def _require_valid_config(self) -> None:
         """Fail fast on misconfigured provider instead of hanging in litellm retries."""
-        provider = (self.config.provider or "").lower()
-        if provider in _CLOUD_PROVIDERS_REQUIRING_KEY and not self.config.api_key:
+        config = self.config
+        if self.role is not None:
+            role_config = get_settings().llm_roles[self.role]
+            config = self._config_for(role_config, role_config.models[0])
+        key_var = f"{self.role.upper()}_LLM_API_KEY or LLM_API_KEY" if self.role else "LLM_API_KEY"
+        base_var = f"{self.role.upper()}_LLM_API_BASE or LLM_API_BASE" if self.role else "LLM_API_BASE"
+        provider = (config.provider or "").lower()
+        if provider in _CLOUD_PROVIDERS_REQUIRING_KEY and not config.api_key:
             raise LLMServiceError(
-                f"LLM misconfigured ({provider}/{self.config.model}): missing API key. "
-                "Set LLM_API_KEY or configure it in Master Settings > General Settings."
+                f"LLM misconfigured ({provider}/{config.model}): missing API key. "
+                f"Set {key_var} or configure it in Master Settings > General Settings."
             )
-        if provider == "ollama" and not self.config.api_base:
+        if provider == "ollama" and not config.api_base:
             raise LLMServiceError(
                 "LLM misconfigured (ollama): missing api_base. "
-                "Set LLM_API_BASE (e.g. http://localhost:11434) or switch provider."
+                f"Set {base_var} (e.g. http://localhost:11434) or switch provider."
             )
+
+    def _complete(self, *, messages: list[dict], timeout: int, json_mode: bool, budget: _WaitBudget | None, **kwargs):
+        """One completion. A role call goes through its pool and recovers from
+        429s by cooling the model down and moving on, without using up the
+        caller's retries. Any other failure is wrapped into LLMServiceError."""
+        if self.role is None:
+            try:
+                return completion(
+                    model=self._model_string(),
+                    messages=messages,
+                    api_base=self._api_base(),
+                    api_key=self.config.api_key,
+                    timeout=timeout,
+                    **(self._json_mode_kwargs() if json_mode else {}),
+                    **kwargs,
+                )
+            except Exception as exc:
+                raise LLMServiceError(f"LLM call failed ({self.config.provider}/{self.config.model}): {exc}") from exc
+
+        pool = _get_pool(self.role)
+        caller_metadata = dict(kwargs.pop("metadata", None) or {})
+        caller_tags = list(caller_metadata.get("tags") or [])
+        kwargs.pop("num_retries", None)
+        while True:
+            start = pool.now()
+            try:
+                model, role_config = pool.acquire(start + budget.remaining)
+            except _PoolWaitExceeded:
+                budget.waited += pool.now() - start
+                models = get_settings().llm_roles[self.role].models
+                raise LLMRateLimitTimeout(
+                    f"{self.role} LLM rate limited: models {models} unavailable "
+                    f"after {budget.waited:.0f}s"
+                ) from None
+            waited = pool.now() - start
+            budget.waited += waited
+            budget.remaining = max(budget.remaining - waited, 0.0)
+
+            config = self._config_for(role_config, model)
+            logger.info(
+                "LLM call role=%s model=%s queue_wait=%.2fs", self.role, model, waited
+            )
+            metadata = {
+                **caller_metadata,
+                "llm_role": self.role,
+                "llm_model": model,
+                "tags": [*caller_tags, self.role, model],
+            }
+            try:
+                return completion(
+                    model=self._model_string(config),
+                    messages=messages,
+                    api_base=self._api_base(config),
+                    api_key=config.api_key,
+                    timeout=timeout,
+                    num_retries=0,
+                    metadata=metadata,
+                    **(self._json_mode_kwargs(config) if json_mode else {}),
+                    **kwargs,
+                )
+            except RateLimitError as exc:
+                seconds = _cooldown_seconds(exc, role_config.cooldown_seconds)
+                pool.report_429(model, seconds)
+                logger.warning(
+                    "LLM 429 role=%s model=%s cooldown=%.0fs; trying the next available model",
+                    self.role, model, seconds,
+                )
+            except Exception as exc:
+                raise LLMServiceError(f"LLM call failed ({config.provider}/{config.model}): {exc}") from exc
+            finally:
+                pool.release()
+
+    def _new_budget(self) -> _WaitBudget | None:
+        if self.role is None:
+            return None
+        return _WaitBudget(get_settings().llm_roles[self.role].max_wait_seconds)
 
     def generate(self, *, system: str, user: str, timeout: int = 30, **kwargs) -> str:
         """Plain text completion. Returns the raw response content."""
         self._require_valid_config()
-        try:
-            response = completion(
-                model=self._model_string(),
-                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-                api_base=self._api_base(),
-                api_key=self.config.api_key,
-                timeout=timeout,
-                **kwargs,
-            )
-        except Exception as exc:
-            raise LLMServiceError(f"LLM call failed ({self.config.provider}/{self.config.model}): {exc}") from exc
-
+        response = self._complete(
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            timeout=timeout,
+            json_mode=False,
+            budget=self._new_budget(),
+            **kwargs,
+        )
         return response.choices[0].message.content
 
     def structured_generate(
@@ -180,27 +411,25 @@ class LLMService:
         import time
 
         self._require_valid_config()
-        
+
         last_exception = None
         last_content = ""
-        
+        # One max wait for every attempt of this call; a 429 is handled inside
+        # _complete and never counts as one of the max_retries attempts.
+        budget = self._new_budget()
+
         for attempt in range(max_retries):
             try:
-                try:
-                    schema_json = json.dumps(response_model.model_json_schema(), indent=2)
-                    user_prompt = f"{user}\n\nYou MUST respond with a JSON object that adheres strictly to this JSON Schema:\n{schema_json}\n\nDo not include any extra keys, markdown tags, or explanations outside the JSON object."
-                    
-                    response = completion(
-                        model=self._model_string(),
-                        messages=[{"role": "system", "content": system}, {"role": "user", "content": user_prompt}],
-                        api_base=self._api_base(),
-                        api_key=self.config.api_key,
-                        timeout=timeout,
-                        **self._json_mode_kwargs(),
-                        **kwargs,
-                    )
-                except Exception as exc:
-                    raise LLMServiceError(f"LLM call failed ({self.config.provider}/{self.config.model}): {exc}") from exc
+                schema_json = json.dumps(response_model.model_json_schema(), indent=2)
+                user_prompt = f"{user}\n\nYou MUST respond with a JSON object that adheres strictly to this JSON Schema:\n{schema_json}\n\nDo not include any extra keys, markdown tags, or explanations outside the JSON object."
+
+                response = self._complete(
+                    messages=[{"role": "system", "content": system}, {"role": "user", "content": user_prompt}],
+                    timeout=timeout,
+                    json_mode=True,
+                    budget=budget,
+                    **kwargs,
+                )
 
                 choice = response.choices[0]
                 content = getattr(choice.message, "content", None)
@@ -284,6 +513,8 @@ class LLMService:
                     content = json.dumps(parsed)
 
                 return response_model.model_validate_json(content)
+            except LLMRateLimitTimeout:
+                raise
             except Exception as exc:
                 last_exception = exc
                 retry_message = (

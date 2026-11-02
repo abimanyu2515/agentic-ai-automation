@@ -109,7 +109,7 @@ class ReportAgent(BaseAgent):
                 critical_issues: list[str] = Field(description="2-3 bullet points of failures or blockers that need attention")
                 recommendations: list[str] = Field(description="1-2 actionable next steps")
             
-            llm = LLMService()
+            llm = LLMService(role="analysis")
             
             # Build context for the LLM
             requirement_context = f"Requirement: {state.requirement.title}\nDescription: {getattr(state.requirement, 'description', 'N/A')}"
