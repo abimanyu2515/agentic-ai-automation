@@ -1,0 +1,30 @@
+The selected test case checks prices, taxes, or totals. List the products a tester can choose in this application, with their unit prices, and the tax rate applied at checkout. Do not generate test datasets.
+
+Requirement:
+Title: $requirement_title
+Description: $requirement_description
+
+Configured application context:
+$application_context
+
+Explicit functional requirements, business rules, and acceptance criteria:
+$validation_rules
+
+Related scenario:
+$scenario
+
+Selected test case:
+$test_case
+
+Instructions:
+- Take products, prices, and the tax rate from the requirement and test case above when they are given. Otherwise use what you reliably know about this exact application (its name and target URL above), such as a public demo store whose catalog is fixed.
+- Use each product's exact name as shown in the application, and its unit price as a number without a currency symbol (for example 29.99).
+- Give tax_rate as a fraction (for example 0.08 for 8%). Use null when the tax rate is neither given above nor reliably known.
+- Set "source" to "requirement" when the values come from the text above, or "known application" when they come from your knowledge of the application.
+- When you do not reliably know the catalog, return an empty products list. Never invent products or prices.
+- Return only a JSON object that matches:
+{
+  "products": [{"name": "Exact product name", "price": 29.99}],
+  "tax_rate": 0.08,
+  "source": "requirement or known application"
+}

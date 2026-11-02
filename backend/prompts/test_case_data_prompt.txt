@@ -13,32 +13,47 @@ $validation_rules
 Related scenario:
 $scenario
 
-Selected test case:
+Selected test case (approved_test_data, when present, shows the fields already agreed for this case):
 $test_case
 
-Previously-used dataset fingerprints (do not reproduce any):
-$reserved_dataset_fingerprints
+Datasets already used (do not reproduce any of these exact value combinations):
+$reserved_datasets
 
 Uniqueness nonce for this generation attempt: $uniqueness_nonce
+
+Case intent:
+$case_intent
 
 Instructions:
 - All 20 datasets must exercise the behavior in this one selected test case. Do not generate data for any other test case.
 - Use the selected test case's title, preconditions, steps, and expected result to identify the exact behavior being tested.
-- For login cases, vary only the field or scenario targeted by the selected case (for example, invalid username, invalid password, empty username, empty password, or valid login). Keep the other fields appropriate to the selected case.
+- Before writing any dataset, walk through the preconditions and every step from the first to the last, and list in "required_fields" every value a tester would type, select, or upload along the way. For an end-to-end case this covers the whole process from scratch: for example the account or sign-up details, search or selection criteria, quantities and dates, customer or guest details, address, and payment details, as far as the steps reach. Include values that preconditions need to be created from scratch. Do not stop at the first form.
+- A field is needed for every choice a step makes, not only for text boxes: options to pick (for example "sort_option" for a "Sort products by name and price" step), items to add, and quantities. When a step acts on several items ("Add selected products"), put them in one field separated by "; " and vary how many items the datasets use.
+- When a later step verifies something that follows from the data (for example "Verify the cart item count"), add an expected_ count computed from the same dataset, such as "expected_cart_count" equal to the number of selected products. Do not add expected_ fields for prices, taxes, or totals: the script reads those from the page.
+- Do not add fields for login credentials (username, password) or for steps with nothing to choose (such as "Navigate to the Products Page" or "Click the Finish button"). Credentials come from the project's vault, including for a "User is logged in" precondition. Only a case that registers a new account, or whose steps type credentials to test a login failure, has credential fields.
+- Name fields in snake_case after what they hold (for example "check_in_date", "card_number"), in the order the steps use them. Include each field in approved_test_data, unless the steps never use it.
+- Every dataset must contain every field in "required_fields" with a realistic value that fits the field and the other values in the same dataset (for example a check-out date after the check-in date, and a total that matches the quantity). Leave a field empty only when the dataset deliberately tests that the field is missing.
+- For a negative or validation case, change only the field or condition the selected case targets. Keep every other field populated with valid values, so the flow reaches the step under test.
+- For login cases, vary only the field or scenario targeted by the selected case (for example invalid username, invalid password, empty username, empty password, or valid login). Keep the other fields appropriate to the selected case.
 - Never invent or include real application credentials. Use synthetic login values only; if the selected case requires valid account credentials that are not supplied in its approved test data, state that limitation in assumptions.
 - Choose fields and values from the supplied requirement and test-case information. Keep unrelated values valid when testing one invalid field.
 - For a negative password test, generate 20 different passwords that violate the exact stated rule, such as numeric-only passwords or lengths outside a documented limit. Do not use the same invalid value repeatedly.
 - For boundary tests, cover documented boundaries and nearby values; do not invent limits.
-- Make every dataset distinct from the other 19 and from every reserved fingerprint. Vary unconstrained synthetic values as needed without weakening the validation condition under test.
-- Keep the same field names in all 20 datasets. Use an empty string for a field deliberately testing a missing value.
-- Use synthetic values only. Do not include real personal information, credentials, or secrets.
+- Make every dataset distinct from the other 19 and from every dataset already used. Vary unconstrained synthetic values as needed without weakening the validation condition under test.
+- Keep the same field names in all 20 datasets.
+- Use synthetic values only. Do not include real personal information, credentials, or secrets. Card numbers must be documented test numbers such as 4111111111111111.
 - Do not invent validation rules. State unknowns in assumptions.
 - Set "expected_outcome" for every dataset: "accepted" when the application should accept the values and complete the step, or "rejected" when it should refuse them (validation error, error message, or staying on the same form). Boundary values on the allowed side of a documented limit are "accepted"; values just outside it are "rejected".
-- Return only a JSON object with a "datasets" array containing exactly 20 objects. Each object must match:
+- Return only a JSON object with a "required_fields" array and a "datasets" array containing exactly 20 objects. It must match:
 {
-  "test_data": {"field_name": "synthetic value"},
-  "targeted_validation_rule": "The exact rule exercised",
-  "test_type": "positive, invalid, boundary, missing_required, or workflow",
-  "expected_outcome": "accepted or rejected",
-  "assumptions": []
+  "required_fields": ["field_name"],
+  "datasets": [
+    {
+      "test_data": {"field_name": "synthetic value"},
+      "targeted_validation_rule": "The exact rule exercised",
+      "test_type": "positive, invalid, boundary, missing_required, or workflow",
+      "expected_outcome": "accepted or rejected",
+      "assumptions": []
+    }
+  ]
 }

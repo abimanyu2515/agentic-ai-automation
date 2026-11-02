@@ -1,0 +1,33 @@
+List every input value the selected test case needs, step by step. Do not generate any values yet.
+
+Requirement:
+Title: $requirement_title
+Description: $requirement_description
+
+Configured application context:
+$application_context
+
+Explicit functional requirements, business rules, and acceptance criteria:
+$validation_rules
+
+Related scenario:
+$scenario
+
+Selected test case (approved_test_data, when present, shows the fields already agreed for this case):
+$test_case
+
+Instructions:
+- Walk through the preconditions, then every step in order, from the first step to the last. Do not stop at the first form. An end-to-end case covers the whole process from scratch: for a complete checkout, for example, the products to add, quantities, customer details (first name, last name, postal code), shipping address, delivery option, payment details, and any coupon, as far as the steps reach.
+- Return one entry for every step, using its 1-based step_number. Give each step the fields a tester types, selects, uploads, or adds in that step. A step with nothing to enter or choose (such as "Navigate to the cart" or "Click Finish") gets an empty list.
+- A choice is a field too: an option to pick (such as "sort_option"), the items to add (one field, such as "products", holding "; " separated items), and quantities.
+- When a later step verifies something that follows from the data (such as the cart item count), add an expected_ count to that step (such as "expected_cart_count"). Do not add expected_ fields for prices, taxes, or totals: the script reads those from the page.
+- Put fields that a precondition needs to be created from scratch (such as sign-up details for a new account) in precondition_fields.
+- Do not add fields for login credentials of an existing account, including for a "User is logged in" precondition. They come from the project's vault.
+- Name fields in snake_case after what they hold (such as "postal_code", "card_number"). Reuse the field names in approved_test_data when the steps use them. Use each field name once, in the step that first needs it.
+- Return only a JSON object that matches:
+{
+  "precondition_fields": [],
+  "steps": [
+    {"step_number": 1, "fields": ["field_name"]}
+  ]
+}
