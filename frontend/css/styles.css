@@ -1595,3 +1595,340 @@ body.light-theme {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* Object Repository (spec 0004) */
+.objrepo-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  min-height: 40px;
+}
+
+.objrepo-scan {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.objrepo-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .objrepo-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.objrepo-section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.objrepo-subtitle {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.objrepo-page-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.objrepo-page-item {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.objrepo-page-button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.objrepo-page-item.selected .objrepo-page-button {
+  border-color: var(--accent-primary);
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.objrepo-page-button:focus-visible,
+.objrepo-delete-page:focus-visible,
+.objrepo-locator-buttons .btn-icon:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.objrepo-page-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.objrepo-page-pattern {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.objrepo-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.objrepo-count {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.objrepo-count-healthy { color: var(--color-success); }
+.objrepo-count-needs_review { color: var(--color-warning); }
+.objrepo-count-broken { color: var(--color-danger); }
+.objrepo-count-missing { color: var(--text-secondary); }
+
+.objrepo-delete-page {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  padding: 0 8px;
+}
+
+.objrepo-elements-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.objrepo-elements-header .objrepo-section-title {
+  margin-bottom: 0;
+}
+
+.objrepo-elements-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.objrepo-filter-label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.objrepo-filter {
+  padding: 6px 10px;
+}
+
+.objrepo-health {
+  white-space: nowrap;
+}
+
+.objrepo-health-healthy {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: var(--color-success);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.objrepo-health-needs_review {
+  background-color: rgba(245, 158, 11, 0.12);
+  color: var(--color-warning);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.objrepo-health-broken {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--color-danger);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.objrepo-health-missing {
+  background-color: rgba(148, 163, 184, 0.12);
+  color: var(--text-secondary);
+  border: 1px dashed rgba(148, 163, 184, 0.45);
+}
+
+.objrepo-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.objrepo-tag,
+.objrepo-more {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.objrepo-locator {
+  max-width: 320px;
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+
+.objrepo-row-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.objrepo-small {
+  padding: 6px 12px;
+  font-size: 0.8rem;
+}
+
+.objrepo-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.objrepo-error {
+  color: var(--color-danger);
+  font-size: 0.85rem;
+  min-height: 1em;
+  margin-bottom: 8px;
+}
+
+.objrepo-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.objrepo-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1100;
+}
+
+.objrepo-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 100vw);
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+  padding: 24px;
+  overflow-y: auto;
+  z-index: 1101;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.objrepo-drawer[hidden],
+.objrepo-drawer-backdrop[hidden] {
+  display: none;
+}
+
+.objrepo-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.objrepo-drawer-header h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.objrepo-drawer-header .modal-close {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.objrepo-locators {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.objrepo-locators legend {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  padding: 0 6px;
+}
+
+.objrepo-locator-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.objrepo-locator-row > .form-control,
+.objrepo-locator-row > .objrepo-exact,
+.objrepo-locator-row > .objrepo-locator-buttons {
+  grid-column: 2;
+}
+
+.objrepo-locator-row > select.form-control {
+  grid-row: 1;
+}
+
+.objrepo-locator-label {
+  grid-column: 1;
+  grid-row: 1;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.objrepo-exact {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.objrepo-locator-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.objrepo-locator-buttons .btn-icon:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.objrepo-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

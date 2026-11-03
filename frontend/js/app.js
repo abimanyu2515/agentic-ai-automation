@@ -1,4 +1,5 @@
-import { API } from './api.js?v=16';
+import { API } from './api.js?v=17';
+import { ObjectRepositoryView } from './object-repository.js?v=1';
 import { Components, escapeHTML } from './components.js?v=3';
 
 class App {
@@ -1227,6 +1228,10 @@ class App {
     if (viewName === 'jira-traceability') this.renderJiraTraceability();
     if (viewName === 'reports') this.renderReports();
     if (viewName === 'project') this.renderProjectPage();
+    if (viewName === 'object-repository') {
+      this.objectRepositoryView = this.objectRepositoryView || new ObjectRepositoryView();
+      this.objectRepositoryView.render(this.currentProject);
+    }
 
     const scopeBtns = ['btn-db-scope-project', 'btn-db-scope-release', 'btn-db-scope-cycle'];
     scopeBtns.forEach(id => {
@@ -3213,7 +3218,7 @@ class App {
       return;
     }
 
-    if (['dashboard', 'requirements', 'scenarios', 'testcases', 'jira-traceability', 'testdatagent', 'playwright', 'executions', 'reports', 'langsmith', 'settings', 'execution-workspace', 'project-start', 'project'].includes(view)) {
+    if (['dashboard', 'requirements', 'scenarios', 'testcases', 'jira-traceability', 'testdatagent', 'playwright', 'executions', 'reports', 'langsmith', 'settings', 'execution-workspace', 'project-start', 'project', 'object-repository'].includes(view)) {
       if (view !== 'project' && this.currentProject) {
         await this.refreshProjectData().catch(e => console.error("Router refresh error:", e));
       }
@@ -4402,6 +4407,7 @@ class App {
       if (view === 'playwright') moduleName = 'Playwright';
       if (view === 'executions') moduleName = 'Execution';
       if (view === 'jira-traceability') moduleName = 'TestCases';
+      if (view === 'object-repository') moduleName = 'ObjectRepository';
       if (view === 'reports') moduleName = 'Reports';
       if (view === 'settings') moduleName = 'Settings';
       

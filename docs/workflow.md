@@ -154,6 +154,16 @@ The backend inspects the selected project's target URL and gives bounded page ev
 
 Each generated script is compiled, checked for observed locators and an expected outcome assertion, then executed with Playwright. A failed script can receive one repair attempt using the failure and refreshed evidence. The latest validation state is stored separately from test execution status as `running`, `validated`, `failed`, or `unverified`. A script is ready only when its validation state is `validated`; failed and unverified scripts remain visible for tester review.
 
+## Object Repository in the Workflow
+
+The object repository (spec 0004, guide: [features/object-repository.md](features/object-repository.md)) touches five workflow stages:
+
+1. **Reconnaissance**: when a safe test environment is inspected (script generation, grounded validation, or Scan now), each page's buttons, links, form fields, and navigation links go to `ObjectRepositoryService.ingest_recon`. That data is removed from the evidence first, so the prompt evidence is unchanged.
+2. **Generation**: `PlaywrightAgent` lists the stored elements of every page the test case visits in an `OBJECT REPOSITORY` prompt section. The model locates them with `orx(page, '<page>.<element>')`. Unknown keys get one repair in the existing repair loops; if they remain, the validation diagnostic is `Unknown object repository keys: ...`.
+3. **Read and dispatch**: stored scripts hold keys only. The helper and the current locators are injected when a script is returned by the API, sent to the workspace, built into a `QueueItem` by `ExecutionAgent` or the batch route, or validated and run by grounded validation.
+4. **Run feedback**: `orx` logs one `[OBJREPO]` marker per lookup. Both execution paths hand the markers to `ExecutionService.apply_object_repository_markers`, which updates element health once per execution.
+5. **Harvest**: while a test runs, each distinct path the page settles on is snapshotted once with the shared extractor. The workspace engine sends the snapshots as `harvest` on its `completed` webhook; the Python runner writes them to `harvest.json`, which `run_execution_and_stream` and the batch route read per run directory after the result is saved. Both go to `ExecutionService.apply_object_repository_harvest`, which redacts and ingests with the reconnaissance rules minus marking missing. Harvesting never changes a run's result.
+
 ---
 
 ## State Machine Design

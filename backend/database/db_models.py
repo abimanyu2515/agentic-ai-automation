@@ -372,3 +372,103 @@ class AuditLogDB(Base):
     action = Column(String(50), nullable=False, index=True)
     module = Column(String(50), nullable=False, index=True)
     field_changes = Column(JSON, nullable=False, default=dict)
+
+
+class ObjectPageDB(Base):
+    __tablename__ = "object_pages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    url_pattern = Column(String(500), nullable=False)
+    last_scanned_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        Index(
+            "uq_object_pages_project_name",
+            "project_id",
+            "name",
+            unique=True,
+            postgresql_where=text("is_deleted = false"),
+            sqlite_where=text("is_deleted = 0"),
+        ),
+        Index(
+            "uq_object_pages_project_pattern",
+            "project_id",
+            "url_pattern",
+            unique=True,
+            postgresql_where=text("is_deleted = false"),
+            sqlite_where=text("is_deleted = 0"),
+        ),
+    )
+
+
+class ObjectElementDB(Base):
+    __tablename__ = "object_elements"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    page_id = Column(UUID(as_uuid=True), ForeignKey("object_pages.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    element_type = Column(String(20), nullable=False)
+    description = Column(Text, nullable=True)
+    fingerprint = Column(String(64), nullable=True)
+    health = Column(String(20), nullable=False, default="healthy", server_default=text("'healthy'"))
+    manually_edited = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    last_execution_id = Column(UUID(as_uuid=True), nullable=True)
+    last_locator_index = Column(Integer, nullable=True)
+    failure_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    consecutive_failed_runs = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    applied_execution_ids = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        Index(
+            "uq_object_elements_page_name",
+            "page_id",
+            "name",
+            unique=True,
+            postgresql_where=text("is_deleted = false"),
+            sqlite_where=text("is_deleted = 0"),
+        ),
+        # Soft deleted rows keep their fingerprint, so deleted elements block recreation.
+        Index(
+            "uq_object_elements_page_fingerprint",
+            "page_id",
+            "fingerprint",
+            unique=True,
+            postgresql_where=text("fingerprint IS NOT NULL"),
+            sqlite_where=text("fingerprint IS NOT NULL"),
+        ),
+    )
+
+
+class ObjectLocatorDB(Base):
+    __tablename__ = "object_locators"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    element_id = Column(UUID(as_uuid=True), ForeignKey("object_elements.id", ondelete="CASCADE"), nullable=False, index=True)
+    position = Column(Integer, nullable=False)
+    strategy = Column(String(20), nullable=False)
+    value = Column(Text, nullable=False)
+    options = Column(JSON, nullable=False, default=dict, server_default=text("'{}'"))
+    success_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    failure_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    last_succeeded_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("element_id", "position", name="uq_object_locators_element_position"),
+    )

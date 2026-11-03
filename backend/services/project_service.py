@@ -296,7 +296,10 @@ class ProjectService:
         if not tc:
             print(f"[DEBUG] test case not found in database: {str(test_case_id)}")
             return None
-        tc.playwright_script = script
+        # Stored scripts hold object repository keys only, never the injected
+        # block (spec 0004, AC-8). Every script save goes through here.
+        from backend.services.object_repository_script import strip_block
+        tc.playwright_script = strip_block(script)
         return self.repo.update_test_case(tc)
 
     def get_execution_result(self, project_id: UUID, execution_id: UUID) -> ExecutionResult | None:

@@ -5,7 +5,7 @@ from backend.config.settings import get_settings
 
 DEFAULT_ROLES = ["Superadmin", "Admin", "Project Manager", "Tester", "Stakeholder"]
 
-MODULES = ["Dashboard", "Requirements", "Scenarios", "TestCases", "Playwright", "Executions", "Reports", "Settings", "Users", "Roles", "Permissions", "Projects"]
+MODULES = ["Dashboard", "Requirements", "Scenarios", "TestCases", "Playwright", "Executions", "Reports", "Settings", "Users", "Roles", "Permissions", "Projects", "ObjectRepository"]
 ACTIONS = ["view", "create", "edit", "delete", "approve"]
 
 def seed_database(db: Session) -> None:
@@ -89,6 +89,8 @@ def seed_database(db: Session) -> None:
         for action in ACTIONS:
             assign_perm("Project Manager", module, action)
     assign_perm("Project Manager", "Projects", "create")
+    for action in ["view", "create", "edit", "delete"]:
+        assign_perm("Project Manager", "ObjectRepository", action)
     assign_perm("Project Manager", "Settings", "view")
 
     # Tester gets view, create, edit for scenarios, testcases, executions, playwright, and view-only for dashboard, requirements, reports
@@ -97,9 +99,11 @@ def seed_database(db: Session) -> None:
             assign_perm("Tester", module, action)
     for module in ["Dashboard", "Requirements", "Reports"]:
         assign_perm("Tester", module, "view")
+    for action in ["view", "create", "edit"]:
+        assign_perm("Tester", "ObjectRepository", action)
 
     # Stakeholder gets read-only view access to reports, executions, dashboard
-    for module in ["Dashboard", "Requirements", "Executions", "Reports"]:
+    for module in ["Dashboard", "Requirements", "Executions", "Reports", "ObjectRepository"]:
         assign_perm("Stakeholder", module, "view")
 
     db.commit()

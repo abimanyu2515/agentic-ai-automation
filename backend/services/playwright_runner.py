@@ -51,6 +51,7 @@ from typing import Callable
 from pydantic import BaseModel
 
 ARTIFACTS_ROOT = Path(__file__).parent.parent / "playwrightt" / "artifacts"
+_HARVEST_SESSION_MODULE = Path(__file__).parent.parent / "playwrightt" / "lib" / "object-harvest-session"
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 _IS_WINDOWS = platform.system() == "Windows"
@@ -166,6 +167,14 @@ class PlaywrightRunner:
         run_dir = ARTIFACTS_ROOT / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
 
+        # Last run's harvest must not be ingested again.
+        harvest_path = run_dir / "harvest.json"
+        if harvest_path.exists():
+            try:
+                harvest_path.unlink()
+            except OSError:
+                pass
+
         report_path = run_dir / "report.json"
         if report_path.exists():
             try:
@@ -220,12 +229,55 @@ const __runnerTakeStepScreenshot = async (actionName: string) => {
   }
 };
 
+// Object repository harvest (spec 0004): each distinct path the page settles
+// on is snapshotted once and appended to harvest.json for the backend.
+const __objrepoHarvestFile = __runnerPath.join(__dirname, 'harvest.json');
+const __objrepoHarvestSettings = {
+  enabled: process.env.OBJREPO_HARVEST === '1',
+  maxPages: Number(process.env.OBJREPO_HARVEST_MAX_PAGES) || 20,
+  budgetMs: Number(process.env.OBJREPO_HARVEST_BUDGET_MS) || 5000,
+};
+const __objrepoReadHarvest = (): any[] => {
+  try {
+    const list = JSON.parse(__runnerFs.readFileSync(__objrepoHarvestFile, 'utf8'));
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+};
+// Per worker; seeded from the file so a restarted worker skips taken paths.
+const __objrepoHarvested = new Set<string>(__objrepoReadHarvest().map((s) => s && s.url).filter(Boolean));
+let __objrepoHarvest: { stop(): Promise<void> } | null = null;
+
 __runnerTest.beforeEach(async ({ page }) => {
   if (!__runnerFs.existsSync(__runnerScreenshotsDir)) {
     __runnerFs.mkdirSync(__runnerScreenshotsDir, { recursive: true });
   }
 
   __runnerCurrent = { page, stepIndex: 0, lastTimelineMessage: '' };
+
+  if (__objrepoHarvestSettings.enabled) {
+    try {
+      __objrepoHarvest = __objrepoStartHarvest({
+        page,
+        source: __objrepoHarvestSource,
+        settings: __objrepoHarvestSettings,
+        harvested: __objrepoHarvested,
+        redact: [process.env.TARGET_USERNAME, process.env.TARGET_PASSWORD],
+        onSnapshot: (snapshot) => {
+          try {
+            const list = __objrepoReadHarvest();
+            list.push(snapshot);
+            __runnerFs.writeFileSync(__objrepoHarvestFile, JSON.stringify(list));
+          } catch (e) {
+            console.warn('[OBJREPO-HARVEST] Could not write harvest.json');
+          }
+        },
+      });
+    } catch (e) {
+      __objrepoHarvest = null;
+    }
+  }
 
   // Each test gets a new page, so goto is wrapped per test.
   const origGoto = page.goto.bind(page);
@@ -270,8 +322,21 @@ __runnerTest.beforeEach(async ({ page }) => {
     return res;
   };
 });
+
+__runnerTest.afterEach(async () => {
+  const harvest = __objrepoHarvest;
+  __objrepoHarvest = null;
+  if (harvest) await harvest.stop().catch(() => {});
+});
 """
-        spec_content = screenshot_wrapper + "\n" + spec_content
+        harvest_module = os.path.relpath(_HARVEST_SESSION_MODULE, run_dir).replace("\\", "/")
+        if not harvest_module.startswith("."):
+            harvest_module = "./" + harvest_module
+        harvest_header = (
+            f"import {{ startHarvest as __objrepoStartHarvest }} from {json.dumps(harvest_module)};\n"
+            f"const __objrepoHarvestSource = {self._harvest_source_literal()};\n"
+        )
+        spec_content = harvest_header + screenshot_wrapper + "\n" + spec_content
 
         if storage_state_path:
             escaped_state_path = storage_state_path.replace("\\", "/")
@@ -301,6 +366,7 @@ __runnerTest.beforeEach(async ({ page }) => {
         child_env = os.environ.copy()
         if "PLAYWRIGHT_CHROMIUM_CHANNEL" in child_env:
             del child_env["PLAYWRIGHT_CHROMIUM_CHANNEL"]
+        child_env.update(self._harvest_env())
         if project_id:
             try:
                 from backend.services.vault_service import VaultService
@@ -394,6 +460,31 @@ __runnerTest.beforeEach(async ({ page }) => {
             )
 
         return self._parse_report(report, stdout_lines)
+
+    @staticmethod
+    def _harvest_env() -> dict[str, str]:
+        """Harvest settings for the generated spec; any failure means off."""
+        try:
+            from backend.config.settings import get_settings
+
+            config = get_settings().object_repository
+            return {
+                "OBJREPO_HARVEST": "1" if config.harvest_enabled else "0",
+                "OBJREPO_HARVEST_MAX_PAGES": str(config.harvest_max_pages),
+                "OBJREPO_HARVEST_BUDGET_MS": str(config.harvest_page_budget_ms),
+            }
+        except Exception:
+            return {"OBJREPO_HARVEST": "0"}
+
+    @staticmethod
+    def _harvest_source_literal() -> str:
+        """The shared extractor as a string literal; an empty one if unreadable."""
+        try:
+            from backend.services.object_repository_harvest import extractor_source
+
+            return json.dumps(extractor_source())
+        except Exception:
+            return json.dumps("() => ({ elements: [] })")
 
     def _parse_report(self, report: dict, stdout_lines: list[str]) -> PlaywrightRunResult:
         # Data-driven scripts wrap each dataset in test.describe(row.id),

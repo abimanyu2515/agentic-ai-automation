@@ -1,14 +1,15 @@
 # Task: Implement Live-Browser Playwright Test Script Generation Agent (Python Backend -> TypeScript Test Output)
 
 ## 1. Objective
+
 Implement the **Test Script Generation Agent** in **Python** (triggered when the user provides a `target_url` and clicks **"Generate Script"** on an existing test case), which outputs a verified **TypeScript Playwright (`@playwright/test`)** `.spec.ts` test script.
 
 **STRICT SCOPE & TECH STACK:**
+
 - **Agent Implementation Language:** **Python** (using `playwright.async_api` or `playwright.sync_api` and our existing Python LLM client).
 - **Generated Output Artifact:** **TypeScript Playwright (`@playwright/test`)** `.spec.ts` code.
 - **DO NOT** create or modify any Scenario Generation or Test Case Generation agents. Those already exist in the Python project.
 - **ONLY** implement/upgrade the **Test Script Generation Agent** so that it takes the existing approved Test Case + `target_url`, opens a live headless Playwright browser in Python, executes each step on the real DOM to discover and verify accurate locators, and synthesizes a working **TypeScript** `@playwright/test` script.
-
 
 ---
 
@@ -17,7 +18,9 @@ Implement the **Test Script Generation Agent** in **Python** (triggered when the
 Replace static prompt-only script generation with a 3-part **Live Browser Execution & Synthesis Engine** in Python:
 
 ### Part 1: Live DOM Distiller (`dom_distiller.py`)
+
 Create an async helper `extract_page_state(page: Page) -> dict` that extracts only actionable DOM state from the live Playwright `page` (never send raw `await page.content()` HTML):
+
 1. **Accessibility Snapshot:** Call `await page.locator("body").aria_snapshot()` (fallback gracefully if on an older Playwright version).
 2. **Visible Interactive Elements:** Run `await page.evaluate(...)` to query visible interactive elements (`a, button, input, select, textarea, [role="button"], [role="link"], [role="checkbox"], [data-testid], [data-test], h1, h2, h3`) and compute a `recommended_selector` using strict priority:
    - `[data-testid="..."]` or `[data-test="..."]`
@@ -26,11 +29,13 @@ Create an async helper `extract_page_state(page: Page) -> dict` that extracts on
    - `button:has-text("...")` or `a:has-text("...")`
 
 ### Part 2: Live Step Execution Loop (`script_generator_agent.py`)
+
 When `generate_accurate_test_script(target_url, steps)` is called:
+
 1. **Launch Browser (Python Playwright):** Use `async with async_playwright() as p:` and launch `await p.chromium.launch(headless=True)` (allow `HEADLESS_AGENT=false` env override for debugging), then navigate to `target_url`.
 2. **Execute Steps Against Live Page:**
    Loop through each `step` in the input `test_case`:
-   - Allow up to `6` micro-actions per step (`while not step_completed and sub_attempts < 6:`), since a single step like *"Login"* or *"Enter 5-digit PIN"* requires multiple actions.
+   - Allow up to `6` micro-actions per step (`while not step_completed and sub_attempts < 6:`), since a single step like _"Login"_ or _"Enter 5-digit PIN"_ requires multiple actions.
    - **Observe:** Call `await extract_page_state(page)` to get the live DOM elements and current URL.
    - **Decide:** Send the current step + live DOM elements + `last_error` (if a previous locator failed) to the LLM using Structured JSON output (`AgentDecision` Pydantic schema):
      - `action`: `'click' | 'fill' | 'select_option' | 'press' | 'assert_visible' | 'assert_text' | 'done'`
@@ -45,7 +50,9 @@ When `generate_accurate_test_script(target_url, steps)` is called:
      - **If it raises an exception:** Catch the error, set `last_error = str(e)`, and let the loop retry so the LLM selects a working locator from the DOM.
 
 ### Part 3: Final TypeScript Script Synthesis
+
 Once all steps have been executed and verified in the Python browser:
+
 1. Ensure the browser closes cleanly in a `finally` block.
 2. Pass the `target_url`, input `steps`, and verified `recorded_history` trace to the LLM to synthesize a complete, idiomatic **TypeScript `@playwright/test` file (`.spec.ts`)** using **only** the verified selectors from `recorded_history`.
 3. Return the TypeScript code string to the caller/API response.
@@ -55,6 +62,7 @@ Once all steps have been executed and verified in the Python browser:
 ## 3. Reference Python Implementation to Integrate
 
 ### `dom_distiller.py`
+
 ```python
 from typing import Any, Dict, List
 from playwright.async_api import Page
@@ -131,7 +139,8 @@ async def extract_page_state(page: Page) -> Dict[str, Any]:
 ```
 
 ### `script_generator_agent.py`
-```python
+
+````python
 import json
 import os
 import re
@@ -269,7 +278,7 @@ Rules:
                         config=types.GenerateContentConfig(
                             response_mime_type="application/json",
                             response_schema=AgentDecision,
-                            temperature=0.1,
+                            temperature=1.0,
                         ),
                     )
 
@@ -326,7 +335,7 @@ Strict Requirements:
     final_response = client.models.generate_content(
         model="gemini-2.5-pro",
         contents=synthesis_prompt,
-        config=types.GenerateContentConfig(temperature=0.1),
+        config=types.GenerateContentConfig(temperature=1.0),
     )
 
     clean_ts_code = re.sub(
@@ -334,11 +343,12 @@ Strict Requirements:
     ).strip()
 
     return clean_ts_code
-```
+````
 
 ---
 
 ## 4. Integration & Acceptance Checklist
+
 1. **Dependencies:** Ensure `playwright` is installed in the Python environment (`pip install playwright` and `playwright install chromium`).
 2. **Wire into Existing "Generate Script" Handler:**
    - In the Python route/service that handles **"Generate Script"**, pass the `target_url` and the approved test case steps into `await generate_accurate_test_script(target_url, steps, test_title)`.

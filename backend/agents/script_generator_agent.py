@@ -197,7 +197,7 @@ Strict Requirements:
         system="You are a senior QA automation engineer who writes TypeScript @playwright/test scripts.",
         user=synthesis_prompt,
         timeout=DEFAULT_LLM_TIMEOUT,
-        temperature=0.1,
+        temperature=1.0,
     )
     clean_ts_code = _clean_ts_code(final_text)
 
@@ -300,7 +300,7 @@ Strict Requirements:
         system="You are a senior QA automation engineer who writes TypeScript @playwright/test scripts.",
         user=synthesis_prompt,
         timeout=DEFAULT_LLM_TIMEOUT,
-        temperature=0.1,
+        temperature=1.0,
     )
     clean_ts_code = _clean_ts_code(final_text)
 
@@ -398,7 +398,7 @@ Rules:
                             user=prompt,
                             response_model=AgentDecision,
                             timeout=STEP_LLM_TIMEOUT,
-                            temperature=0.1,
+                            temperature=1.0,
                         )
                     except LLMServiceError as err:
                         # One bad response should not end the whole script; try the step again.

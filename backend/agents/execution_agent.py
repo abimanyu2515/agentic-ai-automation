@@ -80,7 +80,7 @@ class ExecutionAgent(BaseAgent):
     
     name = "Execution Agent"
 
-    def __init__(self, runner: PlaywrightRunner | None = None, on_log = None, project_id = None):
+    def __init__(self, runner: PlaywrightRunner | None = None, on_log = None, project_id = None, repo = None):
         """
         Initialize execution agent with runner, logging callback, and project ID.
         
@@ -92,6 +92,7 @@ class ExecutionAgent(BaseAgent):
         self.runner = runner or PlaywrightRunner()
         self.on_log = on_log
         self.project_id = project_id
+        self.repo = repo
 
     def run(self, state: WorkflowState) -> WorkflowState:
         """
@@ -125,6 +126,11 @@ class ExecutionAgent(BaseAgent):
 
         state.add_log(f"{self.name} started")
 
+        # Stored scripts hold object repository keys only; inject the current
+        # locators so a locator fix reaches the next run without regeneration.
+        from backend.services.object_repository_service import ObjectRepositoryService
+        renderer = ObjectRepositoryService(project_repo=self.repo).renderer()
+
         # Compile queue items
         queue = []
         for i, tc in enumerate(runnable):
@@ -144,7 +150,7 @@ class ExecutionAgent(BaseAgent):
                 requirement_id=state.requirement.id,
                 testcase_id=tc.id,
                 required_state=required_state,
-                playwright_script=tc.playwright_script,
+                playwright_script=renderer.render(tc),
                 dataset_row=i,
                 priority=1,
                 estimated_duration=30.0,

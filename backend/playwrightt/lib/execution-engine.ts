@@ -4,6 +4,7 @@ import { wsManager } from './websocket-manager';
 import { ApplicationStateResolver } from './app-state-resolver';
 import { NavigationPlanner } from './navigation-planner';
 import { RecoveryManager } from './recovery-manager';
+import { startHarvest, HarvestSession, HarvestSettings } from './object-harvest-session';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -13,6 +14,39 @@ interface ExecutionRunnerOptions {
   artifactDir: string;
   recordVideo?: boolean;
   recordTrace?: boolean;
+}
+
+// Only the object repository run markers, which the backend turns into
+// element and locator health when the run completes (spec 0004).
+function objectRepositoryLogs(logs: string[] | undefined): string[] {
+  return (logs || [])
+    .filter((line) => typeof line === 'string' && line.includes('[OBJREPO]'))
+    .slice(0, 2000);
+}
+
+const HARVEST_OFF: HarvestSettings = { enabled: false, maxPages: 0, budgetMs: 0 };
+
+// Harvest settings and the shared extractor, read once per run (spec 0004).
+// Any failure means harvesting is off for that run.
+async function loadHarvest(): Promise<{ settings: HarvestSettings; source: string | null }> {
+  try {
+    const response = await fetch('http://127.0.0.1:8000/api/v1/object-repository/harvest-settings', {
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!response.ok) return { settings: HARVEST_OFF, source: null };
+    const body = await response.json();
+    const settings: HarvestSettings = {
+      enabled: body?.enabled === true,
+      maxPages: Number(body?.max_pages) || 0,
+      budgetMs: Number(body?.budget_ms) || 0,
+    };
+    if (!settings.enabled || settings.maxPages < 1 || settings.budgetMs < 1) return { settings: HARVEST_OFF, source: null };
+    const source = await fs.readFile(path.join(process.cwd(), 'lib', 'object-harvest.js'), 'utf8');
+    return { settings, source };
+  } catch (e) {
+    console.warn('[OBJREPO-HARVEST] Harvesting is off for this run:', e);
+    return { settings: HARVEST_OFF, source: null };
+  }
 }
 
 async function sendWebhook(projectId: string | undefined, payload: any) {
@@ -113,6 +147,7 @@ export class ExecutionEngine {
     const videoDir = path.join(artifactDir, 'video');
     const traceDir = path.join(artifactDir, 'trace');
     const storageStatePath = path.join(process.cwd(), 'public', 'artifacts', projectId || 'default', 'storage_state.json');
+    let harvestConfig: { settings: HarvestSettings; source: string | null } = { settings: HARVEST_OFF, source: null };
 
     try {
       executionQueue.startExecution(executionId);
@@ -140,6 +175,8 @@ export class ExecutionEngine {
       let retryCount = 0;
       let maxRetries = 2;
       let success = false;
+
+      harvestConfig = await loadHarvest();
 
       while (!success && retryCount <= maxRetries) {
         try {
@@ -760,7 +797,28 @@ export class ExecutionEngine {
           `;
           const userFunction = new Function(wrappedScript);
           const asyncFunc = userFunction();
-          
+
+          // The page is shared across executions, so the harvest listener is
+          // attached per execution and removed in the finally below.
+          let harvestSession: HarvestSession | null = null;
+          if (harvestConfig.source) {
+            try {
+              const harvest = executionQueue.harvestFor(executionId);
+              harvestSession = startHarvest({
+                page: activePage,
+                source: harvestConfig.source,
+                settings: harvestConfig.settings,
+                harvested: harvest.paths,
+                redact: [username, password],
+                onSnapshot: (snapshot) => {
+                  harvest.snapshots.push(snapshot);
+                },
+              });
+            } catch (e) {
+              harvestSession = null;
+            }
+          }
+
           try {
             await asyncFunc(executionContext);
 
@@ -822,6 +880,8 @@ export class ExecutionEngine {
               await Promise.all(screenshotPromises).catch(() => {});
             }
           } finally {
+            if (harvestSession) await harvestSession.stop().catch(() => {});
+
             // Restore original environment variables
             if (origEnvUsername === undefined) delete process.env.TARGET_USERNAME;
             else process.env.TARGET_USERNAME = origEnvUsername;
@@ -946,7 +1006,9 @@ export class ExecutionEngine {
         browser_version: finalExecution?.metadata.browserVersion || null,
         error_message: null,
         timeline: finalExecution?.timeline || [],
-        screenshots: finalExecution?.artifacts.screenshots || []
+        screenshots: finalExecution?.artifacts.screenshots || [],
+        logs: objectRepositoryLogs(finalExecution?.artifacts.logs),
+        harvest: executionQueue.takeHarvest(executionId).slice(0, harvestConfig.settings.maxPages)
       });
 
       wsManager.broadcast({
@@ -1046,7 +1108,9 @@ export class ExecutionEngine {
         browser_version: finalExecution?.metadata.browserVersion || null,
         error_message: error.message,
         timeline: finalExecution?.timeline || [],
-        screenshots: finalExecution?.artifacts.screenshots || []
+        screenshots: finalExecution?.artifacts.screenshots || [],
+        logs: objectRepositoryLogs(finalExecution?.artifacts.logs),
+        harvest: executionQueue.takeHarvest(executionId).slice(0, harvestConfig.settings.maxPages)
       });
 
       wsManager.broadcast({

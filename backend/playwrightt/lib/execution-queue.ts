@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { HarvestSnapshot } from './object-harvest-session';
 
 export type ExecutionStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'stopped';
 
@@ -51,6 +52,24 @@ class ExecutionQueueManager {
   private currentExecutionId: string | null = null;
   private maxConcurrent: number = 1;
   private pausedExecutions: Set<string> = new Set();
+  // Object repository harvest per execution (spec 0004). Kept in memory, not
+  // in metadata.json, because snapshots can be large.
+  private harvests: Map<string, { paths: Set<string>; snapshots: HarvestSnapshot[] }> = new Map();
+
+  harvestFor(executionId: string): { paths: Set<string>; snapshots: HarvestSnapshot[] } {
+    let harvest = this.harvests.get(executionId);
+    if (!harvest) {
+      harvest = { paths: new Set(), snapshots: [] };
+      this.harvests.set(executionId, harvest);
+    }
+    return harvest;
+  }
+
+  takeHarvest(executionId: string): HarvestSnapshot[] {
+    const snapshots = this.harvests.get(executionId)?.snapshots || [];
+    this.harvests.delete(executionId);
+    return snapshots;
+  }
 
   private static ACTIVE_FILE = path.join(process.cwd(), 'public', 'artifacts', 'active_executions.json');
 
