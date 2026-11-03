@@ -394,6 +394,13 @@ class WorkflowService:
                         f"PlaywrightAgent did not generate a script for '{test_case.title}'"
                     )
                 issues = self._script_issues(test_case.playwright_script, dom_context)
+                unknown_keys = self._object_repository().unknown_keys(project_id, test_case.playwright_script)
+                if unknown_keys:
+                    issues.append(
+                        "The script references object repository keys that do not exist: "
+                        + ", ".join(unknown_keys)
+                        + "; use only keys listed in the OBJECT REPOSITORY section, as plain quoted strings"
+                    )
                 if not issues or attempt == 2:
                     break
                 logger.info(
@@ -411,8 +418,41 @@ class WorkflowService:
             test_case.script_validation_attempts = 0
             test_case.script_validation_completed_at = None
             test_case.script_validation_diagnostic = None
+            self._flag_unknown_keys(project_id, test_case)
             repo.save_test_cases([test_case])
             return test_case
+
+    def _object_repository(self):
+        from backend.services.object_repository_service import ObjectRepositoryService
+
+        return ObjectRepositoryService(project_repo=self.repo)
+
+    def _flag_unknown_keys(self, project_id: UUID, test_case: TestCase) -> None:
+        """Set the validation diagnostic when the script uses keys the repository lacks (AC-7)."""
+        unknown = self._object_repository().unknown_keys(project_id, test_case.playwright_script)
+        if unknown:
+            test_case.script_validation_status = ScriptValidationStatus.UNVERIFIED
+            test_case.script_validation_diagnostic = (
+                "Unknown object repository keys: " + ", ".join(unknown)
+            )[:500]
+
+    def _ingest_object_evidence(self, project_id: UUID, evidence: dict | None) -> None:
+        """Feed reconnaissance candidates to the object repository, keeping the prompt evidence unchanged."""
+        from backend.agents.application_reconnaissance_agent import ApplicationReconnaissanceAgent
+
+        recon_pages = ApplicationReconnaissanceAgent.pop_object_evidence(evidence)
+        if not recon_pages:
+            return
+        try:
+            self._object_repository().ingest_evidence(project_id, recon_pages)
+        except SQLAlchemyError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Object repository ingest failed: project_id=%s error=%s",
+                project_id,
+                type(exc).__name__,
+            )
 
     def _live_template_recorder(self, project):
         """Records data-driven templates by running one dataset on the target app.
@@ -470,6 +510,7 @@ class WorkflowService:
                 type(exc).__name__,
             )
             return None
+        self._ingest_object_evidence(project.id, evidence)
         return evidence if evidence.get("pages") else None
 
     @staticmethod
@@ -710,6 +751,8 @@ class WorkflowService:
                 ]
             if any(not case.playwright_script for case in case_state.generated_test_cases):
                 raise ValueError("PlaywrightAgent did not generate scripts for every test-data case")
+            for case in case_state.generated_test_cases:
+                self._flag_unknown_keys(project_id, case)
             repo.save_test_cases(case_state.generated_test_cases)
 
         return test_data_state.test_data_report, case_state.generated_test_cases
@@ -755,6 +798,7 @@ class WorkflowService:
         )
         state = PlaywrightAgent(repo=self.repo).run(state)
         updated_tc = state.generated_test_cases[0]
+        self._flag_unknown_keys(project_id, updated_tc)
         self.repo.save_test_cases([updated_tc])
         return updated_tc
 
@@ -882,8 +926,11 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
         from backend.services.playwright_runner import ARTIFACTS_ROOT
         
         known_screenshots = set()
+        marker_lines: list[str] = []
 
         def on_log_callback(log_line: str):
+            if "[OBJREPO]" in log_line:
+                marker_lines.append(log_line)
             timeline_msg = None
             timeline_match = re.search(r"\[Timeline\]\s*([^:\n]+)(?::\s*(.+))?", log_line, re.IGNORECASE)
             if timeline_match:
@@ -921,7 +968,7 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
         from backend.graph.workflow import build_graph
         from backend.models.operation import WorkflowOperation
         
-        exec_agent = ExecutionAgent(on_log=on_log_callback, project_id=project_id)
+        exec_agent = ExecutionAgent(on_log=on_log_callback, project_id=project_id, repo=workflow_service.repo)
         local_graph = build_graph(
             execution_agent=exec_agent,
             execution_analysis_agent=LoggingExecutionAnalysisAgent(),
@@ -939,7 +986,17 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
         # Save updated test case status and execution result in repo
         workflow_service.repo.update_test_case(test_case)
         workflow_service.repo.save_execution_result(project_id, result)
-        
+
+        # Element and locator health from the run's [OBJREPO] markers (spec 0004, AC-10).
+        from backend.services.execution_service import ExecutionService
+        ExecutionService().apply_object_repository_markers(project_id, result.id, marker_lines)
+
+        # Pages the run visited, written by the runner to its run directory (AC-18).
+        from backend.services.object_repository_harvest import read_harvest_file
+        ExecutionService().apply_object_repository_harvest(
+            project_id, test_case_id, result.id, read_harvest_file(ARTIFACTS_ROOT / tc_id_str)
+        )
+
         # Compile reports automatically via ReportService
         from backend.services.report_service import ReportService
         report_service = ReportService(workflow_service.repo)

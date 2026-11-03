@@ -29,7 +29,7 @@ load_dotenv()
 class LLMConfig(BaseModel):
     provider: str = "openai"
     model: str = "gpt-4o-mini"
-    temperature: float = 0.2
+    temperature: float = 1.0
     api_key: str | None = None
     api_base: str | None = None  # required for ollama (e.g. http://localhost:11434); leave unset for cloud providers
 
@@ -131,6 +131,15 @@ class RepositoryConfig(BaseModel):
     pool_timeout: int = 30
 
 
+class ObjectRepositoryConfig(BaseModel):
+    max_prompt_elements: int = 150
+    locator_timeout_ms: int = 3000
+    scan_status_ttl_seconds: int = 3600
+    harvest_enabled: bool = True
+    harvest_max_pages: int = 20
+    harvest_page_budget_ms: int = 5000
+
+
 class JiraConfig(BaseModel):
     base_url: str = "https://your-domain.atlassian.net"
     email: str = ""
@@ -158,6 +167,7 @@ class Settings(BaseSettings):
     playwright: PlaywrightConfig = PlaywrightConfig()
     langsmith: LangSmithConfig = LangSmithConfig()
     jira: JiraConfig = JiraConfig()
+    object_repository: ObjectRepositoryConfig = ObjectRepositoryConfig()
     # Read only from .env (never override.yaml); filled from llm.* when unset.
     llm_roles: dict[str, LLMRoleConfig] = {}
 

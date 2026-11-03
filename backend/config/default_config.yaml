@@ -16,7 +16,7 @@ agents:
 llm:
   provider: openai          # openai | anthropic | ollama | groq
   model: gpt-4o-mini
-  temperature: 0.2
+  temperature: 1.0
 
 browser:
   type: chromium            # chromium | firefox | webkit
@@ -52,4 +52,12 @@ repository:
   database_url: postgresql+psycopg2://postgres:postgres@localhost:5432/agentic_ai
   pool_size: 10
   max_overflow: 20
-  pool_timeout: 30
+  pool_timeout: 30
+
+object_repository:
+  max_prompt_elements: 150
+  locator_timeout_ms: 3000
+  scan_status_ttl_seconds: 3600
+  harvest_enabled: true
+  harvest_max_pages: 20
+  harvest_page_budget_ms: 5000

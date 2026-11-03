@@ -93,6 +93,8 @@ class ApplicationReconnaissanceAgent(BaseAgent):
             )
         )
 
+        # Object repository candidates feed ingest_recon only, never the prompt.
+        self.pop_object_evidence(dom_context)
         pages = dom_context.get("pages", [])
         successful_pages = [page for page in pages if not page.get("error")]
         if not successful_pages:
@@ -145,6 +147,42 @@ class ApplicationReconnaissanceAgent(BaseAgent):
         )
         return evidence
 
+    def inspect_urls(self, project_id: UUID, urls: list[str]) -> dict[str, Any]:
+        """Inspect explicit same origin URLs for an object repository scan."""
+        project = self.repo.get_project(project_id) if self.repo else None
+        if not project or not project.target_url:
+            raise ApplicationInspectionError(
+                "target_unreachable",
+                f"{self.name}: selected project has no configured target URL",
+            )
+        if not project.is_safe_test_environment:
+            raise ApplicationInspectionError(
+                "unsafe_test_environment",
+                f"{self.name}: the selected project is not marked as a safe test environment",
+            )
+        origin = self._safe_origin(project.target_url)
+        same_origin = [url for url in urls if self._safe_origin(url) == origin]
+        logger.info("%s scan started: project_id=%s url_count=%s", self.name, project_id, len(same_origin))
+        return asyncio.run(
+            self._reconnoiter(
+                state=None,
+                target_url=project.target_url,
+                test_cases=[],
+                urls=same_origin or [project.target_url],
+            )
+        )
+
+    @staticmethod
+    def pop_object_evidence(evidence: dict[str, Any] | None) -> list[dict[str, Any]]:
+        """Remove and return the object repository candidates from evidence.
+
+        Each item is {"url": page URL, "elements": [...]} for ingest_recon.
+        The remaining evidence is what the prompt receives, unchanged.
+        """
+        if not evidence:
+            return []
+        return evidence.pop("_object_repository", None) or []
+
     def _resolve_project_config(self, state: WorkflowState) -> tuple[str | None, str]:
         """Resolve only the explicitly selected project configuration."""
         if not self.repo or not state.requirement:
@@ -180,12 +218,15 @@ class ApplicationReconnaissanceAgent(BaseAgent):
         target_url: str,
         test_cases: list[TestCase],
         allow_invalid_login_probe: bool = False,
+        urls: list[str] | None = None,
     ) -> dict[str, Any]:
         """Main reconnaissance logic using Playwright."""
         from playwright.async_api import async_playwright
 
-        # Determine which pages to inspect based on test case steps
-        urls_to_visit = self._derive_urls_from_test_cases(target_url, test_cases)
+        # Determine which pages to inspect based on test case steps, or the
+        # explicit list a scan passes.
+        urls_to_visit = list(dict.fromkeys(urls)) if urls else self._derive_urls_from_test_cases(target_url, test_cases)
+        visit_limit = 20 if urls else 5
         target_origin = self._safe_origin(target_url)
         if any(self._safe_origin(url) != target_origin for url in urls_to_visit):
             raise ApplicationInspectionError(
@@ -212,7 +253,7 @@ class ApplicationReconnaissanceAgent(BaseAgent):
 
                 await context.route("**/*", restrict_requests)
                 page = await context.new_page()
-                for url in urls_to_visit[:5]:
+                for url in urls_to_visit[:visit_limit]:
                     if state:
                         state.add_log(f"[{self.name}] Inspecting origin: {self._safe_origin(url)}")
                     page_info = await self._inspect_page(
@@ -224,6 +265,11 @@ class ApplicationReconnaissanceAgent(BaseAgent):
                     if page_info:
                         dom_context["pages"].append(page_info)
 
+                dom_context["_object_repository"] = [
+                    {"url": page_info["url"], "elements": page_info.pop("_objects", [])}
+                    for page_info in dom_context["pages"]
+                    if not page_info.get("error")
+                ]
                 if dom_context["pages"]:
                     first_page = dom_context["pages"][0]
                     dom_context["global"]["navigation"] = first_page.get("navigation", [])
@@ -325,35 +371,66 @@ class ApplicationReconnaissanceAgent(BaseAgent):
             await page.goto(url, wait_until="domcontentloaded", timeout=20000)
             await page.locator("body").wait_for(state="visible", timeout=5000)
         except Exception:
-            return {
-                "url": self._safe_page_url(url),
-                "error": "Navigation failed",
-                "forms": [],
-                "elements": [],
-                "navigation": [],
-                "common_elements": [],
-                "visible_text": [],
+            return self._error_page(url, "Navigation failed")
+
+        # One page that can't be read must not fail the whole inspection or
+        # scan; it is reported as an error page, which callers already skip.
+        try:
+            forms = await self._extract_forms(page)
+            if allow_invalid_login_probe:
+                for test_case in test_cases:
+                    credentials = self._explicit_invalid_login_data(test_case)
+                    if credentials and await self._looks_like_login_page(forms):
+                        await self._submit_invalid_login(page, forms, credentials)
+                        break
+
+            page_info = {
+                "url": self._safe_page_url(page.url),
+                "title": self._sanitize_text((await page.title())[:200], test_cases),
+                "forms": forms,
+                "elements": await self._extract_interactive_elements(page),
+                "navigation": await self._extract_navigation(page),
+                "common_elements": await self._extract_common_elements(page),
+                "visible_text": await self._extract_visible_text(page, test_cases),
             }
-
-        forms = await self._extract_forms(page)
-        if allow_invalid_login_probe:
-            for test_case in test_cases:
-                credentials = self._explicit_invalid_login_data(test_case)
-                if credentials and await self._looks_like_login_page(forms):
-                    await self._submit_invalid_login(page, forms, credentials)
-                    break
-
-        page_info = {
-            "url": self._safe_page_url(page.url),
-            "title": self._sanitize_text((await page.title())[:200], test_cases),
-            "forms": forms,
-            "elements": await self._extract_interactive_elements(page),
-            "navigation": await self._extract_navigation(page),
-            "common_elements": await self._extract_common_elements(page),
-            "visible_text": await self._extract_visible_text(page, test_cases),
-        }
+        except Exception as exc:
+            logger.warning("Page inspection failed: url=%s error=%s", self._safe_page_url(url), type(exc).__name__)
+            return self._error_page(url, "Inspection failed")
+        try:
+            page_info["_objects"] = await self._extract_object_elements(page, test_cases)
+        except Exception as exc:
+            logger.warning("Object repository extraction failed: error=%s", type(exc).__name__)
+            page_info["_objects"] = []
 
         return page_info
+
+    @classmethod
+    def _error_page(cls, url: str, error: str) -> dict[str, Any]:
+        return {
+            "url": cls._safe_page_url(url),
+            "error": error,
+            "forms": [],
+            "elements": [],
+            "navigation": [],
+            "common_elements": [],
+            "visible_text": [],
+        }
+
+    @staticmethod
+    async def _html_text(locator) -> str:
+        """The element's innerText, or "" for non HTML nodes such as SVG icons.
+
+        Text selectors like [class*='error'] and a[href] also match SVG
+        elements, and Playwright's inner_text() raises on those.
+        """
+        from playwright.async_api import Error as PlaywrightError
+
+        try:
+            return await locator.inner_text()
+        except PlaywrightError as exc:
+            if "not an HTMLElement" not in str(exc):
+                raise
+            return ""
 
     @staticmethod
     def _explicit_invalid_login_data(test_case: TestCase) -> tuple[str, str] | None:
@@ -447,7 +524,7 @@ class ApplicationReconnaissanceAgent(BaseAgent):
         ).all():
             if not await locator.is_visible():
                 continue
-            text = (await locator.inner_text()).strip()
+            text = (await self._html_text(locator)).strip()
             if text:
                 texts.append(self._sanitize_text(text, test_cases))
             if len(texts) == 12:
@@ -498,7 +575,7 @@ class ApplicationReconnaissanceAgent(BaseAgent):
                 submit_selector = await self._get_best_selector(submit_btn)
                 submit_text = (
                     await submit_btn.get_attribute("aria-label")
-                    or await submit_btn.inner_text()
+                    or await self._html_text(submit_btn)
                     or await submit_btn.get_attribute("value")
                     or ""
                 )
@@ -559,7 +636,7 @@ class ApplicationReconnaissanceAgent(BaseAgent):
                 continue
             text = (
                 await btn.get_attribute("aria-label")
-                or await btn.inner_text()
+                or await self._html_text(btn)
                 or await btn.get_attribute("value")
                 or ""
             )
@@ -578,7 +655,7 @@ class ApplicationReconnaissanceAgent(BaseAgent):
         for link in links:
             if not await link.is_visible():
                 continue
-            text = (await link.inner_text()).strip()
+            text = (await self._html_text(link)).strip()
             href = await link.get_attribute("href") or ""
             selector = await self._get_best_selector(link)
             if selector and text:
@@ -611,7 +688,7 @@ class ApplicationReconnaissanceAgent(BaseAgent):
             for link in links[:50]:
                 if not await link.is_visible():
                     continue
-                text = (await link.inner_text()).strip()
+                text = (await self._html_text(link)).strip()
                 href = await link.get_attribute("href") or ""
                 if text and href:
                     link_selector = await self._get_best_selector(link)
@@ -667,6 +744,24 @@ class ApplicationReconnaissanceAgent(BaseAgent):
                 continue
 
         return common
+
+    # ------------------------------------------------ object repository
+
+    async def _extract_object_elements(self, page, test_cases: list[TestCase]) -> list[dict]:
+        """Buttons, links, form fields, and navigation links for the object repository.
+
+        Runs the extractor test runs share (spec 0004, AC-21) in one page call,
+        then applies the same redaction and token rules a harvest does.
+        """
+        from backend.services.object_repository_harvest import (
+            clean_elements,
+            extractor_source,
+            values_from_test_data,
+        )
+
+        result = await page.evaluate(extractor_source(), {})
+        secrets = [value for test_case in test_cases for value in values_from_test_data(test_case)]
+        return clean_elements(result.get("elements") or [], secrets)
 
     async def _get_best_selector(self, locator) -> str:
         """Return a stable selector observed on the current page."""

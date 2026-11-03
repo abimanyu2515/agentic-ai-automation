@@ -87,6 +87,13 @@
         Test Cases
       </div>
 
+      <div class="nav-item nav-item-indented" data-view="object-repository" data-level="1" style="display: none;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2 3.6 3 8 3s8-1 8-3V7M4 7c0 2 3.6 3 8 3s8-1 8-3M4 7c0-2 3.6-3 8-3s8 1 8 3m-16 5c0 2 3.6 3 8 3s8-1 8-3" />
+        </svg>
+        Object Repository
+      </div>
+
       <div class="nav-item nav-item-indented" data-view="jira-traceability" data-level="1" style="display: none;">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
@@ -590,6 +597,15 @@
         <div id="executions-list-container">
           <!-- Table loaded dynamically -->
         </div>
+      </div>
+
+      <!-- VIEW: Object Repository -->
+      <div class="view-panel" id="object-repository-view">
+        <div class="page-header">
+          <h1>Object Repository</h1>
+        </div>
+        <p class="page-description">Pages and UI elements that generated scripts reference by name. Fix a locator once and every script that uses it picks up the fix on its next run.</p>
+        <div id="object-repository-content"></div>
       </div>
 
       <!-- VIEW: Reports -->
@@ -1344,7 +1360,7 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=20"></script>
+  <script type="module" src="/js/app.js?v=21"></script>
   <script>
     document.getElementById('login-form').addEventListener('submit', async function(e) {
       e.preventDefault();

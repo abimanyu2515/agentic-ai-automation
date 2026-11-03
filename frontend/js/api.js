@@ -570,6 +570,64 @@ export const API = {
 
   async getAuditLogs() {
     return request('/admin/audit-logs');
+  },
+
+  // Object repository (spec 0004)
+  async getObjectRepositoryPermissions(projectId) {
+    return request(`/projects/${projectId}/object-repository/permissions`);
+  },
+
+  async getObjectPages(projectId, limit = 200, offset = 0) {
+    return request(`/projects/${projectId}/object-repository/pages?limit=${limit}&offset=${offset}`);
+  },
+
+  async createObjectPage(projectId, payload) {
+    return request(`/projects/${projectId}/object-repository/pages`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  },
+
+  async updateObjectPage(projectId, pageId, payload) {
+    return request(`/projects/${projectId}/object-repository/pages/${pageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    });
+  },
+
+  async deleteObjectPage(projectId, pageId) {
+    return request(`/projects/${projectId}/object-repository/pages/${pageId}`, { method: 'DELETE' });
+  },
+
+  async getObjectElements(projectId, pageId, health = '', limit = 500, offset = 0) {
+    const filter = health ? `&health=${encodeURIComponent(health)}` : '';
+    return request(`/projects/${projectId}/object-repository/pages/${pageId}/elements?limit=${limit}&offset=${offset}${filter}`);
+  },
+
+  async createObjectElement(projectId, pageId, payload) {
+    return request(`/projects/${projectId}/object-repository/pages/${pageId}/elements`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  },
+
+  async updateObjectElement(projectId, elementId, payload) {
+    return request(`/projects/${projectId}/object-repository/elements/${elementId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    });
+  },
+
+  async deleteObjectElement(projectId, elementId) {
+    return request(`/projects/${projectId}/object-repository/elements/${elementId}`, { method: 'DELETE' });
+  },
+
+  async startObjectScan(projectId) {
+    return request(`/projects/${projectId}/object-repository/scan`, { method: 'POST' });
+  },
+
+  async getObjectScan(projectId, scanId) {
+    return request(`/projects/${projectId}/object-repository/scan/${scanId}`);
   }
 };
 export { API_BASE };

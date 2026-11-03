@@ -29,6 +29,13 @@ On pages not listed in the evidence, or when no evidence is supplied:
 2. Never write a test that fails on purpose because a locator was not observed. Every step must become a real action so the run shows whether the application behaves as expected.
 3. Never pass a Playwright method name, a description, a comment, or a TODO as a selector string, for example `page.locator('getByLabel(...)')`.
 
+## Object repository
+When an `OBJECT REPOSITORY` section is supplied, it lists stored elements by key (`<page>.<element>`):
+1. Locate every listed element only through `await orx(page, '<page>.<element>')`, which returns a Locator, for example `const btn = await orx(page, 'login_page.login_button'); await btn.click();`.
+2. Pass the key as a plain quoted string exactly as listed. Never build a key at run time with a template string or a variable.
+3. Do not define, import, or replace `orx`, and do not repeat a listed element's locator yourself. The platform injects `orx` and the current locators before the script runs.
+4. Use the live page evidence and the locator rules above only for controls the repository does not list.
+
 ## Action and assertion rules
 - Use the correct Playwright operation for the observed control: `fill` for text inputs, `selectOption` for a select control, `check` for a checkbox or radio control, and `click` for a button or link.
 - For select controls, select by observed label when available, for example `selectOption({ label: 'Option name' })`. Do not call `selectOption` on a text input.

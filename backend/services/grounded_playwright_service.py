@@ -16,6 +16,7 @@ from backend.agents.playwright_agent import PlaywrightAgent
 from backend.models.state import WorkflowState
 from backend.models.test_case import EvaluationStatus, ScriptValidationStatus, TestCase
 from backend.repository.project_repository import get_project_repository
+from backend.services.object_repository_service import ObjectRepositoryService
 from backend.services.playwright_runner import PlaywrightRunner
 from backend.services.playwright_script_validation import validate_playwright_script
 
@@ -41,6 +42,10 @@ class GroundedPlaywrightScriptService:
     @property
     def repo(self):
         return self._repo or get_project_repository()
+
+    @property
+    def object_repository(self) -> ObjectRepositoryService:
+        return ObjectRepositoryService(project_repo=self.repo)
 
     def reserve_batch(self, project_id: UUID, test_case_ids: list[UUID]) -> list[TestCase]:
         cases = self._load_approved_cases(project_id, test_case_ids)
@@ -128,6 +133,7 @@ class GroundedPlaywrightScriptService:
                 cases,
                 allow_invalid_login_probe=True,
             )
+            self._ingest_object_evidence(project_id, evidence)
             if not evidence.get("pages"):
                 raise ApplicationInspectionError(
                     "insufficient_evidence",
@@ -175,13 +181,18 @@ class GroundedPlaywrightScriptService:
             )
             generated_state = self._agent(test_case).run(state)
             test_case = generated_state.generated_test_cases[0]
+            unknown_keys: list[str] = []
             if not test_case.playwright_script:
                 latest_issues = ["No script was generated"]
             else:
                 self.repo.update_test_case(test_case)
+                unknown_keys = self.object_repository.unknown_keys(project_id, test_case.playwright_script)
+                # Validate and run what the runner really receives: the script
+                # with the current object repository locators injected.
+                rendered = self.object_repository.render_for_test_case(test_case)
                 try:
                     latest_issues = validate_playwright_script(
-                        test_case.playwright_script,
+                        rendered,
                         evidence,
                         test_case.expected_result,
                     )
@@ -194,9 +205,15 @@ class GroundedPlaywrightScriptService:
                     self.repo.update_test_case(test_case)
                     return
 
+                if unknown_keys:
+                    latest_issues = [
+                        "The script references object repository keys that do not exist: "
+                        + ", ".join(unknown_keys)
+                        + "; use only keys listed in the OBJECT REPOSITORY section, as plain quoted strings"
+                    ] + latest_issues
                 if not latest_issues:
                     result = self.runner.run(
-                        test_case.playwright_script,
+                        rendered,
                         str(uuid4()),
                         project_id=str(project_id),
                     )
@@ -222,17 +239,32 @@ class GroundedPlaywrightScriptService:
                         [test_case],
                         allow_invalid_login_probe=True,
                     )
+                    self._ingest_object_evidence(project_id, evidence)
                 except ApplicationInspectionError:
                     latest_issues = ["Fresh page evidence was unavailable for the repair"]
                     break
 
         test_case.script_validation_status = ScriptValidationStatus.FAILED
         test_case.script_validation_completed_at = datetime.now(timezone.utc)
+        unknown_keys = self.object_repository.unknown_keys(project_id, test_case.playwright_script)
         test_case.script_validation_diagnostic = self._safe_diagnostic(
-            "; ".join(latest_issues[:3]) or "Script validation failed.",
+            ("Unknown object repository keys: " + ", ".join(unknown_keys)) if unknown_keys
+            else "; ".join(latest_issues[:3]) or "Script validation failed.",
             test_case,
         )
         self.repo.update_test_case(test_case)
+
+    def _ingest_object_evidence(self, project_id: UUID, evidence: dict) -> None:
+        """Feed reconnaissance candidates to the object repository; the prompt evidence stays unchanged."""
+        recon_pages = ApplicationReconnaissanceAgent.pop_object_evidence(evidence)
+        if not recon_pages:
+            return
+        try:
+            self.object_repository.ingest_evidence(project_id, recon_pages)
+        except SQLAlchemyError:
+            raise
+        except Exception as exc:
+            logger.warning("Object repository ingest failed: project_id=%s error=%s", project_id, type(exc).__name__)
 
     def _requirement_for(self, test_case: TestCase):
         scenario = self.repo.get_scenario(test_case.scenario_id)

@@ -15,6 +15,7 @@ _These recommendations keep the build orderly. You can skip any step that does n
 | 2 | Requirement to execution workflow | Existing product | existing |
 | 3 | Project creation with target URL | Project setup | in-progress |
 | 4 | Role based LLM routing | LLM reliability | in-progress |
+| 5 | Object repository | Locator reliability | in-progress |
 
 ## Existing product
 
@@ -56,6 +57,23 @@ Send test data and script generation to Gemini (rotating between two models, at 
   - [x] Logging, LangSmith tags, settings endpoints and Master Settings display, covering AC-10 and AC-11
 - [ ] Verify it: `/check verify role based LLM routing`
 - [ ] Test it: `/test role based LLM routing`
+
+## Locator reliability
+
+### 5. Object repository · in-progress
+Store each project's pages, UI elements, and ordered locators so generated scripts reference elements by name, one locator fix reaches every script, and run feedback shows which locators are going stale.
+**Done when:** recon and testers fill the repository, generated scripts use `orx` keys with locators injected at read and run time, runs update element health on both execution paths, the Object Repository view lets permitted users browse, edit, and scan, on both the JSON store and PostgreSQL, and test runs on both runners harvest the pages they visit (add and update only, redacted).
+- [x] Design it (spec): `/architect object repository`
+- Spec: [0004](../specs/0004-object-repository/index.md)
+- Code: `backend/services/`, `backend/repository/`, `backend/database/`, `backend/agents/application_reconnaissance_agent.py`, `backend/agents/playwright_agent.py`, `backend/agents/execution_agent.py`, `backend/services/execution_service.py`, `backend/playwrightt/lib/execution-engine.ts`, `backend/playwrightt/lib/object-harvest.js`, `backend/playwrightt/lib/object-harvest-session.ts`, `backend/main.py`, `frontend/`
+- [x] Build it: `/develop object repository`
+  - [x] One manual element end to end: tables, both stores, service and create/read API, permissions, render and strip, prompt and key validation, minimal view, covering AC-4, AC-6, AC-7, AC-8, AC-9, AC-11, AC-12, and AC-14
+  - [x] Run feedback from both execution paths into element and locator health, covering AC-10
+  - [x] Recon ingest with merge rules and locking, plus the Scan now job, covering AC-1, AC-2, AC-3, and AC-15
+  - [x] Edit, rename rewrite, delete, the full view, docs, and test coverage, covering AC-4, AC-5, AC-12, and AC-13
+  - [x] Harvest during execution: shared extractor, harvest ingest with redaction, Python runner file transport, workspace engine payload, covering AC-16, AC-17, AC-18, AC-19, AC-20, and AC-21
+- [ ] Verify it: `/check verify object repository`
+- [ ] Test it: `/test object repository`
 
 ## Legend
 

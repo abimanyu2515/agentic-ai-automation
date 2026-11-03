@@ -195,3 +195,65 @@ def test_visible_text_sanitization_redacts_supplied_test_data():
 
     assert "private-user" not in result
     assert "private-password" not in result
+
+
+# Regression: visible SVG icons matched by text selectors (spec 0004 scan crash).
+# saucedemo shows <svg class="error_icon"> on its login form when a logged out
+# user opens /inventory.html; inner_text() raised "Node is not an HTMLElement".
+_SVG_PAGE = """
+<h1>Swag Labs</h1>
+<svg class="svg-inline--fa error_icon" width="12" height="12"><circle cx="6" cy="6" r="5"/></svg>
+<div class="error-message-container">Epic sadface: log in first</div>
+<svg role="button" width="12" height="12"><circle cx="6" cy="6" r="5"/></svg>
+<button>Login</button>
+<nav><a href="/home">Home</a><svg width="12" height="12"><a href="/icon"><circle cx="6" cy="6" r="5"/></a></svg></nav>
+<svg width="12" height="12"><a href="/plain-icon"><circle cx="6" cy="6" r="5"/></a></svg>
+"""
+
+
+def _with_page(html, action):
+    from playwright.async_api import async_playwright
+
+    async def run():
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            try:
+                page = await browser.new_page()
+                await page.set_content(html)
+                return await action(page)
+            finally:
+                await browser.close()
+
+    return asyncio.run(run())
+
+
+def test_visible_text_skips_svg_icons_instead_of_failing():
+    agent = ApplicationReconnaissanceAgent()
+    texts = _with_page(_SVG_PAGE, lambda page: agent._extract_visible_text(page, []))
+    assert texts == ["Swag Labs", "Epic sadface: log in first"]
+
+
+def test_interactive_elements_and_navigation_skip_svg_nodes():
+    agent = ApplicationReconnaissanceAgent()
+
+    async def extract(page):
+        return await agent._extract_interactive_elements(page), await agent._extract_navigation(page)
+
+    elements, navigation = _with_page(_SVG_PAGE, extract)
+    assert [e["name"] for e in elements if e["role"] == "button"] == ["Login"]
+    assert [item["name"] for item in navigation] == ["Home"]
+
+
+def test_one_failing_page_returns_an_error_page_instead_of_raising(monkeypatch):
+    agent = ApplicationReconnaissanceAgent()
+
+    async def broken(page):
+        raise RuntimeError("extraction broke")
+
+    monkeypatch.setattr(agent, "_extract_forms", broken)
+    result = _with_page(
+        "<h1>x</h1>",
+        lambda page: agent._inspect_page(page=page, url="about:blank", test_cases=[], allow_invalid_login_probe=False),
+    )
+    assert result["error"] == "Inspection failed"
+    assert result["elements"] == [] and "_objects" not in result

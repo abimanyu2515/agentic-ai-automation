@@ -455,6 +455,77 @@ PUT /api/v1/projects/{project_id}/testcases/{test_case_id}/script
 
 **Response**: `200` — `TestCaseResponse`, `404` if not found.
 
+Any injected object repository block in the submitted script is removed before saving, so stored scripts hold element keys only. Every `TestCaseResponse` (and the `/api/v1/playwright/workspace` responses) returns the script rendered with the current object repository locators. See [Object Repository](#object-repository).
+
+---
+
+## Object Repository
+
+All routes sit under `/api/v1/projects/{project_id}/object-repository`, need a bearer token, and check the `ObjectRepository` permission module (`403` without it). Page and element IDs from another project return `404`. Feature guide: [features/object-repository.md](features/object-repository.md).
+
+| Endpoint | Method | Permission | Body / query | Response | Errors |
+|---|---|---|---|---|---|
+| `/permissions` | GET | view | none | `{"actions": ["view", "create", ...]}` for the caller on this project | 403 |
+| `/pages` | GET | view | `limit` (50, max 200), `offset` | `{"pages": [page + counts], "total"}` | 404 project |
+| `/pages` | POST | create | `name`, `url_pattern` | `201` page | 409 duplicate, 422 invalid |
+| `/pages/{page_id}` | PATCH | edit | `name`, `url_pattern` (optional) | `{"page", "scripts_rewritten"}` | 404, 409, 422 |
+| `/pages/{page_id}` | DELETE | delete | none | `{"elements_deleted", "referencing_test_cases"}` | 404 |
+| `/pages/{page_id}/elements` | GET | view | `health`, `limit` (100, max 500), `offset` | `{"elements", "total"}` | 404, 422 bad health |
+| `/pages/{page_id}/elements` | POST | create | `name`, `element_type`, `locators` (1 to 5), `description` | `201` element | 409 duplicate, 422 invalid |
+| `/elements/{element_id}` | PATCH | edit | `name`, `element_type`, `description`, `locators` (full ordered list) | `{"element", "scripts_rewritten"}` | 404, 409, 422 |
+| `/elements/{element_id}` | DELETE | delete | none | `{"referencing_test_cases"}` | 404 |
+| `/scan` | POST | create | none | `202` `{"scan_id"}` | 409 not a safe test environment, no target URL, or a scan already running |
+| `/scan/{scan_id}` | GET | view | none | `{"scan_id", "status", "pages_scanned", "added", "updated", "marked_missing", "error"}` | 404 unknown, expired, or other project |
+
+**Rules**: names are snake_case (`^[a-z][a-z0-9_]*$`); `url_pattern` is a path glob that starts with `/` and has no `***` or `?` (`*` is one segment, `**` any number); `strategy` is one of `role`, `label`, `placeholder`, `text`, `test_id`, `css`, `xpath`; `element_type` is one of `button`, `link`, `input`, `select`, `checkbox`, `radio`, `textarea`, `nav`. Options: `role` allows `name` and `exact`, `label` and `text` allow `exact`, others `{}`.
+
+Any create or update sets `manually_edited = true`, `health = healthy`, and resets the failure counters. Locators whose `(strategy, value, options)` did not change keep their success and failure counts. A rename rewrites every quoted reference to the old key in the project's stored scripts in the same transaction. Every write records one audit entry (module `OBJECT_REPOSITORY`).
+
+**Element** example:
+
+```json
+{
+  "id": "uuid",
+  "page_id": "uuid",
+  "key": "login_page.login_button",
+  "name": "login_button",
+  "element_type": "button",
+  "health": "healthy",
+  "manually_edited": true,
+  "last_used_at": null,
+  "last_locator_index": null,
+  "failure_count": 0,
+  "consecutive_failed_runs": 0,
+  "locators": [
+    {"id": "uuid", "position": 0, "strategy": "role", "value": "button", "options": {"name": "Log in"}, "success_count": 0, "failure_count": 0, "last_succeeded_at": null}
+  ]
+}
+```
+
+### Execution webhook `logs`
+
+`POST /api/v1/projects/{project_id}/executions/webhook` `completed` payloads carry an optional `logs` list holding only `[OBJREPO]` marker lines (at most 2000). `ExecutionService` turns them into element and locator health once per execution.
+
+### Execution webhook `harvest`
+
+Both `completed` payloads (passed and failed) carry an optional `harvest` list, at most `harvest_max_pages` items:
+
+```json
+"harvest": [
+  {"url": "/inventory.html", "elements": [{"element_type": "button", "role": "button", "label": "Add backpack", "placeholder": "", "attributes": {"data-testid": "add-backpack", "id": "", "name": "", "tag": "button", "type": ""}, "locators": [{"strategy": "test_id", "value": "add-backpack", "options": {}, "match_count": 1}]}]}
+]
+```
+
+`ExecutionService.apply_object_repository_harvest` keeps the first snapshot per path, redacts, and ingests each page without marking anything missing. A malformed snapshot is skipped with a warning and never fails the webhook. The Python runner sends the same snapshots through `harvest.json` in the run directory instead.
+
+### `GET /api/v1/object-repository/harvest-settings`
+
+No authentication (global settings, no secrets). The execution engine calls it at run start, like its credentials fetch.
+
+```json
+{"enabled": true, "max_pages": 20, "budget_ms": 5000}
+```
+
 ---
 
 ## Executions

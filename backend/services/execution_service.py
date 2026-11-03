@@ -29,6 +29,75 @@ class ExecutionService:
     def repo(self):
         return get_project_repository()
 
+    def apply_object_repository_markers(self, project_id: UUID, execution_id: UUID, lines: list[str]) -> int:
+        """The single place run markers become element and locator health (spec 0004, AC-10).
+
+        finalize_execution passes the workspace `completed` payload's logs; the
+        Python runner paths pass the lines they collected from the runner. It
+        never raises, so a bad marker can't fail a webhook or a run.
+        """
+        from backend.services.object_repository_service import ObjectRepositoryService
+
+        return ObjectRepositoryService(project_repo=self.repo).apply_run_markers(project_id, execution_id, lines)
+
+    def apply_object_repository_harvest(self, project_id: UUID, test_case_id: UUID | None, execution_id: UUID, snapshots) -> dict:
+        """The single place harvested pages are ingested (spec 0004, AC-18 to AC-20).
+
+        Keeps the first snapshot per path up to harvest_max_pages, redacts the
+        project's vault credentials and the test case's test data, then merges
+        each page with the reconnaissance rules minus marking missing. Failed
+        runs are ingested too. It never raises, so a bad snapshot can't fail a
+        webhook or a run.
+        """
+        import logging
+
+        from backend.services import object_repository_harvest as harvest
+        from backend.services.object_repository_service import ObjectRepositoryService, _settings
+
+        totals = {"pages": 0, "added": 0, "updated": 0}
+        try:
+            settings = _settings()
+            if not settings.harvest_enabled:
+                return totals
+            pages = harvest.parse_snapshots(snapshots, settings.harvest_max_pages)
+            if not pages:
+                return totals
+            secrets: list = []
+            try:
+                from backend.services.vault_service import VaultService
+
+                secrets.extend(VaultService().get_credentials(str(project_id)))
+            except Exception:
+                logging.warning("Harvest redaction could not load vault credentials: project_id=%s", project_id)
+            test_case = self.repo.get_test_case(test_case_id) if test_case_id else None
+            secrets.extend(harvest.values_from_test_data(test_case))
+
+            service = ObjectRepositoryService(project_repo=self.repo)
+            for path, elements in pages:
+                try:
+                    counts = service.ingest_recon(
+                        project_id, path, harvest.clean_elements(elements, secrets), mark_missing=False
+                    )
+                except Exception:
+                    logging.exception("Harvest ingest failed for one page: project_id=%s path=%s", project_id, path)
+                    continue
+                totals["pages"] += 1
+                totals["added"] += counts["added"]
+                totals["updated"] += counts["updated"]
+            project = self.repo.get_project(project_id)
+            logging.info(
+                "Object repository harvest: project_id=%s execution_id=%s safe_test_environment=%s pages=%s added=%s updated=%s",
+                project_id,
+                execution_id,
+                bool(project and project.is_safe_test_environment),
+                totals["pages"],
+                totals["added"],
+                totals["updated"],
+            )
+        except Exception:
+            logging.exception("Object repository harvest failed: execution_id=%s", execution_id)
+        return totals
+
     def finalize_execution(self, project_id: UUID, payload: dict) -> ExecutionResult:
         """
         Processes the completed execution result, updates at-a-glance testcase statuses,
@@ -85,6 +154,13 @@ class ExecutionService:
 
         # 1. Persist result
         self.repo.save_execution_result(project_id, result)
+
+        # 1b. Element and locator health from the run's [OBJREPO] markers.
+        self.apply_object_repository_markers(project_id, exec_id, payload.get("logs") or [])
+
+        # 1c. Pages the run visited, harvested by the workspace engine.
+        if payload.get("harvest") is not None:
+            self.apply_object_repository_harvest(project_id, result.test_case_id, exec_id, payload.get("harvest"))
 
         # 2. Update at-a-glance run outcome status on the TestCase model.
         # Human approval and evaluation metadata fields remain completely IMMUTABLE.

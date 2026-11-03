@@ -292,8 +292,11 @@ class PlaywrightAgent(BaseAgent):
         max_workers: int = 1,
         test_data_template: bool = False,
         template_recorder: Callable[..., str] | None = None,
+        object_repository=None,
     ):
-        """template_recorder, when given, records each multi-dataset template
+        """object_repository, when given, is the ObjectRepositoryService whose
+        stored elements are listed in the prompt (spec 0004); by default one is
+        built on `repo`. template_recorder, when given, records each multi-dataset template
         on the live target app (see script_generator_agent's
         generate_data_driven_template). Without it, or when recording fails,
         templates come from one LLM call grounded on state.dom_context."""
@@ -304,6 +307,21 @@ class PlaywrightAgent(BaseAgent):
         self.max_workers = max_workers
         self.test_data_template = test_data_template
         self.template_recorder = template_recorder
+        self.object_repository = object_repository
+        self._object_project = None
+
+    def _object_repository_prompt(self, test_case: TestCase, framework: str) -> str | None:
+        """The OBJECT REPOSITORY prompt section for this case, or None."""
+        if framework not in ("playwright", "selenium") or self._object_project is None:
+            return None
+        service = self.object_repository
+        if service is None:
+            if self.repo is None:
+                return None
+            from backend.services.object_repository_service import ObjectRepositoryService
+
+            service = ObjectRepositoryService(project_repo=self.repo)
+        return service.prompt_section(self._object_project, test_case, framework)
 
     def run(self, state: WorkflowState) -> WorkflowState:
         if state.requirement is None:
@@ -341,6 +359,7 @@ class PlaywrightAgent(BaseAgent):
 
             framework = target_proj.framework or "playwright"
             target_url = target_proj.target_url
+            self._object_project = target_proj
             if not target_url:
                 raise ValueError(f"{self.name}: selected project has no target URL")
 
@@ -1035,6 +1054,10 @@ class PlaywrightAgent(BaseAgent):
                 "Assert the stated expected_result with an observed visible result or an "
                 "outcome explicitly named by the test case."
             )
+        if "imported" not in framework and "existing" not in framework:
+            object_section = self._object_repository_prompt(test_case, framework)
+            if object_section:
+                prompt += object_section
         if repair_feedback:
             prompt += (
                 "\n\nREPAIR FEEDBACK:\n"

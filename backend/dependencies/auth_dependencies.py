@@ -65,6 +65,33 @@ async def get_current_user(
         )
     return user
 
+def permitted_actions(db: Session, user: UserDB, module: str, project_id: UUID | None, actions: list[str]) -> list[str]:
+    """The actions of `module` the user may perform, using the same role
+    resolution as has_permission (project role first, then global role)."""
+    if getattr(user, "role", None) == "Superadmin":
+        return list(actions)
+    role_name = None
+    if project_id:
+        mapping = db.query(ProjectUserDB).filter(
+            ProjectUserDB.project_id == project_id,
+            ProjectUserDB.user_id == user.id
+        ).first()
+        if mapping:
+            role = db.query(RoleDB).filter(RoleDB.id == mapping.role_id).first()
+            if role:
+                role_name = role.name
+    role_name = role_name or user.role
+    if not role_name:
+        return []
+    rows = db.query(PermissionDB.action).join(RolePermissionDB).join(RoleDB).filter(
+        RoleDB.name == role_name,
+        PermissionDB.module == module,
+        PermissionDB.action.in_(actions)
+    ).all()
+    allowed = {row.action for row in rows}
+    return [action for action in actions if action in allowed]
+
+
 def has_permission(module: str, action: str):
     """Enforce permissions dynamically against PostgreSQL mappings.
     Superadmins bypass checks. Checks user project-specific role first,

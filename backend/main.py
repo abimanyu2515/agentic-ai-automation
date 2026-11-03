@@ -95,7 +95,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 import fitz
-from fastapi import FastAPI, HTTPException, Body, status, BackgroundTasks, UploadFile, File, Depends, Request
+from fastapi import FastAPI, HTTPException, Body, Query, status, BackgroundTasks, UploadFile, File, Depends, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.responses import JSONResponse
@@ -119,12 +119,34 @@ from backend.services.project_configuration import (
 from backend.schemas.requirement_dto import RequirementCreate, RequirementResponse
 from backend.schemas.scenario_dto import ScenarioUpdate, ScenarioResponse
 from backend.schemas.testcase_dto import TestCaseUpdate, TestCaseResponse, ScriptUpdatePayload
+from backend.schemas.object_repository_dto import (
+    ElementCreate,
+    ElementDeleteResponse,
+    ElementListResponse,
+    ElementResponse,
+    ElementUpdate,
+    ElementUpdateResponse,
+    PageCreate,
+    PageDeleteResponse,
+    PageListResponse,
+    PageResponse,
+    PageUpdate,
+    PageUpdateResponse,
+    ScanStartResponse,
+    ScanStatusResponse,
+)
+from backend.services.object_repository_service import (
+    ObjectRepositoryError,
+    ObjectRepositoryService,
+    ScriptRenderer,
+)
+from backend.services.object_repository_scan import ObjectRepositoryScanService
 from backend.models.document import Document
 from backend.models.execution_result import ExecutionResult, ExecutionStatus
 import backend.services.report_service
 
 from sqlalchemy.orm import Session
-from backend.dependencies.auth_dependencies import get_db, get_current_user, has_permission
+from backend.dependencies.auth_dependencies import get_db, get_current_user, has_permission, permitted_actions
 from backend.services.auth_service import hash_password, verify_password, create_access_token, create_refresh_token, decode_token
 from backend.services.audit_service import log_audit
 from backend.utils.crypto import encrypt_value
@@ -228,6 +250,39 @@ def on_startup():
 project_service = ProjectService()
 workflow_service = WorkflowService()
 grounded_playwright_service = GroundedPlaywrightScriptService()
+object_repository_service = ObjectRepositoryService()
+object_repository_scan_service = ObjectRepositoryScanService(object_repository_service)
+
+
+def _test_case_response(tc, renderer: ScriptRenderer | None = None) -> TestCaseResponse:
+    """The one TestCase response mapper. Scripts are rendered with the current
+    object repository locators; the project comes from the test case itself."""
+    renderer = renderer or object_repository_service.renderer()
+    return TestCaseResponse(
+        id=tc.id,
+        scenario_id=tc.scenario_id,
+        test_case_ref_id=tc.test_case_ref_id,
+        title=tc.title,
+        preconditions=tc.preconditions,
+        steps=tc.steps,
+        expected_result=tc.expected_result,
+        priority=tc.priority,
+        status=tc.status,
+        confidence=tc.confidence,
+        evaluation_status=tc.evaluation_status,
+        evaluation_reason=tc.evaluation_reason,
+        playwright_script=renderer.render(tc),
+        script_validation_status=tc.script_validation_status,
+        script_validation_attempts=tc.script_validation_attempts,
+        script_validation_completed_at=tc.script_validation_completed_at,
+        script_validation_diagnostic=tc.script_validation_diagnostic,
+        generated_at=tc.generated_at,
+        jira_issue_key=getattr(tc, "jira_issue_key", None),
+        jira_issue_url=getattr(tc, "jira_issue_url", None),
+        jira_sync_status=getattr(tc, "jira_sync_status", None),
+        jira_last_synced_at=getattr(tc, "jira_last_synced_at", None),
+        test_data_sets=tc.test_data_sets or [],
+    )
 
 
 def resolve_scenario_response(s) -> ScenarioResponse:
@@ -1472,32 +1527,9 @@ def duplicate_scenario(project_id: UUID, scenario_id: UUID):
 def generate_test_cases(project_id: UUID, requirement_id: UUID):
     try:
         test_cases = workflow_service.generate_test_cases(project_id, requirement_id)
+        renderer = object_repository_service.renderer()
         return [
-            TestCaseResponse(
-                id=tc.id,
-                scenario_id=tc.scenario_id,
-                test_case_ref_id=tc.test_case_ref_id,
-                title=tc.title,
-                preconditions=tc.preconditions,
-                steps=tc.steps,
-                expected_result=tc.expected_result,
-                priority=tc.priority,
-                status=tc.status,
-                confidence=tc.confidence,
-                evaluation_status=tc.evaluation_status,
-                evaluation_reason=tc.evaluation_reason,
-                playwright_script=tc.playwright_script,
-                script_validation_status=tc.script_validation_status,
-                script_validation_attempts=tc.script_validation_attempts,
-                script_validation_completed_at=tc.script_validation_completed_at,
-                script_validation_diagnostic=tc.script_validation_diagnostic,
-                generated_at=tc.generated_at,
-                jira_issue_key=getattr(tc, "jira_issue_key", None),
-                jira_issue_url=getattr(tc, "jira_issue_url", None),
-                jira_sync_status=getattr(tc, "jira_sync_status", None),
-                jira_last_synced_at=getattr(tc, "jira_last_synced_at", None),
-                test_data_sets=tc.test_data_sets or [],
-            )
+            _test_case_response(tc, renderer)
             for tc in test_cases
         ]
     except ValueError as exc:
@@ -1595,32 +1627,9 @@ def generate_test_data_script_for_test_case(
 def get_test_cases(project_id: UUID):
     try:
         test_cases = project_service.get_test_cases_for_project(project_id)
+        renderer = object_repository_service.renderer()
         return [
-            TestCaseResponse(
-                id=tc.id,
-                scenario_id=tc.scenario_id,
-                test_case_ref_id=tc.test_case_ref_id,
-                title=tc.title,
-                preconditions=tc.preconditions,
-                steps=tc.steps,
-                expected_result=tc.expected_result,
-                priority=tc.priority,
-                status=tc.status,
-                confidence=tc.confidence,
-                evaluation_status=tc.evaluation_status,
-                evaluation_reason=tc.evaluation_reason,
-                playwright_script=tc.playwright_script,
-                script_validation_status=tc.script_validation_status,
-                script_validation_attempts=tc.script_validation_attempts,
-                script_validation_completed_at=tc.script_validation_completed_at,
-                script_validation_diagnostic=tc.script_validation_diagnostic,
-                generated_at=tc.generated_at,
-                jira_issue_key=getattr(tc, "jira_issue_key", None),
-                jira_issue_url=getattr(tc, "jira_issue_url", None),
-                jira_sync_status=getattr(tc, "jira_sync_status", None),
-                jira_last_synced_at=getattr(tc, "jira_last_synced_at", None),
-                test_data_sets=tc.test_data_sets,
-            )
+            _test_case_response(tc, renderer)
             for tc in test_cases
         ]
     except Exception as exc:
@@ -1643,31 +1652,7 @@ def update_test_case(project_id: UUID, test_case_id: UUID, data: TestCaseUpdate)
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Test case not found")
-    return TestCaseResponse(
-        id=updated.id,
-        scenario_id=updated.scenario_id,
-        test_case_ref_id=updated.test_case_ref_id,
-        title=updated.title,
-        preconditions=updated.preconditions,
-        steps=updated.steps,
-        expected_result=updated.expected_result,
-        priority=updated.priority,
-        status=updated.status,
-        confidence=updated.confidence,
-        evaluation_status=updated.evaluation_status,
-        evaluation_reason=updated.evaluation_reason,
-        playwright_script=updated.playwright_script,
-        script_validation_status=updated.script_validation_status,
-        script_validation_attempts=updated.script_validation_attempts,
-        script_validation_completed_at=updated.script_validation_completed_at,
-        script_validation_diagnostic=updated.script_validation_diagnostic,
-        generated_at=updated.generated_at,
-        jira_issue_key=getattr(updated, "jira_issue_key", None),
-        jira_issue_url=getattr(updated, "jira_issue_url", None),
-        jira_sync_status=getattr(updated, "jira_sync_status", None),
-        jira_last_synced_at=getattr(updated, "jira_last_synced_at", None),
-        test_data_sets=updated.test_data_sets or [],
-    )
+    return _test_case_response(updated)
 
 
 @app.delete("/api/v1/projects/{project_id}/testcases/{test_case_id}")
@@ -1697,30 +1682,7 @@ def update_test_case_script(project_id: UUID, test_case_id: UUID, payload: Scrip
     updated = project_service.update_test_case_script(test_case_id, payload.script)
     if not updated:
         raise HTTPException(status_code=404, detail="Test case not found")
-    return TestCaseResponse(
-        id=updated.id,
-        scenario_id=updated.scenario_id,
-        test_case_ref_id=updated.test_case_ref_id,
-        title=updated.title,
-        preconditions=updated.preconditions,
-        steps=updated.steps,
-        expected_result=updated.expected_result,
-        priority=updated.priority,
-        status=updated.status,
-        confidence=updated.confidence,
-        evaluation_status=updated.evaluation_status,
-        evaluation_reason=updated.evaluation_reason,
-        playwright_script=updated.playwright_script,
-        script_validation_status=updated.script_validation_status,
-        script_validation_attempts=updated.script_validation_attempts,
-        script_validation_completed_at=updated.script_validation_completed_at,
-        script_validation_diagnostic=updated.script_validation_diagnostic,
-        generated_at=updated.generated_at,
-        jira_issue_key=getattr(updated, "jira_issue_key", None),
-        jira_issue_url=getattr(updated, "jira_issue_url", None),
-        jira_sync_status=getattr(updated, "jira_sync_status", None),
-        jira_last_synced_at=getattr(updated, "jira_last_synced_at", None)
-    )
+    return _test_case_response(updated)
 
 
 @app.get("/api/v1/settings")
@@ -2009,29 +1971,7 @@ class ScriptValidationBatchRequest(BaseModel):
 def generate_playwright_script(project_id: UUID, test_case_id: UUID, payload: GenerateScriptPayload = Body(default=GenerateScriptPayload())):
     try:
         updated_tc = workflow_service.generate_playwright_script(project_id, test_case_id, automation_framework=payload.framework)
-        return TestCaseResponse(
-            id=updated_tc.id,
-            scenario_id=updated_tc.scenario_id,
-            title=updated_tc.title,
-            preconditions=updated_tc.preconditions,
-            steps=updated_tc.steps,
-            expected_result=updated_tc.expected_result,
-            priority=updated_tc.priority,
-            status=updated_tc.status,
-            confidence=updated_tc.confidence,
-            evaluation_status=updated_tc.evaluation_status,
-            evaluation_reason=updated_tc.evaluation_reason,
-            playwright_script=updated_tc.playwright_script,
-            script_validation_status=updated_tc.script_validation_status,
-            script_validation_attempts=updated_tc.script_validation_attempts,
-            script_validation_completed_at=updated_tc.script_validation_completed_at,
-            script_validation_diagnostic=updated_tc.script_validation_diagnostic,
-            generated_at=updated_tc.generated_at,
-            jira_issue_key=getattr(updated_tc, "jira_issue_key", None),
-            jira_issue_url=getattr(updated_tc, "jira_issue_url", None),
-            jira_sync_status=getattr(updated_tc, "jira_sync_status", None),
-            jira_last_synced_at=getattr(updated_tc, "jira_last_synced_at", None)
-        )
+        return _test_case_response(updated_tc)
     except ValueError as exc:
         message = str(exc)
         status_code = 404 if "not found" in message.lower() else 400
@@ -2149,6 +2089,7 @@ def execute_batch(project_id: UUID, test_case_ids: list[UUID], background_tasks:
     # Compile queue items
     queue = []
     runnable_test_cases = []
+    renderer = object_repository_service.renderer()
     for i, tc_id in enumerate(test_case_ids):
         tc = project_service.repo.get_test_case(tc_id)
         if tc and tc.playwright_script:
@@ -2169,7 +2110,7 @@ def execute_batch(project_id: UUID, test_case_ids: list[UUID], background_tasks:
                 requirement_id=None,
                 testcase_id=tc.id,
                 required_state=required_state,
-                playwright_script=tc.playwright_script,
+                playwright_script=renderer.render(tc),
                 dataset_row=i,
                 priority=1,
                 estimated_duration=30.0,
@@ -2226,9 +2167,12 @@ def execute_batch(project_id: UUID, test_case_ids: list[UUID], background_tasks:
                 pass
                 
         runner = PlaywrightRunner()
-        
+        marker_lines: dict[str, list[str]] = {}
+
         def on_runner_log(line):
             active_item = next((it for it in context.queue if it.status == "running"), None)
+            if active_item and "[OBJREPO]" in str(line):
+                marker_lines.setdefault(active_item.task_id, []).append(str(line))
             log_batch_event("Running", line, active_item)
 
         qm = BatchQueueManager(
@@ -2268,6 +2212,17 @@ def execute_batch(project_id: UUID, test_case_ids: list[UUID], background_tasks:
                         "console": context.artifacts.get(item.task_id, {}).get("console", [])
                     }
                     project_service.repo.save_execution_result(project_id, res)
+                    from backend.services.execution_service import ExecutionService
+                    ExecutionService().apply_object_repository_markers(
+                        project_id, res.id, marker_lines.get(item.task_id, [])
+                    )
+                    # Each queue item runs in its own directory, so the file
+                    # is attributed to this test case (spec 0004, AC-18).
+                    from backend.services.object_repository_harvest import read_harvest_file
+                    from backend.services.playwright_runner import ARTIFACTS_ROOT
+                    ExecutionService().apply_object_repository_harvest(
+                        project_id, tc.id, res.id, read_harvest_file(ARTIFACTS_ROOT / str(item.testcase_id))
+                    )
 
                     # Trigger report generation
                     from backend.services.report_service import ReportService
@@ -2598,30 +2553,7 @@ def get_test_case(project_id: UUID, test_case_id: UUID):
     tc = project_service.get_test_case(test_case_id)
     if not tc:
         raise HTTPException(status_code=404, detail="Test case not found")
-    return TestCaseResponse(
-        id=tc.id,
-        scenario_id=tc.scenario_id,
-        test_case_ref_id=tc.test_case_ref_id,
-        title=tc.title,
-        preconditions=tc.preconditions,
-        steps=tc.steps,
-        expected_result=tc.expected_result,
-        priority=tc.priority,
-        status=tc.status,
-        confidence=tc.confidence,
-        evaluation_status=tc.evaluation_status,
-        evaluation_reason=tc.evaluation_reason,
-        playwright_script=tc.playwright_script,
-        script_validation_status=tc.script_validation_status,
-        script_validation_attempts=tc.script_validation_attempts,
-        script_validation_completed_at=tc.script_validation_completed_at,
-        script_validation_diagnostic=tc.script_validation_diagnostic,
-        generated_at=tc.generated_at,
-        jira_issue_key=getattr(tc, "jira_issue_key", None),
-        jira_issue_url=getattr(tc, "jira_issue_url", None),
-        jira_sync_status=getattr(tc, "jira_sync_status", None),
-        jira_last_synced_at=getattr(tc, "jira_last_synced_at", None)
-    )
+    return _test_case_response(tc)
 
 
 @app.get("/api/v1/playwright/workspace")
@@ -2636,13 +2568,14 @@ def get_playwright_workspace(
     if test_case_ids:
         tc_ids = [UUID(t.strip()) for t in test_case_ids.split(",") if t.strip()]
         test_cases_data = []
+        renderer = object_repository_service.renderer()
         for tc_id in tc_ids:
             tc = project_service.get_test_case(tc_id)
             if tc:
                 test_cases_data.append({
                     "id": str(tc.id),
                     "title": tc.title,
-                    "playwright_script": tc.playwright_script,
+                    "playwright_script": renderer.render(tc),
                     "is_frozen": tc.is_frozen or tc.evaluation_status == "approved",
                 })
         return {
@@ -2673,7 +2606,7 @@ def get_playwright_workspace(
     return {
         "project_id": str(project_id),
         "test_case_id": str(test_case_id),
-        "playwright_script": tc.playwright_script,
+        "playwright_script": object_repository_service.render_for_test_case(tc),
         "base_url": settings.playwright.base_url,
         "browser": settings.playwright.browser,
         "is_frozen": tc.is_frozen or tc.evaluation_status == "approved",
@@ -2814,6 +2747,224 @@ class RolePermissionsUpdate(BaseModel):
 class ProjectUserAssign(BaseModel):
     user_id: str
     role_id: str
+
+# ==========================================================
+# Object repository (spec 0004)
+# ==========================================================
+
+_OBJREPO = "/api/v1/projects/{project_id}/object-repository"
+
+
+@app.get("/api/v1/object-repository/harvest-settings")
+def get_object_repository_harvest_settings():
+    # Global settings, no secrets: the execution engine reads them at run start.
+    config = get_settings().object_repository
+    return {
+        "enabled": config.harvest_enabled,
+        "max_pages": config.harvest_max_pages,
+        "budget_ms": config.harvest_page_budget_ms,
+    }
+
+
+def _objrepo_error(exc: ObjectRepositoryError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+
+def _objrepo_audit(db: Session, user: UserDB, project_id: UUID):
+    return lambda action, changes: log_audit(db, user.id, project_id, action, "OBJECT_REPOSITORY", changes)
+
+
+def _page_response(page, counts: dict | None = None) -> PageResponse:
+    return PageResponse(**page.model_dump(exclude={"elements"}), counts=counts)
+
+
+def _element_response(page, element) -> ElementResponse:
+    return ElementResponse(
+        **element.model_dump(exclude={"locators", "fingerprint", "applied_execution_ids", "is_deleted", "deleted_at", "deleted_by"}),
+        key=f"{page.name}.{element.name}",
+        locators=[locator.model_dump() for locator in sorted(element.locators, key=lambda loc: loc.position)],
+    )
+
+
+@app.get(f"{_OBJREPO}/permissions")
+def get_object_repository_permissions(
+    project_id: UUID,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("ObjectRepository", "view")),
+):
+    """The caller's ObjectRepository actions on this project, so the view shows only what works."""
+    return {"actions": permitted_actions(db, user, "ObjectRepository", project_id, ["view", "create", "edit", "delete"])}
+
+
+@app.get(f"{_OBJREPO}/pages", response_model=PageListResponse)
+def list_object_pages(
+    project_id: UUID,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    authorized: bool = Depends(has_permission("ObjectRepository", "view")),
+):
+    try:
+        pages, total = object_repository_service.list_pages(project_id, limit, offset)
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    return PageListResponse(pages=[_page_response(item["page"], item["counts"]) for item in pages], total=total)
+
+
+@app.post(f"{_OBJREPO}/pages", response_model=PageResponse, status_code=status.HTTP_201_CREATED)
+def create_object_page(
+    project_id: UUID,
+    payload: PageCreate,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("ObjectRepository", "create")),
+):
+    try:
+        page = object_repository_service.create_page(
+            project_id, payload.name, payload.url_pattern, audit=_objrepo_audit(db, user, project_id)
+        )
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    return _page_response(page)
+
+
+@app.patch(f"{_OBJREPO}/pages/{{page_id}}", response_model=PageUpdateResponse)
+def update_object_page(
+    project_id: UUID,
+    page_id: UUID,
+    payload: PageUpdate,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("ObjectRepository", "edit")),
+):
+    try:
+        page, rewritten = object_repository_service.update_page(
+            project_id, page_id, payload.model_dump(exclude_unset=True), audit=_objrepo_audit(db, user, project_id)
+        )
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    return PageUpdateResponse(page=_page_response(page), scripts_rewritten=rewritten)
+
+
+@app.delete(f"{_OBJREPO}/pages/{{page_id}}", response_model=PageDeleteResponse)
+def delete_object_page(
+    project_id: UUID,
+    page_id: UUID,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("ObjectRepository", "delete")),
+):
+    try:
+        deleted, references = object_repository_service.delete_page(
+            project_id, page_id, deleted_by=user.id, audit=_objrepo_audit(db, user, project_id)
+        )
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    return PageDeleteResponse(elements_deleted=deleted, referencing_test_cases=references)
+
+
+@app.get(f"{_OBJREPO}/pages/{{page_id}}/elements", response_model=ElementListResponse)
+def list_object_elements(
+    project_id: UUID,
+    page_id: UUID,
+    health: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    authorized: bool = Depends(has_permission("ObjectRepository", "view")),
+):
+    try:
+        page, elements, total = object_repository_service.list_elements(project_id, page_id, health, limit, offset)
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    return ElementListResponse(elements=[_element_response(page, element) for element in elements], total=total)
+
+
+@app.post(f"{_OBJREPO}/pages/{{page_id}}/elements", response_model=ElementResponse, status_code=status.HTTP_201_CREATED)
+def create_object_element(
+    project_id: UUID,
+    page_id: UUID,
+    payload: ElementCreate,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("ObjectRepository", "create")),
+):
+    try:
+        page, element = object_repository_service.create_element(
+            project_id,
+            page_id,
+            payload.name,
+            payload.element_type,
+            [locator.model_dump() for locator in payload.locators],
+            payload.description,
+            audit=_objrepo_audit(db, user, project_id),
+        )
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    return _element_response(page, element)
+
+
+@app.patch(f"{_OBJREPO}/elements/{{element_id}}", response_model=ElementUpdateResponse)
+def update_object_element(
+    project_id: UUID,
+    element_id: UUID,
+    payload: ElementUpdate,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("ObjectRepository", "edit")),
+):
+    changes = payload.model_dump(exclude_unset=True)
+    try:
+        page, element, rewritten = object_repository_service.update_element(
+            project_id, element_id, changes, audit=_objrepo_audit(db, user, project_id)
+        )
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    return ElementUpdateResponse(element=_element_response(page, element), scripts_rewritten=rewritten)
+
+
+@app.delete(f"{_OBJREPO}/elements/{{element_id}}", response_model=ElementDeleteResponse)
+def delete_object_element(
+    project_id: UUID,
+    element_id: UUID,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("ObjectRepository", "delete")),
+):
+    try:
+        references = object_repository_service.delete_element(
+            project_id, element_id, deleted_by=user.id, audit=_objrepo_audit(db, user, project_id)
+        )
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    return ElementDeleteResponse(referencing_test_cases=references)
+
+
+@app.post(f"{_OBJREPO}/scan", response_model=ScanStartResponse, status_code=status.HTTP_202_ACCEPTED)
+def start_object_repository_scan(
+    project_id: UUID,
+    background_tasks: BackgroundTasks,
+    user: UserDB = Depends(get_current_user),
+    authorized: bool = Depends(has_permission("ObjectRepository", "create")),
+):
+    try:
+        scan_id = object_repository_scan_service.start(project_id, user.id)
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    background_tasks.add_task(object_repository_scan_service.run, scan_id)
+    return ScanStartResponse(scan_id=scan_id)
+
+
+@app.get(f"{_OBJREPO}/scan/{{scan_id}}", response_model=ScanStatusResponse)
+def get_object_repository_scan(
+    project_id: UUID,
+    scan_id: str,
+    authorized: bool = Depends(has_permission("ObjectRepository", "view")),
+):
+    try:
+        return ScanStatusResponse(**object_repository_scan_service.status(project_id, scan_id))
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+
 
 @app.post("/api/v1/auth/login")
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
