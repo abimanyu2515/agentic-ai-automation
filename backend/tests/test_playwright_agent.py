@@ -408,7 +408,7 @@ def test_test_data_template_retries_once_when_model_omits_a_data_marker():
     assert any("retrying template generation once" in log for log in result.logs)
 
 
-def test_test_data_template_expands_selected_case_to_20_distinct_playwright_tests():
+def test_test_data_template_scripts_only_the_first_5_of_20_datasets():
     requirement = Requirement(title="Registration", description="Register with a password.")
     scenario = Scenario(
         requirement_id=requirement.id,
@@ -464,10 +464,12 @@ test('Test data __TEST_DATA_ID__: __TEST_TYPE__', async ({ page }) => {
     assert generated_script.count("test(") == 1
     assert "for (const row of datasets)" in generated_script
     assert generated_script.count("import { test, expect }") == 1
-    assert generated_script.count('"password": "') == 20
+    assert generated_script.count('"password": "') == 5
     assert "00000000" in generated_script
-    assert "00000019" in generated_script
-    assert "user-19@example.test" in generated_script
+    assert "00000004" in generated_script
+    assert "00000005" not in generated_script
+    assert "user-19@example.test" not in generated_script
+    assert any("first 5 of 20 datasets" in log for log in result.logs)
     assert "fill(row.data[\"password\"])" in generated_script
     assert "getByText('Password validation error is shown')" in generated_script
     assert "__TEST_DATA_" not in generated_script
@@ -555,6 +557,23 @@ def test_describe_data_fields_names_each_field_shape_from_all_datasets():
     assert "yes/no choice" in notes["__TEST_DATA_05__"]
     assert "Assert it" in notes["__TEST_DATA_06__"]
     assert "{{vault:" not in "".join(notes.values())
+
+
+def test_item_fields_find_the_item_card_then_its_button():
+    """Live failure: getByRole('button', { name: 'Add to cart Sauce Labs Backpack' })."""
+    notes = playwright_agent_module._describe_data_fields(
+        {"product_selection": "__TEST_DATA_01__", "product_name": "__TEST_DATA_02__"},
+        [
+            {"product_selection": "Sauce Labs Backpack; Sauce Labs Onesie", "product_name": "Sauce Labs Backpack"},
+            {"product_selection": "Sauce Labs Bike Light", "product_name": "Sauce Labs Onesie"},
+        ],
+    )
+
+    for note in notes.values():
+        assert ".filter({ hasText: item }).getByRole('button'" in note
+        assert "Never put the item name into the control's accessible name" in note
+    assert "list of items" in notes["__TEST_DATA_01__"]
+    assert "the item to pick" in notes["__TEST_DATA_02__"]
 
 
 def test_template_prompt_explains_list_and_assert_fields_and_loops_per_dataset():

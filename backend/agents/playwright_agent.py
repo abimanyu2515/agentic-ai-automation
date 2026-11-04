@@ -160,6 +160,16 @@ _VAULT_REFERENCE = re.compile(r'"\{\{vault:(TARGET_USERNAME|TARGET_PASSWORD)\}\}
 # "expected_". A marker hides those shapes, so the template prompt names them.
 _LIST_SEPARATOR = "; "
 _BOOLEAN_VALUES = {"true", "false", "yes", "no"}
+_ITEM_FIELD = re.compile(r"product|item", re.IGNORECASE)
+# Seen live: getByRole('button', { name: `Add to cart ${item}` }) on a store
+# whose every button is named just "Add to cart". The name is in the item's
+# card, not in its button.
+_ITEM_LOCATOR_RULE = (
+    "Find the item's container (its card or row) by the item's visible name, then "
+    "the action control inside it, for example page.locator(<item card selector>)"
+    ".filter({ hasText: item }).getByRole('button', { name: 'Add to cart' }). Never "
+    "put the item name into the control's accessible name."
+)
 
 
 def _describe_data_fields(
@@ -192,8 +202,8 @@ def _describe_data_fields(
                 f"- {marker} ({field}): a list of items joined with '{_LIST_SEPARATOR}', "
                 f"for example {example}. Datasets hold {size_text} items. "
                 f"Loop over '{marker}'.split('{_LIST_SEPARATOR}') and repeat the step's "
-                "action once per item, finding each item's control by the item's visible "
-                "name. Never hard-code item names or a fixed number of items."
+                f"action once per item. {_ITEM_LOCATOR_RULE} Never hard-code item names "
+                "or a fixed number of items."
             )
         elif field.lower().startswith("expected_"):
             notes[marker] = (
@@ -207,12 +217,21 @@ def _describe_data_fields(
                 f"setChecked(['true', 'yes'].includes('{marker}'.toLowerCase())). This "
                 "comparison is allowed."
             )
+        elif _ITEM_FIELD.search(field):
+            notes[marker] = (
+                f"- {marker} ({field}): the item to pick, for example {example}. "
+                f"{_ITEM_LOCATOR_RULE} Never pick the first item or a hard-coded one."
+            )
         else:
             notes[marker] = (
                 f"- {marker} ({field}): a value to type or select, for example {example}."
             )
     return notes
 
+
+# Only the first datasets of a multi-dataset test case are scripted; the rest
+# stay stored on the test case but get no generated test.
+_MAX_SCRIPT_DATASETS = 5
 
 # Loop variable name and leading comment for each dataset outcome group.
 _DATASET_GROUPS = {
@@ -399,7 +418,8 @@ class PlaywrightAgent(BaseAgent):
                     test_case, framework, target_url, state
                 )
                 state.add_log(
-                    f"{self.name} finished: generated {len(test_case.test_data_sets)} "
+                    f"{self.name} finished: generated "
+                    f"{min(len(test_case.test_data_sets), _MAX_SCRIPT_DATASETS)} "
                     f"data-driven Playwright tests for '{test_case.title}'"
                 )
                 return state
@@ -615,12 +635,17 @@ class PlaywrightAgent(BaseAgent):
             raise ValueError(
                 f"{self.name}: scenario for '{test_case.title}' was not found"
             )
-        datasets = test_case.test_data_sets
         profiles = (
             test_case.test_data_profiles
-            if len(test_case.test_data_profiles) == len(datasets)
-            else [{} for _ in datasets]
-        )
+            if len(test_case.test_data_profiles) == len(test_case.test_data_sets)
+            else [{} for _ in test_case.test_data_sets]
+        )[:_MAX_SCRIPT_DATASETS]
+        datasets = test_case.test_data_sets[:_MAX_SCRIPT_DATASETS]
+        if len(test_case.test_data_sets) > len(datasets):
+            state.add_log(
+                f"{self.name}: scripting the first {len(datasets)} of "
+                f"{len(test_case.test_data_sets)} datasets for '{test_case.title}'"
+            )
         case_outcome = self._case_outcome(profiles, scenario.path_type)
 
         templates: dict[str, str] = {}
