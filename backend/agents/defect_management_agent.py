@@ -119,7 +119,7 @@ class DefectManagementAgent(BaseAgent):
             llm_service: LLM service instance (injected for testing)
             jira_service: JIRA service instance (injected for testing)
         """
-        self.llm_service = llm_service or LLMService(role="analysis")
+        self.llm_service = llm_service or LLMService(role="analysis", agent="defect_management_agent")
         self.jira_service = jira_service or JiraService()
 
     def run(self, state: WorkflowState) -> WorkflowState:

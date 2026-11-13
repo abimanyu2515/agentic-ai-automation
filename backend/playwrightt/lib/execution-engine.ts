@@ -440,11 +440,63 @@ export class ExecutionEngine {
                 }
               }
             ),
-            expect: (actual: any) => {
+            expect: (actual: any, message?: string) => {
+              // Playwright's expect(value, 'message') puts the message on the
+              // failure. Keep that, so a script can say which step it was
+              // checking instead of surfacing a bare timeout.
+              const withMessage = (fn: any) => {
+                if (typeof fn !== 'function' || typeof message !== 'string' || !message.trim()) return fn;
+                const prefix = (error: any) => {
+                  if (error instanceof Error) {
+                    error.message = `${message}\n${error.message}`;
+                    return error;
+                  }
+                  return new Error(`${message}\n${String(error)}`);
+                };
+                return (...args: any[]) => {
+                  try {
+                    const result = fn(...args);
+                    return result && typeof result.then === 'function'
+                      ? result.catch((error: any) => { throw prefix(error); })
+                      : result;
+                  } catch (error) {
+                    throw prefix(error);
+                  }
+                };
+              };
               const baseAssertions: any = {
                 toBeVisible: async (options?: { timeout?: number }) => {
                   if (actual && typeof actual.waitFor === 'function') {
-                    await actual.waitFor({ state: 'visible', timeout: options?.timeout || 5000 });
+                    const timeout = options?.timeout || 5000;
+                    // A styled radio or checkbox hides its native input and shows its
+                    // <label> instead, so the input never becomes visible. Treat such an
+                    // input as visible once one of its labels is, as a user would see it.
+                    const choiceLabelVisible = async (): Promise<boolean> => {
+                      try {
+                        return await actual.evaluate((el: any) => {
+                          const type = String(el.getAttribute?.('type') || '').toLowerCase();
+                          if (el.tagName !== 'INPUT' || !['radio', 'checkbox'].includes(type)) return false;
+                          return Array.from(el.labels || []).some((label: any) => {
+                            const box = label.getBoundingClientRect();
+                            const style = getComputedStyle(label);
+                            return box.width > 0 && box.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                          });
+                        }, undefined, { timeout: 250 });
+                      } catch {
+                        return false;
+                      }
+                    };
+                    const deadline = Date.now() + timeout;
+                    while (true) {
+                      const remaining = deadline - Date.now();
+                      try {
+                        await actual.waitFor({ state: 'visible', timeout: Math.max(1, Math.min(500, remaining)) });
+                        return;
+                      } catch (error) {
+                        if (await choiceLabelVisible()) return;
+                        if (Date.now() >= deadline) throw error;
+                      }
+                    }
                   } else if (actual && typeof actual.isVisible === 'function') {
                     const visible = await actual.isVisible();
                     if (!visible) {
@@ -665,7 +717,7 @@ export class ExecutionEngine {
                         }
                       }
                     };
-                    if (negations[propName]) return negations[propName];
+                    if (negations[propName]) return withMessage(negations[propName]);
                     return () => {
                       console.warn(`[Expect Proxy] Negated assertion expect().not.${propName}() is a mock fallback.`);
                     };
@@ -675,7 +727,8 @@ export class ExecutionEngine {
 
               return new Proxy(baseAssertions, {
                 get: (target, propName: string) => {
-                  if (propName in target) return target[propName];
+                  if (propName === 'not') return target[propName];
+                  if (propName in target) return withMessage(target[propName]);
                   console.warn(`[Expect Proxy] Assertion expect().${propName}() not explicitly supported, using dynamic fallback.`);
                   return async (...args: any[]) => {
                     if (actual && typeof actual.waitFor === 'function') {

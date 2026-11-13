@@ -13,6 +13,8 @@ Responsibilities:
     - Generate a CSV-ready 20-row requirement dataset or one validation-targeted
       dataset for a selected test case.
     - Record assumptions when the real validation rules are not supplied.
+    - Output raw JSON only. Do NOT surround the JSON with markdown code blocks 
+      (e.g., do not use ```json). Do NOT include any intro or conclusion text.
 
 This agent intentionally follows the repository's state-based conventions and
 reports structured output as data that downstream agents can parse. It does not
@@ -24,7 +26,9 @@ from __future__ import annotations
 
 import ast
 from collections import Counter
+from collections.abc import Callable
 import csv
+from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 import hashlib
 import io
@@ -102,6 +106,23 @@ CASE_METADATA_FIELDS = frozenset({
     "test_type",
     "expected_outcome",
 })
+
+# Fields whose dates an application expects to lie ahead of the run, such as
+# an insurance start date or a check-in date. Seen live: a model wrote start
+# dates a year in the past, the form rejected them, and the price step never
+# loaded. Past-type dates (birth, manufacture) are excluded.
+FUTURE_DATE_FIELD_PATTERN = re.compile(
+    r"start|begin|effective|check[_ -]?in|check[_ -]?out|arrival|departure|travel|"
+    r"delivery|appointment|booking|reservation|pick[_ -]?up|drop[_ -]?off|return|"
+    r"renewal|schedule"
+)
+PAST_DATE_FIELD_PATTERN = re.compile(
+    r"birth|dob|manufactur|built|issue|purchase|registration|founded|since"
+)
+DATE_FORMATS = (
+    "%m/%d/%Y", "%d/%m/%Y", "%Y-%m-%d", "%Y/%m/%d",
+    "%d.%m.%Y", "%d-%m-%Y", "%m-%d-%Y",
+)
 
 # How many LLM requests the per-case path makes before giving up.
 CASE_DATA_REQUESTS = 6
@@ -361,8 +382,13 @@ class TestDataAgent(BaseAgent):
 
     name = "TestData Agent"
 
-    def __init__(self, llm_service: LLMService | None = None):
-        self.llm_service = llm_service or LLMService(role="generation")
+    def __init__(
+        self,
+        llm_service: LLMService | None = None,
+        today: Callable[[], date] | None = None,
+    ):
+        self.llm_service = llm_service or LLMService(role="generation", agent="test_data_agent")
+        self._today = today or date.today
 
     def run(self, state: WorkflowState) -> WorkflowState:
         if state.requirement is None:
@@ -429,7 +455,10 @@ class TestDataAgent(BaseAgent):
         application_context = context.get("application_context", {})
         if not isinstance(application_context, dict):
             raise ValueError(f"{self.name} received invalid application context")
+        today = self._today()
         prompt_context = {
+            # Models otherwise date "future" values from their training era.
+            "today": today.isoformat(),
             "requirement_title": requirement.title,
             "requirement_description": requirement.description,
             "application_context": json.dumps(application_context, ensure_ascii=False),
@@ -587,7 +616,18 @@ class TestDataAgent(BaseAgent):
                     price_catalog is None
                     or self._use_catalog_names(dataset, price_catalog)
                 )
+                and not self._stale_future_dates(dataset, today)
             ]
+            stale = [
+                field
+                for dataset in candidate.datasets
+                for field in self._stale_future_dates(dataset, today)
+            ]
+            if stale:
+                state.add_log(
+                    f"{self.name}: dropped datasets whose "
+                    f"{', '.join(sorted(set(stale)))} was not after {today.isoformat()}"
+                )
             if not usable:
                 continue
             # All 20 rows must share one field set. The first reply with usable
@@ -712,6 +752,29 @@ class TestDataAgent(BaseAgent):
             f"for test case '{test_case.title}'"
         )
         return state
+
+    @staticmethod
+    def _stale_future_dates(dataset: "TestCaseDataResponse", today: date) -> list[str]:
+        """Fields of an accepted dataset that hold a future-type date (start,
+        check-in, delivery) on or before today. A rejected dataset may use a
+        past date on purpose, so it is left alone. A value that parses under
+        several formats (05/12/2027) is stale only if every reading is."""
+        if dataset.expected_outcome != "accepted":
+            return []
+        stale = []
+        for key, value in dataset.test_data.items():
+            name = key.lower()
+            if PAST_DATE_FIELD_PATTERN.search(name) or not FUTURE_DATE_FIELD_PATTERN.search(name):
+                continue
+            readings = set()
+            for fmt in DATE_FORMATS:
+                try:
+                    readings.add(datetime.strptime(value.strip(), fmt).date())
+                except ValueError:
+                    continue
+            if readings and all(reading <= today for reading in readings):
+                stale.append(key)
+        return stale
 
     @classmethod
     def _generate_deterministic_case_data(

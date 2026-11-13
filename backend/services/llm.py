@@ -13,6 +13,11 @@ LLMService(role="generation") the "generation" role. Every role call goes
 through that role's shared _RolePool, which rotates models, caps concurrent
 calls, paces calls per model and cools a model down after a 429.
 LLMService(config=...) skips all of that.
+
+Token usage (Token Utilization page): every completion attempt, successful
+or not, is reported to token_usage_service.record_llm_call with its tokens,
+latency and the agent from LLMService(agent=...) or the llm_context. Recording
+never raises and never blocks the call.
 """
 
 import logging
@@ -21,11 +26,13 @@ import threading
 import time
 from typing import Callable, TypeVar
 
+import litellm
 from litellm import completion
 from litellm.exceptions import RateLimitError
 from pydantic import BaseModel
 
 from backend.config.settings import LLM_ROLES, LLMConfig, LLMRoleConfig, get_settings
+from backend.services.token_usage_service import record_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +80,43 @@ DEFAULT_LLM_TIMEOUT = 60
 
 # Cloud providers that require an API key. Ollama is local and needs api_base instead.
 _CLOUD_PROVIDERS_REQUIRING_KEY = {"openai", "groq", "nvidia", "anthropic", "gemini"}
+
+
+def model_string_for(provider: str, model: str) -> str:
+    """The litellm model string for a provider and bare model name."""
+    return f"{_PROVIDER_PREFIXES.get(provider, '')}{model}"
+
+
+def lookup_litellm_price(model: str) -> tuple[float, float] | None:
+    """(input, output) USD per token from litellm's price map, or None if unknown.
+    Lives here so llm.py stays the only module that imports litellm."""
+    info = (getattr(litellm, "model_cost", None) or {}).get(model)
+    if not info:
+        return None
+    per_in = info.get("input_cost_per_token")
+    per_out = info.get("output_cost_per_token")
+    if per_in is None and per_out is None:
+        return None
+    return float(per_in or 0.0), float(per_out or 0.0)
+
+
+def _usage_counts(response) -> tuple[int, int, int | None]:
+    """(prompt, completion, total) tokens from a litellm response; zeros when absent."""
+    usage = getattr(response, "usage", None)
+    if usage is None and isinstance(response, dict):
+        usage = response.get("usage")
+    if usage is None:
+        return 0, 0, None
+
+    def read(name: str) -> int:
+        value = usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    total = read("total_tokens")
+    return read("prompt_tokens"), read("completion_tokens"), total or None
 
 
 class LLMServiceError(Exception):
@@ -219,7 +263,9 @@ class _WaitBudget:
 
 
 class LLMService:
-    def __init__(self, config: LLMConfig | None = None, role: str | None = None):
+    def __init__(self, config: LLMConfig | None = None, role: str | None = None, agent: str | None = None):
+        # Who the token usage of this service is attributed to (Token Utilization page).
+        self.agent = agent
         if config is not None and role is not None:
             raise ValueError("Pass either config or role to LLMService, not both")
         if role is not None and role not in LLM_ROLES:
@@ -303,13 +349,52 @@ class LLMService:
                 f"Set {base_var} (e.g. http://localhost:11434) or switch provider."
             )
 
-    def _complete(self, *, messages: list[dict], timeout: int, json_mode: bool, budget: _WaitBudget | None, **kwargs):
+    def _record_usage(
+        self,
+        config: LLMConfig,
+        started: float,
+        *,
+        response=None,
+        status: str = "success",
+        error: Exception | None = None,
+        attempt: int = 1,
+    ) -> None:
+        prompt_tokens, completion_tokens, total_tokens = (
+            _usage_counts(response) if response is not None else (0, 0, None)
+        )
+        record_llm_call(
+            agent=self.agent,
+            role=self.role,
+            provider=config.provider,
+            model=config.model,
+            model_string=self._model_string(config),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            status=status,
+            error_type=type(error).__name__ if error is not None else None,
+            attempt=attempt,
+        )
+
+    def _complete(
+        self,
+        *,
+        messages: list[dict],
+        timeout: int,
+        json_mode: bool,
+        budget: _WaitBudget | None,
+        attempt: int = 1,
+        **kwargs,
+    ):
         """One completion. A role call goes through its pool and recovers from
         429s by cooling the model down and moving on, without using up the
-        caller's retries. Any other failure is wrapped into LLMServiceError."""
+        caller's retries. Any other failure is wrapped into LLMServiceError.
+        Every attempt is reported for token usage."""
         if self.role is None:
+            started = time.perf_counter()
             try:
-                return completion(
+                response = completion(
                     model=self._model_string(),
                     messages=messages,
                     api_base=self._api_base(),
@@ -319,7 +404,10 @@ class LLMService:
                     **kwargs,
                 )
             except Exception as exc:
+                self._record_usage(self.config, started, status="error", error=exc, attempt=attempt)
                 raise LLMServiceError(f"LLM call failed ({self.config.provider}/{self.config.model}): {exc}") from exc
+            self._record_usage(self.config, started, response=response, attempt=attempt)
+            return response
 
         pool = _get_pool(self.role)
         caller_metadata = dict(kwargs.pop("metadata", None) or {})
@@ -350,8 +438,9 @@ class LLMService:
                 "llm_model": model,
                 "tags": [*caller_tags, self.role, model],
             }
+            started = time.perf_counter()
             try:
-                return completion(
+                response = completion(
                     model=self._model_string(config),
                     messages=messages,
                     api_base=self._api_base(config),
@@ -362,7 +451,10 @@ class LLMService:
                     **(self._json_mode_kwargs(config) if json_mode else {}),
                     **kwargs,
                 )
+                self._record_usage(config, started, response=response, attempt=attempt)
+                return response
             except RateLimitError as exc:
+                self._record_usage(config, started, status="rate_limited", error=exc, attempt=attempt)
                 seconds = _cooldown_seconds(exc, role_config.cooldown_seconds)
                 pool.report_429(model, seconds)
                 logger.warning(
@@ -370,6 +462,7 @@ class LLMService:
                     self.role, model, seconds,
                 )
             except Exception as exc:
+                self._record_usage(config, started, status="error", error=exc, attempt=attempt)
                 raise LLMServiceError(f"LLM call failed ({config.provider}/{config.model}): {exc}") from exc
             finally:
                 pool.release()
@@ -428,6 +521,7 @@ class LLMService:
                     timeout=timeout,
                     json_mode=True,
                     budget=budget,
+                    attempt=attempt + 1,
                     **kwargs,
                 )
 

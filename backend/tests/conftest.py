@@ -6,6 +6,9 @@ belongs here, not copy-pasted into each one.
 
 import pytest
 
+from backend.repository.token_usage_store import InMemoryTokenUsageStore
+from backend.services.token_usage_service import TokenUsageService, set_token_usage_service
+
 from backend.agents.evaluation_agent import _EvaluationBatch, _TestCaseEvaluation
 from backend.agents.scenario_agent import _GeneratedScenario, _GeneratedScenarioBatch
 from backend.agents.test_case_agent import TestCaseListResponse, TestCaseResponse
@@ -207,3 +210,16 @@ def mock_llm_service(stub_llm_service):
     with mock.patch.object(LLMService, "structured_generate", side_effect=stub_llm_service.structured_generate) as m1, \
          mock.patch.object(LLMService, "generate", side_effect=stub_llm_service.generate) as m2:
         yield stub_llm_service
+
+@pytest.fixture(autouse=True)
+def token_usage_service(tmp_path):
+    """Every test records LLM token usage into memory, never into
+    backend/database/token_usage.jsonl. Tests that care read it from here."""
+    service = TokenUsageService(
+        store=InMemoryTokenUsageStore(),
+        settings_path=tmp_path / "token_usage_settings.json",
+        async_writes=False,
+    )
+    set_token_usage_service(service)
+    yield service
+    set_token_usage_service(None)

@@ -94,7 +94,7 @@ async function request(url, options = {}) {
             fetch(`${API_BASE}${url}`, {
               ...options,
               headers
-            }).then(res => res.status === 204 ? null : res.json())
+            }).then(res => res.status === 204 ? null : (options.responseType === 'text' ? res.text() : res.json()))
           );
         });
       });
@@ -120,7 +120,8 @@ async function request(url, options = {}) {
       return null;
     }
 
-    return response.json();
+    // responseType: 'text' returns the raw body (CSV exports).
+    return options.responseType === 'text' ? response.text() : response.json();
   } catch (error) {
     if (error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
       throw new Error("The request timed out while the backend was processing it. Check the backend logs before retrying, as the operation may still be running.");
@@ -628,6 +629,54 @@ export const API = {
 
   async getObjectScan(projectId, scanId) {
     return request(`/projects/${projectId}/object-repository/scan/${scanId}`);
+  },
+
+  // ── Token Utilization ───────────────────────────────────────────────
+  // filters: { from, to, project_id, agent, model, role, provider, status, operation }
+
+  async getTokenUsageSummary(filters = {}) {
+    return request(`/token-usage/summary${tokenUsageQuery(filters)}`);
+  },
+
+  async getTokenUsageTimeseries(filters = {}, bucket = 'day', splitBy = '') {
+    return request(`/token-usage/timeseries${tokenUsageQuery(filters, { bucket, split_by: splitBy })}`);
+  },
+
+  async getTokenUsageBreakdown(filters = {}, groupBy = 'agent') {
+    return request(`/token-usage/breakdown${tokenUsageQuery(filters, { group_by: groupBy })}`);
+  },
+
+  async getTokenUsageCalls(filters = {}, page = 1, pageSize = 25, sort = '-created_at') {
+    return request(`/token-usage/calls${tokenUsageQuery(filters, { page, page_size: pageSize, sort })}`);
+  },
+
+  async getTokenUsageFacets(filters = {}) {
+    return request(`/token-usage/facets${tokenUsageQuery(filters)}`);
+  },
+
+  async exportTokenUsageCsv(filters = {}) {
+    return request(`/token-usage/export.csv${tokenUsageQuery(filters)}`, { responseType: 'text' });
+  },
+
+  async getTokenUsagePricing() {
+    return request('/token-usage/pricing');
+  },
+
+  async getTokenUsageSettings() {
+    return request('/token-usage/settings');
+  },
+
+  async updateTokenUsageSettings(payload) {
+    return request('/token-usage/settings', { method: 'PUT', body: JSON.stringify(payload) });
   }
 };
+
+function tokenUsageQuery(filters = {}, extra = {}) {
+  const params = new URLSearchParams();
+  Object.entries({ ...filters, ...extra }).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') params.set(key, value);
+  });
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}
 export { API_BASE };

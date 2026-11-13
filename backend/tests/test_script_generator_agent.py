@@ -348,3 +348,111 @@ def test_data_driven_template_fills_vault_placeholders_and_passes_field_notes():
     for prompt in llm.prompts + [llm.synthesis_prompt]:
         assert "real-user" not in prompt
         assert "s3cret!" not in prompt
+
+
+class _FactsLocator(_FakeLocator):
+    async def evaluate(self, script, timeout=None):
+        return self.page.facts.get(self.selector, {})
+
+
+class _FactsPage(_FakePage):
+    def __init__(self):
+        super().__init__()
+        self.valid_selectors = {"#nav_automobile", "label:has(#selectsilver)"}
+        # Like the styled price radio: an empty label around a hidden input.
+        self.facts = {
+            "#nav_automobile": {"text": "Automobile"},
+            "label:has(#selectsilver)": {
+                "text": "",
+                "control_id": "selectsilver",
+                "control_type": "radio",
+                "control_value": "Silver",
+            },
+        }
+
+    def locator(self, selector):
+        return _FactsLocator(self, selector)
+
+
+class _SequencedLLM(_ScriptedLLM):
+    def __init__(self, decisions, final_texts):
+        super().__init__(decisions, None)
+        self.final_texts = list(final_texts)
+        self.synthesis_prompts = []
+
+    def generate(self, *, system, user, **kwargs):
+        self.synthesis_prompts.append(user)
+        return self.final_texts.pop(0)
+
+
+def _record_choice_template(llm):
+    page = _FactsPage()
+    with mock.patch.object(agent, "async_playwright", lambda: _FakePlaywright(_FakeBrowser(page))), \
+         mock.patch.object(agent, "extract_page_state", _fake_page_state):
+        script = asyncio.run(
+            agent.generate_data_driven_template(
+                "https://app.example.test/",
+                ["Click Automobile", "Select the Silver price option"],
+                "__TEST_DATA_ID__ [__TEST_TYPE__] Quote",
+                "The quote is sent",
+                sample_data={"pricing_tier": "Silver"},
+                markers={"pricing_tier": "__TEST_DATA_01__"},
+                llm=llm,
+            )
+        )
+    return script
+
+
+_CHOICE_DECISIONS = [
+    _decision("click", "#nav_automobile"),
+    _decision("done"),
+    _decision("click", "label:has(#selectsilver)"),
+    _decision("done"),
+    _decision("done"),
+]
+
+
+def test_template_trace_records_what_a_clicked_choice_carries():
+    full = (
+        "import { test, expect } from '@playwright/test';\n"
+        "test('t', async ({ page }) => { await page.locator('#nav_automobile').click();\n"
+        "await page.locator(\"label:has(input[value='__TEST_DATA_01__'])\").click(); });"
+    )
+    llm = _SequencedLLM(_CHOICE_DECISIONS, [full])
+
+    assert _record_choice_template(llm) == full
+    prompt = llm.synthesis_prompts[0]
+    # The empty label's hidden input value is what ties it to the data value.
+    assert '"control_value": "Silver"' in prompt
+    assert '"text": "Automobile"' in prompt
+    assert "never select it by text" in prompt
+    assert "Never replace it with a URL the trace reached later" in prompt
+    assert len(llm.synthesis_prompts) == 1
+
+
+def test_template_that_drops_a_verified_click_is_regenerated_once():
+    dropped = (
+        "import { test, expect } from '@playwright/test';\n"
+        "test('t', async ({ page }) => {\n"
+        "await page.locator(\"label:has(input[value='__TEST_DATA_01__'])\").click(); });"
+    )
+    full = dropped.replace("{\n", "{ await page.locator('#nav_automobile').click();\n", 1)
+    llm = _SequencedLLM(_CHOICE_DECISIONS, [dropped, full])
+
+    assert _record_choice_template(llm) == full
+    assert len(llm.synthesis_prompts) == 2
+    assert "left out these verified clicks from the trace: #nav_automobile" in llm.synthesis_prompts[1]
+    # The data-valued choice may be rewritten with a marker, so it is never demanded verbatim.
+    assert "label:has(#selectsilver)" not in llm.synthesis_prompts[1].split("REJECTED")[1]
+
+
+def test_missing_trace_clicks_ignores_quote_style_and_data_valued_selectors():
+    history = [
+        {"action": "click", "selector": 'a[href="quote.php"]'},
+        {"action": "click", "selector": "label:has(#selectsilver)"},
+        {"action": "fill", "selector": "#name"},
+    ]
+    script = "await page.locator(\"a[href='quote.php']\").click();"
+
+    assert agent._missing_trace_clicks(script, history, {"tier": "Silver"}) == []
+    assert agent._missing_trace_clicks("", history, {"tier": "Silver"}) == ['a[href="quote.php"]']

@@ -46,6 +46,8 @@ report_*.pdf
 *.db
 *.sqlite
 backend/database/vault.json
+backend/database/token_usage.jsonl
+backend/database/token_usage_settings.json
 
 # IDE & Editor Files
 .vscode/

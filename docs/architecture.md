@@ -74,6 +74,7 @@ A single-page application served as static files. No build step — vanilla JS w
 - **API communication**: `api.js` wraps `fetch()` with JWT token handling
 - **View switching**: Hash-based routing via `app.js`
 - **Components**: `components.js` provides reusable table, modal, card builders
+- **Token Utilization**: `token-utilization.js` renders real LLM token usage and cost per agent, model and project from `/api/v1/token-usage/*` (see [features/token-utilization.md](features/token-utilization.md))
 
 ### 2. API Layer
 

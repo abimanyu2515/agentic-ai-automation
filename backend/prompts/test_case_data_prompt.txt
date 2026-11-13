@@ -21,6 +21,8 @@ $reserved_datasets
 
 Uniqueness nonce for this generation attempt: $uniqueness_nonce
 
+Today's date: $today
+
 Case intent:
 $case_intent
 
@@ -33,6 +35,7 @@ Instructions:
 - Do not add fields for login credentials (username, password) or for steps with nothing to choose (such as "Navigate to the Products Page" or "Click the Finish button"). Credentials come from the project's vault, including for a "User is logged in" precondition. Only a case that registers a new account, or whose steps type credentials to test a login failure, has credential fields.
 - Name fields in snake_case after what they hold (for example "check_in_date", "card_number"), in the order the steps use them. Include each field in approved_test_data, unless the steps never use it.
 - Every dataset must contain every field in "required_fields" with a realistic value that fits the field and the other values in the same dataset (for example a check-out date after the check-in date, and a total that matches the quantity). Leave a field empty only when the dataset deliberately tests that the field is missing.
+- Work out every date from today's date above, never from examples or from your own sense of the current year. A date the application expects in the future (for example an insurance or policy start date, check-in, departure, delivery, or appointment date) must fall 2 to 6 months after today in an accepted dataset. A date that must lie in the past (for example a birth date or date of manufacture) must be before today. Use the date format the application context or approved_test_data shows.
 - For a negative or validation case, change only the field or condition the selected case targets. Keep every other field populated with valid values, so the flow reaches the step under test.
 - For login cases, vary only the field or scenario targeted by the selected case (for example invalid username, invalid password, empty username, empty password, or valid login). Keep the other fields appropriate to the selected case.
 - Never invent or include real application credentials. Use synthetic login values only; if the selected case requires valid account credentials that are not supplied in its approved test data, state that limitation in assumptions.

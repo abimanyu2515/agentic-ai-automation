@@ -118,7 +118,7 @@ class ScenarioAgent(BaseAgent):
             llm_service: LLM service instance (injected for testing)
             scenario_count: Number of scenarios to generate (defaults to settings.generation.scenario_count)
         """
-        self.llm_service = llm_service or LLMService(role="analysis")
+        self.llm_service = llm_service or LLMService(role="analysis", agent="scenario_agent")
         self.scenario_count = scenario_count or get_settings().generation.scenario_count
 
     def run(self, state: WorkflowState) -> WorkflowState:

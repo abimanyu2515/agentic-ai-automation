@@ -59,6 +59,7 @@ from backend.agents.base import BaseAgent
 from backend.models.scenario import Scenario
 from backend.models.state import WorkflowState
 from backend.models.test_case import TestCase
+from backend.services.llm_context import run_in_context
 from backend.services.llm import LLMService, LLMServiceError
 from backend.utils.prompts import load_prompt
 
@@ -134,7 +135,7 @@ class TestCaseAgent(BaseAgent):
         Args:
             llm_service: LLM service instance (injected for testing)
         """
-        self.llm_service = llm_service or LLMService(role="analysis")
+        self.llm_service = llm_service or LLMService(role="analysis", agent="test_case_agent")
         if max_workers < 1:
             raise ValueError("max_workers must be at least 1")
         self.max_workers = max_workers
@@ -230,7 +231,8 @@ class TestCaseAgent(BaseAgent):
             with ThreadPoolExecutor(
                 max_workers=min(self.max_workers, len(scenario_batches))
             ) as executor:
-                generated_batches = executor.map(generate_batch, scenario_batches)
+                # run_in_context keeps token usage attribution (project, run) in worker threads.
+                generated_batches = executor.map(run_in_context(generate_batch), scenario_batches)
                 generated_test_cases = [
                     test_case
                     for generated_batch in generated_batches

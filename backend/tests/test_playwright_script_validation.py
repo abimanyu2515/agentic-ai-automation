@@ -209,3 +209,200 @@ test("login", async ({ page }) => {
 });
 """
     assert validate_playwright_script(script, context_without_password) == []
+
+
+_UNLABELED_FIELD_CONTEXT = {
+    "pages": [
+        {
+            "title": "Enter Vehicle Data",
+            "forms": [
+                {
+                    "fields": [
+                        {
+                            "type": "select",
+                            "role": "combobox",
+                            "label": "",
+                            "name": "Make",
+                            "placeholder": "",
+                            "selector": "#make",
+                            "match_count": 1,
+                        }
+                    ]
+                }
+            ],
+            "elements": [],
+            "visible_text": ["Enter Vehicle Data"],
+        }
+    ]
+}
+
+
+def test_getByLabel_is_rejected_for_a_field_without_an_accessible_label():
+    script = """import { test, expect } from "@playwright/test";
+
+test("vehicle data", async ({ page }) => {
+  await page.getByLabel("Make").selectOption({ label: "Audi" });
+  await expect(page.getByText("Enter Vehicle Data")).toBeVisible();
+});
+"""
+
+    issues = validate_playwright_script(script, _UNLABELED_FIELD_CONTEXT)
+    assert "Label locator 'Make' is not uniquely observed" in issues
+
+
+def test_observed_selector_is_accepted_for_a_field_without_an_accessible_label():
+    script = """import { test, expect } from "@playwright/test";
+
+test("vehicle data", async ({ page }) => {
+  await page.locator("#make").selectOption({ label: "Audi" });
+  await expect(page.getByText("Enter Vehicle Data")).toBeVisible();
+});
+"""
+
+    assert validate_playwright_script(script, _UNLABELED_FIELD_CONTEXT) == []
+
+
+def test_hidden_step_field_and_button_selectors_are_observed():
+    context = {
+        "pages": [
+            {
+                "title": "Wizard",
+                "forms": [
+                    {
+                        "fields": [
+                            {"type": "text", "role": "textbox", "label": "", "name": "First Name",
+                             "selector": "#firstname", "match_count": 1, "visible": False},
+                        ],
+                        "hidden_buttons": [
+                            {"name": "Send »", "selector": "#send", "match_count": 1, "visible": False},
+                        ],
+                    }
+                ],
+                "elements": [],
+                "visible_text": ["Wizard"],
+            }
+        ]
+    }
+    script = """import { test, expect } from "@playwright/test";
+
+test("wizard", async ({ page }) => {
+  await page.locator("#firstname").fill("Ada");
+  await page.locator("#send").click();
+  await expect(page.getByText("Wizard")).toBeVisible();
+});
+"""
+
+    assert validate_playwright_script(script, context) == []
+
+
+def test_option_click_selector_is_observed():
+    context = {
+        "pages": [
+            {
+                "title": "Wizard",
+                "forms": [
+                    {
+                        "fields": [
+                            {"type": "checkbox", "role": "checkbox", "label": "Speeding",
+                             "name": "Hobbies", "selector": "#speeding", "match_count": 1,
+                             "visible": False, "value": "Speeding",
+                             "click_selector": "label:has(#speeding)"},
+                        ],
+                    }
+                ],
+                "elements": [],
+                "visible_text": ["Wizard"],
+            }
+        ]
+    }
+    script = """import { test, expect } from "@playwright/test";
+
+test("wizard", async ({ page }) => {
+  await page.locator("label:has(#speeding)").click();
+  await expect(page.getByText("Wizard")).toBeVisible();
+});
+"""
+
+    assert validate_playwright_script(script, context) == []
+
+
+def _wizard_context():
+    return {"pages": [{"forms": [{
+        "steps": [
+            {"step": 1, "name": "Vehicle", "visible": True, "next_button": "#next1"},
+            {"step": 2, "name": "Product", "visible": False,
+             "next_button": "#next2", "prev_button": "#prev2"},
+            {"step": 3, "name": "Quote", "visible": False},
+        ],
+        "fields": [
+            {"selector": "#make", "step": 1},
+            {"selector": "#startdate", "step": 2},
+            {"selector": "#euro", "click_selector": "label:has(#euro)", "step": 2},
+            {"selector": "#email", "step": 3},
+        ],
+        "hidden_buttons": [
+            {"selector": "#next2", "step": 2},
+            {"selector": "#prev2", "step": 2},
+        ],
+    }]}]}
+
+
+def test_step_order_flags_a_control_used_after_its_step_was_left():
+    from backend.services.playwright_script_validation import validate_step_order
+
+    script = """
+      await page.goto(BASE_URL);
+      await page.locator('#make').selectOption('Audi');
+      await page.locator('#next1').click();
+      await page.locator('#startdate').fill('01/02/2027');
+      await page.locator('#next2').click();
+      await page.locator('label:has(#euro)').click();
+      await page.locator('#email').fill('a@b.test');
+    """
+    issues = validate_step_order(script, _wizard_context())
+    assert len(issues) == 1
+    assert "'label:has(#euro)' is on step 2 ('Product')" in issues[0]
+    assert "on step 3 ('Quote')" in issues[0]
+
+
+def test_step_order_flags_a_next_button_clicked_twice():
+    from backend.services.playwright_script_validation import validate_step_order
+
+    script = """
+      await page.goto(BASE_URL);
+      await page.locator('#next1').click();
+      await page.locator('#next2').click();
+      await page.locator('#next2').click();
+    """
+    assert len(validate_step_order(script, _wizard_context())) == 1
+
+
+def test_step_order_accepts_in_order_scripts_prev_clicks_and_assigned_locators():
+    from backend.services.playwright_script_validation import validate_step_order
+
+    script = """
+      for (const row of datasets) {
+        await page.goto(BASE_URL);
+        await page.locator('#make').selectOption(row.data["make"]);
+        const next = page.locator('#next1');
+        await next.click();
+        await expect(page.locator('#startdate'), 'Product did not load').toBeVisible();
+        await page.locator('#startdate').fill(row.data["start"]);
+        await page.locator('#prev2').click();
+        await page.locator('#make').selectOption('Audi');
+        await next.click();
+        await page.locator('label:has(#euro)').click();
+        await page.locator(`xpath=//label[normalize-space()='${row.data["x"]}']`).click();
+        await page.locator('#next2').click();
+        await page.locator('#email').fill(row.data["email"]);
+      }
+    """
+    assert validate_step_order(script, _wizard_context()) == []
+
+
+def test_step_order_needs_step_evidence():
+    from backend.services.playwright_script_validation import validate_step_order
+
+    script = "await page.locator('#next2').click(); await page.locator('#make').click();"
+    assert validate_step_order(script, {"pages": [{"forms": [{"fields": []}]}]}) == []
+    assert validate_step_order(script, None) == []
