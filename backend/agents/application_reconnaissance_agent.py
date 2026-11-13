@@ -37,6 +37,7 @@ import asyncio
 import ipaddress
 import json
 import logging
+import re
 import socket
 from typing import Any
 from urllib.parse import urljoin, urlsplit
@@ -47,6 +48,94 @@ from backend.models.state import WorkflowState
 from backend.models.test_case import TestCase
 
 logger = logging.getLogger(__name__)
+
+# Per form cap on fields (and on hidden buttons). Multi-step forms list every
+# step's fields, so this is above a single screen's count.
+MAX_FORM_FIELDS = 100
+
+# Steps that move by clicking a named link, for example "Click Automobile in
+# the top menu" or "Select Automobile from the navigation".
+_NAVIGATION_STEP = re.compile(
+    r"^\s*(?:\d+[.)]\s*)?(?:click|select|choose|open|go to|navigate to|tap)\b", re.IGNORECASE
+)
+MAX_FOLLOWED_LINKS = 3
+
+# Multi-step forms (wizards) keep every step on one URL and show one at a time.
+# A step group is the outermost set of same tag and class siblings inside the
+# form that each hold a button, with exactly one of them visible. Seen live: a
+# script ticked a Product Data checkbox after clicking that step's Next, so
+# each field and button is tagged with its step, and each step names the button
+# that leaves it.
+_STEP_BUTTONS = "button, input[type='submit'], input[type='button'], [role='button']"
+_STEP_GROUP_JS = """
+  const BUTTONS = "button, input[type='submit'], input[type='button'], [role='button']";
+  const isVisible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length)
+    && getComputedStyle(el).visibility !== 'hidden';
+  const keyOf = el => el.tagName + '|' + (typeof el.className === 'string' ? el.className.trim() : '');
+  const stepGroup = form => {
+    for (const parent of [form, ...form.querySelectorAll('*')]) {
+      const groups = new Map();
+      for (const child of parent.children) {
+        const key = keyOf(child);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(child);
+      }
+      for (const members of groups.values()) {
+        if (members.length < 2) continue;
+        if (!members.every(member => member.querySelector(BUTTONS))) continue;
+        if (members.filter(isVisible).length !== 1) continue;
+        return members;
+      }
+    }
+    return null;
+  };
+"""
+_STEP_OF_JS = (
+    "el => {" + _STEP_GROUP_JS + """
+  const form = el.closest('form');
+  const group = form && stepGroup(form);
+  if (!group) return null;
+  const index = group.findIndex(member => member.contains(el));
+  return index < 0 ? null : index + 1;
+}"""
+)
+_FORM_STEPS_JS = (
+    "form => {" + _STEP_GROUP_JS + """
+  const group = stepGroup(form);
+  if (!group) return null;
+  const textOf = el => ((el.innerText || el.textContent || '').split('\\n')[0] || '')
+    .replace(/\\s+/g, ' ').trim().replace(/\\s*\\d+$/, '');
+  // Step names: a tab or progress list outside the steps with one item per
+  // step, else each step's first heading or legend.
+  let names = null;
+  for (const list of document.querySelectorAll("[role='tablist'], nav, ul, ol")) {
+    if (group.some(member => member.contains(list) || list.contains(member))) continue;
+    const items = [...list.children];
+    if (items.length !== group.length) continue;
+    const texts = items.map(textOf);
+    if (texts.every(Boolean)) { names = texts; break; }
+  }
+  const all = [...form.querySelectorAll(BUTTONS)];
+  const buttonText = button => (button.getAttribute('aria-label') || button.innerText
+    || button.value || '').replace(/\\s+/g, ' ').trim();
+  return group.map((member, index) => {
+    const heading = member.querySelector("h1, h2, h3, h4, h5, h6, legend, [role='heading']");
+    const buttons = [...member.querySelectorAll(BUTTONS)];
+    const prev = buttons.find(button => /prev|back|«/i.test(buttonText(button)));
+    // The last step's button submits; it does not lead to another step.
+    const next = index === group.length - 1 ? null
+      : buttons.find(button => /next|continue|proceed|»/i.test(buttonText(button)))
+        || buttons.filter(button => button !== prev).pop();
+    return {
+      step: index + 1,
+      name: ((names && names[index]) || (heading && textOf(heading)) || `Step ${index + 1}`).slice(0, 100),
+      visible: isVisible(member),
+      next_index: next ? all.indexOf(next) : -1,
+      prev_index: prev ? all.indexOf(prev) : -1,
+    };
+  });
+}"""
+)
 
 
 class ApplicationInspectionError(ValueError):
@@ -264,6 +353,17 @@ class ApplicationReconnaissanceAgent(BaseAgent):
                     )
                     if page_info:
                         dom_context["pages"].append(page_info)
+                if not urls and test_cases:
+                    for page_info in await self._follow_step_links(page, target_url, test_cases):
+                        # A page reached the way the steps reach it replaces a
+                        # direct load of the same URL: apps such as a quote form
+                        # that reads the chosen product from a cookie set by the
+                        # menu show different fields when opened directly.
+                        dom_context["pages"] = [
+                            existing for existing in dom_context["pages"]
+                            if existing.get("url") != page_info.get("url")
+                        ]
+                        dom_context["pages"].append(page_info)
 
                 dom_context["_object_repository"] = [
                     {"url": page_info["url"], "elements": page_info.pop("_objects", [])}
@@ -372,7 +472,75 @@ class ApplicationReconnaissanceAgent(BaseAgent):
             await page.locator("body").wait_for(state="visible", timeout=5000)
         except Exception:
             return self._error_page(url, "Navigation failed")
+        return await self._inspect_loaded_page(page, url, test_cases, allow_invalid_login_probe)
 
+    async def _follow_step_links(
+        self,
+        page,
+        target_url: str,
+        test_cases: list[TestCase],
+    ) -> list[dict[str, Any]]:
+        """Inspect the pages reached by clicking links that the steps name.
+
+        A step such as "Click Automobile in the top menu" names a link on the
+        page the flow is on. Starting from the target URL, each such step
+        clicks the visible link with that exact name and inspects the page it
+        leads to, so the evidence matches what the script will see. Only
+        links are followed (plain navigation, nothing is submitted), and the
+        browser's request filter still blocks other origins.
+        """
+        steps = [
+            step for test_case in test_cases
+            for step in [*test_case.preconditions, *test_case.steps]
+            if _NAVIGATION_STEP.search(step)
+        ]
+        if not steps:
+            return []
+        try:
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=20000)
+        except Exception:
+            return []
+        pages = []
+        for step in steps:
+            if len(pages) >= MAX_FOLLOWED_LINKS:
+                break
+            try:
+                names = await page.locator("a[href]").evaluate_all(
+                    """links => links
+                      .filter(a => a.offsetWidth || a.offsetHeight || a.getClientRects().length)
+                      .map(a => (a.innerText || a.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim())
+                      .filter(name => name.length >= 3 && name.length <= 60)"""
+                )
+            except Exception:
+                continue
+            step_text = f" {' '.join(step.casefold().split())} "
+            matches = sorted(
+                {name for name in names if re.search(rf"(?<!\w){re.escape(name.casefold())}(?!\w)", step_text)},
+                key=len,
+                reverse=True,
+            )
+            if not matches:
+                continue
+            link = page.get_by_role("link", name=matches[0], exact=True).first
+            try:
+                await link.click(timeout=5000)
+                await page.wait_for_load_state("domcontentloaded", timeout=20000)
+                await page.locator("body").wait_for(state="visible", timeout=5000)
+            except Exception:
+                continue
+            page_info = await self._inspect_loaded_page(page, page.url, test_cases, False)
+            if page_info and not page_info.get("error"):
+                page_info["reached_by"] = f"link {matches[0]!r}"
+                pages.append(page_info)
+        return pages
+
+    async def _inspect_loaded_page(
+        self,
+        page,
+        url: str,
+        test_cases: list[TestCase],
+        allow_invalid_login_probe: bool,
+    ) -> dict[str, Any] | None:
         # One page that can't be read must not fail the whole inspection or
         # scan; it is reported as an error page, which callers already skip.
         try:
@@ -463,7 +631,7 @@ class ApplicationReconnaissanceAgent(BaseAgent):
     @staticmethod
     def _looks_like_login_page(forms: list[dict[str, Any]]) -> bool:
         return any(
-            field.get("type") == "password"
+            field.get("type") == "password" and field.get("visible", True)
             for form in forms
             for field in form.get("fields", [])
         )
@@ -476,13 +644,13 @@ class ApplicationReconnaissanceAgent(BaseAgent):
     ) -> None:
         username, password = credentials
         for form in forms:
-            fields = form.get("fields", [])
+            fields = [field for field in form.get("fields", []) if field.get("visible", True)]
             username_field = next(
                 (
                     field for field in fields
                     if field.get("type") != "password"
                     and any(
-                        token in str(field.get("label", "")).casefold()
+                        token in f"{field.get('label', '')} {field.get('name', '')}".casefold()
                         for token in ("user", "email", "login")
                     )
                     and field.get("match_count") == 1
@@ -557,11 +725,46 @@ class ApplicationReconnaissanceAgent(BaseAgent):
                 "submit_button": None,
                 "match_count": await page.locator(selector).count() if selector else 0,
             }
-            fields = (await form.locator("input, select, textarea").all())[:50]
+            # Hidden fields are kept (visible: false): a multi-step form such as
+            # a wizard on one URL shows its later steps only after actions, so
+            # without them the model has no observed selector for those steps.
+            steps = await self._form_steps(page, form)
+            if steps:
+                form_info["steps"] = steps
+            fields = (await form.locator(
+                "input:not([type='hidden']), select, textarea"
+            ).all())[:MAX_FORM_FIELDS]
             for field in fields:
                 field_info = await self._extract_field_info(page, field)
                 if field_info:
+                    if steps:
+                        await self._tag_step(field, field_info)
                     form_info["fields"].append(field_info)
+            hidden_buttons = []
+            for button in (await form.locator(
+                "button, input[type='submit'], input[type='button']"
+            ).all())[:MAX_FORM_FIELDS]:
+                if await button.is_visible():
+                    continue
+                button_selector = await self._get_best_selector(button)
+                button_text = (
+                    await button.get_attribute("aria-label")
+                    or await button.text_content()
+                    or await button.get_attribute("value")
+                    or ""
+                )
+                button_info = {
+                    "name": " ".join(button_text.split())[:100],
+                    "selector": button_selector,
+                    "match_count": await page.locator(button_selector).count()
+                    if button_selector else 0,
+                    "visible": False,
+                }
+                if steps:
+                    await self._tag_step(button, button_info)
+                hidden_buttons.append(button_info)
+            if hidden_buttons:
+                form_info["hidden_buttons"] = hidden_buttons
 
             submit_candidates = await form.locator(
                 'button[type="submit"], input[type="submit"], button'
@@ -585,14 +788,58 @@ class ApplicationReconnaissanceAgent(BaseAgent):
                     "match_count": await page.locator(submit_selector).count()
                     if submit_selector else 0,
                 }
+                if steps:
+                    await self._tag_step(submit_btn, form_info["submit_button"])
             forms.append(form_info)
 
         return forms
 
-    async def _extract_field_info(self, page, field) -> dict | None:
-        """Extract information from a form field."""
-        if not await field.is_visible():
+    async def _form_steps(self, page, form) -> list[dict[str, Any]] | None:
+        """The steps of a multi-step form, in order, or None for a plain form.
+
+        Each step has its 1-based number, a name (from the form's tab or
+        progress list, else its heading), whether it was visible at load, and
+        the unique selectors of the buttons that move to the next and previous
+        step, so a script can tell which controls it may use before each
+        "Next" click.
+        """
+        try:
+            raw = await form.evaluate(_FORM_STEPS_JS)
+        except Exception:
             return None
+        if not raw:
+            return None
+        buttons = form.locator(_STEP_BUTTONS)
+        steps = []
+        for item in raw:
+            step = {
+                "step": int(item["step"]),
+                "name": " ".join(str(item.get("name") or "").split())[:100],
+                "visible": bool(item.get("visible")),
+            }
+            for key in ("next", "prev"):
+                index = item.get(f"{key}_index", -1)
+                if not isinstance(index, int) or index < 0:
+                    continue
+                selector = await self._get_best_selector(buttons.nth(index))
+                if selector and await page.locator(selector).count() == 1:
+                    step[f"{key}_button"] = selector
+            steps.append(step)
+        return steps
+
+    @staticmethod
+    async def _tag_step(element, info: dict[str, Any]) -> None:
+        """Add the multi-step form step that holds this element, when known."""
+        try:
+            step = await element.evaluate(_STEP_OF_JS)
+        except Exception:
+            return
+        if isinstance(step, int):
+            info["step"] = step
+
+    async def _extract_field_info(self, page, field) -> dict | None:
+        """Extract information from a form field, visible or hidden."""
+        visible = await field.is_visible()
         tag_name = await field.evaluate("el => el.tagName.toLowerCase()")
         field_type = (await field.get_attribute("type") or "text").casefold()
         name = await field.get_attribute("name") or ""
@@ -602,7 +849,11 @@ class ApplicationReconnaissanceAgent(BaseAgent):
               .filter(Boolean)
               .join(' ')"""
         )
-        label_text = label_text or await field.get_attribute("aria-label") or name or "Unlabeled"
+        # Only text Playwright's getByLabel can resolve counts as a label. A
+        # name attribute is reported separately, so a page whose <label> is
+        # not tied to its field (no `for`, not wrapping it) yields an empty
+        # label and the model uses the observed selector instead.
+        label_text = label_text or await field.get_attribute("aria-label") or ""
         if tag_name == "select":
             control_type = "select"
         elif field_type in ("checkbox", "radio", "password", "email", "search", "number"):
@@ -611,17 +862,76 @@ class ApplicationReconnaissanceAgent(BaseAgent):
             control_type = "text"
 
         selector = await self._get_best_selector(field)
-        return {
+        info = {
             "type": control_type,
             "role": "combobox" if control_type == "select" else (
                 "textbox" if control_type not in ("checkbox", "radio") else control_type
             ),
             "label": " ".join(label_text.split())[:100],
+            "name": name[:100],
             "selector": selector,
             "match_count": await page.locator(selector).count() if selector else 0,
             "placeholder": ((await field.get_attribute("placeholder")) or "")[:100],
             "required": await field.get_attribute("required") is not None,
+            "visible": visible,
         }
+        if control_type in ("checkbox", "radio"):
+            # The value attribute of an option is authored markup, not user
+            # input; it ties a data value to an option without visible text.
+            option_value = await field.get_attribute("value")
+            if option_value:
+                info["value"] = option_value[:100]
+            click_selector = await self._label_click_selector(page, field, selector)
+            if click_selector:
+                info["click_selector"] = click_selector
+        return info
+
+    async def _label_click_selector(self, page, field, field_selector: str) -> str | None:
+        """A unique selector for the <label> of a checkbox or radio, or None.
+
+        Many forms style these controls by hiding or covering the native input
+        (a custom span or icon on top of it), so a click on the input is
+        intercepted while a click on its label toggles it on any site. Built
+        from plain HTML only: the label's id, its `for` attribute, the input
+        it wraps, or the input's name and value attributes (authored markup,
+        not something a user typed). Kept only when it matches one element.
+        """
+        info = await field.evaluate(
+            """el => {
+              const label = el.closest('label') || (el.labels && el.labels[0]) || null;
+              if (!label) return null;
+              return {
+                id: label.id || '',
+                htmlFor: label.getAttribute('for') || '',
+                wraps: label.contains(el),
+                tag: el.tagName.toLowerCase(),
+                name: el.getAttribute('name') || '',
+                value: el.getAttribute('value') || '',
+              };
+            }"""
+        )
+        if not info:
+            return None
+        candidates = []
+        if info["id"]:
+            candidates.append(f"label#{await field.evaluate('(_, id) => CSS.escape(id)', info['id'])}")
+        if info["htmlFor"]:
+            candidates.append(f"label[for={json.dumps(info['htmlFor'])}]")
+        if info["wraps"]:
+            if field_selector:
+                candidates.append(f"label:has({field_selector})")
+            if info["name"] and info["value"]:
+                candidates.append(
+                    f"label:has({info['tag']}[name={json.dumps(info['name'])}]"
+                    f"[value={json.dumps(info['value'])}])"
+                )
+        for candidate in candidates:
+            try:
+                if await page.locator(candidate).count() == 1:
+                    return candidate
+            except Exception:
+                continue
+        return None
 
     async def _extract_interactive_elements(self, page) -> list[dict]:
         """Extract buttons, links, and other interactive elements."""

@@ -472,3 +472,42 @@ class ObjectLocatorDB(Base):
     __table_args__ = (
         UniqueConstraint("element_id", "position", name="uq_object_locators_element_position"),
     )
+
+
+class TokenUsageDB(Base):
+    """One billable LLM completion attempt (Token Utilization feature).
+    project_id has no foreign key on purpose: usage history outlives a deleted project."""
+    __tablename__ = "token_usage"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+    agent = Column(String(100), nullable=False, index=True)
+    operation = Column(String(200), nullable=True)
+    project_id = Column(UUID(as_uuid=True), nullable=True)
+    requirement_id = Column(UUID(as_uuid=True), nullable=True)
+    test_case_id = Column(UUID(as_uuid=True), nullable=True)
+    run_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+
+    role = Column(String(50), nullable=True)
+    provider = Column(String(50), nullable=False, default="")
+    model = Column(String(200), nullable=False, default="", index=True)
+
+    prompt_tokens = Column(Integer, nullable=False, default=0)
+    completion_tokens = Column(Integer, nullable=False, default=0)
+    total_tokens = Column(Integer, nullable=False, default=0)
+
+    input_cost_usd = Column(Float, nullable=False, default=0.0)
+    output_cost_usd = Column(Float, nullable=False, default=0.0)
+    cost_usd = Column(Float, nullable=False, default=0.0)
+    priced = Column(Boolean, nullable=False, default=False)
+    price_source = Column(String(20), nullable=False, default="none")
+
+    latency_ms = Column(Integer, nullable=False, default=0)
+    status = Column(String(20), nullable=False, default="success")
+    error_type = Column(String(200), nullable=True)
+    attempt = Column(Integer, nullable=False, default=1)
+
+    __table_args__ = (
+        Index("ix_token_usage_project_created", "project_id", "created_at"),
+    )

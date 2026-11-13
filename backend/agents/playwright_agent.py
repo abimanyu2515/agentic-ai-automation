@@ -73,6 +73,7 @@ from uuid import UUID
 from backend.agents.base import BaseAgent
 from backend.models.state import WorkflowState
 from backend.models.test_case import TestCase
+from backend.services.llm_context import run_in_context
 from backend.services.llm import LLMService
 from backend.utils.prompts import load_prompt
 
@@ -87,7 +88,33 @@ _SYSTEM_PROMPT = (
     "2. Live page evidence, when provided, covers only the pages it lists (usually the pages "
     "reachable before login). On those pages derive every locator from it: prefer uniquely "
     "observed accessible locators (getByRole, getByLabel, getByPlaceholder, getByText), and use "
-    "an observed CSS selector only when the evidence includes it. For pages the evidence does not "
+    "an observed CSS selector only when the evidence includes it. A form field whose evidence "
+    "`label` is empty has no accessible label (its visible caption is not tied to the control): "
+    "never use getByLabel or getByRole with a name for it; act on its observed `selector` "
+    "(for example page.locator('#make')). A field's `name` is an HTML attribute, not a label. "
+    "A form field or hidden_buttons entry with `visible: false` was on the page but hidden at "
+    "load, typically a later step of a multi-step form on the same URL: once the steps reveal "
+    "it, use its observed `selector`, or getByLabel with its evidence `label` when that label "
+    "is not empty; never a label the evidence does not show. "
+    "A form with `steps` is a multi-step form shown one step at a time. Each field and button "
+    "carries the `step` number it sits on, and each step names its `next_button` (which shows "
+    "the following step) and `prev_button`. Finish every control a test step needs on its "
+    "evidence step before clicking that step's next_button, even when the test case lists it "
+    "as a separate step (for example optional products listed after a product data step "
+    "belong on the product data form if the evidence puts them there). Click each "
+    "next_button exactly once, in step order, and never use a control after its step's "
+    "next_button was clicked. "
+    "A checkbox or radio with a `click_selector` is toggled by clicking that selector (its "
+    "<label>), not the input: many forms cover the native input with a styled element that "
+    "intercepts the click, so check(), setChecked(), or clicking the input can time out. "
+    "To pick such an option from a data value, map the value to its option through the "
+    "evidence (match the value against each option's `label` or `value`, ignoring case and "
+    "spaces) and "
+    "click that option's click_selector; when the options are not in the evidence, click the "
+    "label whose whitespace-normalized text equals the value, for example "
+    "page.locator(`xpath=//label[normalize-space()='${value}']`). Never use XPath text()= "
+    "for label text: it fails on the whitespace around a wrapped input. "
+    "For pages the evidence does not "
     "list, use the accessible locator the step wording implies: getByRole with the control's "
     "visible name (e.g. getByRole('button', { name: 'Continue' })), getByLabel or getByPlaceholder "
     "with the field's name, or getByText with text quoted in the step. Every locator "
@@ -151,6 +178,52 @@ _JS_COMMENT_OR_STRING = re.compile(
     r"|'(?:[^'\\\n]|\\.)*'|\"(?:[^\"\\\n]|\\.)*\"|`(?:[^`\\]|\\.)*`"
 )
 
+
+def _template_parts(content: str) -> list[tuple[bool, str]]:
+    """Split a template literal's content into (is_code, text) parts.
+
+    Text parts keep their characters; each ${...} part keeps its `${` and `}`
+    and is flagged as code. Braces inside quoted strings in the expression
+    are not counted. An unclosed ${ leaves the rest as text.
+    """
+    parts: list[tuple[bool, str]] = []
+    start = index = 0
+    while index < len(content):
+        char = content[index]
+        if char == "\\":
+            index += 2
+            continue
+        if not content.startswith("${", index):
+            index += 1
+            continue
+        depth, end, quote = 0, index + 2, None
+        while end < len(content):
+            current = content[end]
+            if current == "\\":
+                end += 2
+                continue
+            if quote:
+                if current == quote:
+                    quote = None
+            elif current in "'\"":
+                quote = current
+            elif current == "{":
+                depth += 1
+            elif current == "}":
+                if depth == 0:
+                    break
+                depth -= 1
+            end += 1
+        if end >= len(content):
+            break
+        if index > start:
+            parts.append((False, content[start:index]))
+        parts.append((True, content[index:end + 1]))
+        start = index = end + 1
+    if start < len(content):
+        parts.append((False, content[start:]))
+    return parts
+
 # A TestDataAgent vault reference as a JSON string, such as
 # "{{vault:TARGET_USERNAME}} run 01", for a valid login's credentials.
 _VAULT_REFERENCE = re.compile(r'"\{\{vault:(TARGET_USERNAME|TARGET_PASSWORD)\}\}(?: run \d+)?"')
@@ -169,6 +242,16 @@ _ITEM_LOCATOR_RULE = (
     "the action control inside it, for example page.locator(<item card selector>)"
     ".filter({ hasText: item }).getByRole('button', { name: 'Add to cart' }). Never "
     "put the item name into the control's accessible name."
+)
+
+
+# Seen live: a wizard whose checkboxes are covered by a styled span, so only
+# a click on the wrapping <label> toggles them, and //label[text()='X'] missed
+# because of the whitespace around the wrapped input.
+_OPTION_LOCATOR_RULE = (
+    "When the items are checkbox or radio options, click each item's option label "
+    "instead: the evidence click_selector of the option whose label or value matches the item, "
+    "or page.locator(`xpath=//label[normalize-space()='${item}']`)."
 )
 
 
@@ -202,8 +285,8 @@ def _describe_data_fields(
                 f"- {marker} ({field}): a list of items joined with '{_LIST_SEPARATOR}', "
                 f"for example {example}. Datasets hold {size_text} items. "
                 f"Loop over '{marker}'.split('{_LIST_SEPARATOR}') and repeat the step's "
-                f"action once per item. {_ITEM_LOCATOR_RULE} Never hard-code item names "
-                "or a fixed number of items."
+                f"action once per item. {_ITEM_LOCATOR_RULE} {_OPTION_LOCATOR_RULE} "
+                "Never hard-code item names or a fixed number of items."
             )
         elif field.lower().startswith("expected_"):
             notes[marker] = (
@@ -215,7 +298,9 @@ def _describe_data_fields(
                 f"- {marker} ({field}): a yes/no choice, for example {example}. Apply it "
                 f"to the checkbox, switch, or option, for example "
                 f"setChecked(['true', 'yes'].includes('{marker}'.toLowerCase())). This "
-                "comparison is allowed."
+                "comparison is allowed. When the evidence gives the control a "
+                "click_selector, click that label instead, only when its current state "
+                "differs from the wanted one."
             )
         elif _ITEM_FIELD.search(field):
             notes[marker] = (
@@ -288,7 +373,20 @@ def _normalize_playwright_code(code: str, base_url: str) -> str:
             f"\nconst BASE_URL = process.env.TARGET_URL || {json.dumps(base_url)};\n",
         )
         code = "\n".join(lines)
+    elif base_url:
+        # The runner does not set TARGET_URL, so the fallback is the URL the test
+        # opens. Models copy a deeper URL from the trace or evidence, which skips
+        # the project's own entry steps; the project URL always wins.
+        code = _BASE_URL_FALLBACK.sub(
+            lambda match: match.group(1) + json.dumps(base_url), code, count=1
+        )
     return code
+
+
+_BASE_URL_FALLBACK = re.compile(
+    r"""(\bconst\s+BASE_URL\s*=\s*process\.env\.TARGET_URL\s*(?:\|\||\?\?)\s*)"""
+    r"""(?:'[^'\n]*'|"[^"\n]*"|`[^`$\n]*`)"""
+)
 
 
 def _format_preconditions(preconditions: list[str]) -> str:
@@ -319,7 +417,7 @@ class PlaywrightAgent(BaseAgent):
         on the live target app (see script_generator_agent's
         generate_data_driven_template). Without it, or when recording fails,
         templates come from one LLM call grounded on state.dom_context."""
-        self.llm_service = llm_service or LLMService(role="generation")
+        self.llm_service = llm_service or LLMService(role="generation", agent="playwright_agent")
         self.repo = repo
         if max_workers < 1:
             raise ValueError("max_workers must be at least 1")
@@ -486,7 +584,8 @@ class PlaywrightAgent(BaseAgent):
                 test_case.playwright_script = script
         else:
             with ThreadPoolExecutor(max_workers=min(self.max_workers, len(approved))) as executor:
-                for test_case, script in zip(approved, executor.map(generate_script, approved)):
+                # run_in_context keeps token usage attribution (project, run) in worker threads.
+                for test_case, script in zip(approved, executor.map(run_in_context(generate_script), approved)):
                     test_case.playwright_script = script
 
         state.add_log(f"{self.name} finished: generated {len(approved)} {framework.capitalize()} script(s)")
@@ -839,6 +938,15 @@ class PlaywrightAgent(BaseAgent):
             "|".join(re.escape(marker) for marker in sorted(expressions, key=len, reverse=True))
         )
 
+        def bind_text(text: str) -> str:
+            """Markers in template literal text become ${expression}."""
+            return marker_pattern.sub(lambda m: "${" + expressions[m.group(0)] + "}", text)
+
+        def bind_code(code: str) -> str:
+            code = _JS_COMMENT_OR_STRING.sub(bind, code)
+            # Any marker left sits in code, outside a string.
+            return marker_pattern.sub(lambda m: expressions[m.group(0)], code)
+
         def bind(match: re.Match) -> str:
             token = match.group(0)
             if not marker_pattern.search(token):
@@ -850,13 +958,16 @@ class PlaywrightAgent(BaseAgent):
                 if content in expressions:
                     return expressions[content]
                 content = content.replace("`", "\\`").replace("${", "\\${")
-            return "`" + marker_pattern.sub(
-                lambda m: "${" + expressions[m.group(0)] + "}", content
+                return "`" + bind_text(content) + "`"
+            # A template literal: its ${...} parts are code, so a marker in a
+            # string there is bound as code (for example
+            # `#select${'__M__'.toLowerCase()}` reads the row, not the text).
+            return "`" + "".join(
+                bind_code(part) if is_code else bind_text(part)
+                for is_code, part in _template_parts(content)
             ) + "`"
 
-        script = _JS_COMMENT_OR_STRING.sub(bind, script)
-        # Any marker left sits in code, outside a string.
-        return marker_pattern.sub(lambda m: expressions[m.group(0)], script)
+        return bind_code(script)
 
     @staticmethod
     def _resolve_vault_references(row_literal: str) -> str:
@@ -1037,6 +1148,9 @@ class PlaywrightAgent(BaseAgent):
                 "fill() with the marker so the empty value is applied.\n"
                 "- Do not branch on marker values and never replace a marker with an "
                 "example or a TODO value.\n"
+                "- When a marker's value must be transformed or built into a selector, "
+                "first assign it to a const (for example const option = '__TEST_DATA_01__';) "
+                "and use that const; do not write a marker inside a ${...} expression.\n"
                 "- Follow the steps in order; only the marked values vary between datasets.\n"
                 "- When username or password fields are listed in test_data, fill them "
                 "with their markers too; at run time they hold the project's credentials.\n"
@@ -1075,7 +1189,9 @@ class PlaywrightAgent(BaseAgent):
                 "not inspected):\n"
                 + json.dumps(dom_context, ensure_ascii=False, separators=(",", ":"))
                 + "\nOn the listed pages use only uniquely observed labels, accessible names, "
-                "visible text, and selectors. On pages that are not listed, follow rule 2. "
+                "visible text, and selectors; for a field with an empty label or "
+                "`visible: false`, use its selector. On pages that are not listed, "
+                "follow rule 2. "
                 "Assert the stated expected_result with an observed visible result or an "
                 "outcome explicitly named by the test case."
             )

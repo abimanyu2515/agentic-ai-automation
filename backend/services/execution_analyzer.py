@@ -55,7 +55,7 @@ class ExecutionAnalyzer:
         """
         print("[ExecutionAnalyzer] Step 1 - Constructor entered")
         print("[ExecutionAnalyzer] Step 2 - LLMService initialized")
-        self.llm_service = llm_service or LLMService(role="analysis")
+        self.llm_service = llm_service or LLMService(role="analysis", agent="execution_analyzer")
         print("[ExecutionAnalyzer] Step 3 - Constructor completed")
     
     def analyze_execution(

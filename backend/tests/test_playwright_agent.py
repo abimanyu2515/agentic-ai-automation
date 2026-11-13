@@ -554,7 +554,11 @@ def test_describe_data_fields_names_each_field_shape_from_all_datasets():
     assert "list of items" in notes["__TEST_DATA_04__"]
     assert "1 to 2 items" in notes["__TEST_DATA_04__"]
     assert "'__TEST_DATA_04__'.split('; ')" in notes["__TEST_DATA_04__"]
+    # List items may be checkbox options whose input a styled element covers.
+    assert "click_selector" in notes["__TEST_DATA_04__"]
+    assert "normalize-space()" in notes["__TEST_DATA_04__"]
     assert "yes/no choice" in notes["__TEST_DATA_05__"]
+    assert "click_selector" in notes["__TEST_DATA_05__"]
     assert "Assert it" in notes["__TEST_DATA_06__"]
     assert "{{vault:" not in "".join(notes.values())
 
@@ -711,6 +715,33 @@ def test_bind_markers_to_row_handles_strings_comments_and_code():
     ]
 
 
+def test_bind_markers_to_row_binds_quoted_markers_inside_template_expressions():
+    expressions = {"__TEST_DATA_23__": 'row.data["price_option"]', "__TEST_DATA_02__": 'row.data["name"]'}
+    script = (
+        "await page.locator(`label:has(#select${'__TEST_DATA_23__'.toLowerCase()})`).click();\n"
+        "const a = `x __TEST_DATA_02__ ${fn({ k: \"__TEST_DATA_23__\" })} \\${keep}`;\n"
+        "const b = `${'pre-__TEST_DATA_02__'}`;"
+    )
+
+    bound = PlaywrightAgent._bind_markers_to_row(script, expressions)
+
+    assert bound.split("\n") == [
+        'await page.locator(`label:has(#select${row.data["price_option"].toLowerCase()})`).click();',
+        'const a = `x ${row.data["name"]} ${fn({ k: row.data["price_option"] })} \\${keep}`;',
+        'const b = `${`pre-${row.data["name"]}`}`;',
+    ]
+
+
+def test_template_parts_split_text_and_expressions():
+    from backend.agents.playwright_agent import _template_parts
+
+    assert _template_parts("a ${b('}')} c \\${d} ${e") == [
+        (False, "a "),
+        (True, "${b('}')}"),
+        (False, " c \\${d} ${e"),
+    ]
+
+
 def test_missing_playwright_import_is_added():
     code = (
         "const BASE_URL = process.env.TARGET_URL || '';\n"
@@ -758,3 +789,19 @@ def test_requires_requirement():
 
     with pytest.raises(ValueError):
         agent.run(state)
+
+def test_normalize_pins_base_url_fallback_to_the_project_url():
+    from backend.agents.playwright_agent import _normalize_playwright_code
+
+    code = (
+        "import { test, expect } from '@playwright/test';\n"
+        "const BASE_URL = process.env.TARGET_URL || \"https://shop.example.test/deep/form.php\";\n"
+        "test('t', async ({ page }) => { await page.goto(BASE_URL); });"
+    )
+
+    normalized = _normalize_playwright_code(code, "https://shop.example.test/")
+
+    assert 'process.env.TARGET_URL || "https://shop.example.test/";' in normalized
+    assert "form.php" not in normalized
+    # Without a project URL there is nothing to pin.
+    assert _normalize_playwright_code(code, "") == code

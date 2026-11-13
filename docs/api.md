@@ -619,6 +619,111 @@ GET /api/v1/projects/{project_id}/dashboard-metrics?scope=project|release|cycle&
 
 ---
 
+## Token Usage
+
+Real LLM token usage and cost recorded for every agent call. See [Token Utilization](features/token-utilization.md). All routes need the `TokenUsage` permission: `view` for reads, `edit` to change settings.
+
+**Common filters** (query string, all optional): `from`, `to` (ISO 8601; a value without a timezone is read as UTC; `to` is exclusive), `project_id`, `agent`, `model`, `role`, `provider`, `status` (`success` | `error` | `rate_limited`), `operation`.
+
+### Summary
+
+```
+GET /api/v1/token-usage/summary
+```
+
+```json
+{
+  "calls": 42, "prompt_tokens": 81000, "completion_tokens": 23000, "total_tokens": 104000,
+  "cost_usd": 0.0412, "avg_tokens_per_call": 2476.2, "avg_cost_per_call": 0.00098,
+  "avg_latency_ms": 3120, "errors": 2, "error_rate": 0.0476, "retries": 3, "unpriced_calls": 0,
+  "previous": { "...": "same totals for the previous period of equal length, or null" },
+  "deltas": { "cost_usd": 12.5, "total_tokens": -4.0, "calls": null },
+  "unpriced_models": [],
+  "first_call_at": "2026-11-01T09:00:00Z", "last_call_at": "2026-11-12T10:00:00Z",
+  "budget": {
+    "monthly_budget_usd": 25.0, "alert_threshold_pct": 80.0, "month_to_date_usd": 4.1,
+    "projected_month_end_usd": 10.2, "used_pct": 16.4, "projected_pct": 40.8, "state": "ok"
+  }
+}
+```
+
+`previous` and `deltas` are only filled when both `from` and `to` are given. `budget.state` is `none`, `ok`, `warning` (above the threshold, or projected over budget) or `exceeded`.
+
+### Time series
+
+```
+GET /api/v1/token-usage/timeseries?bucket=hour|day|week&split_by=agent|model|role|provider|project_id|operation|status
+```
+
+Returns `labels` (bucket starts, UTC) and `series`. Each series item is `{key, tokens[], prompt_tokens[], completion_tokens[], cost_usd[], calls[]}`. With no `split_by` there is one series, `All`. A split keeps the 8 largest series by cost and folds the rest into `Other`.
+
+### Breakdown
+
+```
+GET /api/v1/token-usage/breakdown?group_by=agent|model|role|provider|project_id|operation|status
+```
+
+Returns `{group_by, rows: [...]}`, sorted by cost. Each row has these fields:
+- The group: `key`, plus `models` and `roles`.
+- Volume: `calls`, `prompt_tokens`, `completion_tokens`, `total_tokens`.
+- Cost: `cost_usd`, `cost_share_pct`, `token_share_pct`.
+- Averages: `avg_tokens_per_call`, `avg_cost_per_call`, `avg_latency_ms`.
+- Failures: `errors`, `error_rate`, `retries`, `unpriced_calls`.
+- `stage`, only when grouping by agent.
+
+`400` for an unknown `group_by`.
+
+### Call log
+
+```
+GET /api/v1/token-usage/calls?page=1&page_size=25&sort=-created_at
+```
+
+`sort` is one of `created_at`, `cost_usd`, `total_tokens`, `latency_ms`, `agent` or `model`. Prefix it with `-` for descending order. `page_size` is capped at 200. Returns `{page, page_size, total, items}`, where each item is a full usage record plus `stage`.
+
+### Facets
+
+```
+GET /api/v1/token-usage/facets
+```
+
+Distinct `agent`, `model`, `role`, `provider`, `status`, `operation` and `project_id` values, for filter dropdowns.
+
+### Export CSV
+
+```
+GET /api/v1/token-usage/export.csv
+```
+
+`text/csv` attachment of the filtered records, one row per attempt.
+
+### Pricing
+
+```
+GET /api/v1/token-usage/pricing
+```
+
+The effective price of every configured model and every model seen in usage, as a list of `{provider, model, model_string, roles, input_per_1m, output_per_1m, source}`. `source` is `override`, `litellm` or `none`.
+
+### Settings
+
+```
+GET /api/v1/token-usage/settings
+PUT /api/v1/token-usage/settings
+```
+
+```json
+{
+  "monthly_budget_usd": 25.0,
+  "alert_threshold_pct": 80,
+  "pricing_overrides": { "meta/llama-3.1-70b-instruct": { "input_per_1m": 0.35, "output_per_1m": 0.4 } }
+}
+```
+
+`PUT` replaces all three fields and returns the saved settings. Values are validated: the budget must be 0 or more, and the threshold must be between 0 and 100.
+
+---
+
 ## Releases & Test Cycles
 
 ### List Releases
@@ -720,7 +825,7 @@ Returns all configuration sections (LLM, Workflow, Browser, RAG, Generation, Eva
 }
 ```
 
-`llm_roles` is read only and comes from the `GENERATION_LLM_*` and `ANALYSIS_LLM_*` variables in `.env` (spec 0003). API keys and base URLs are never returned. `GET /api/v1/projects/{project_id}/traces` also returns `llm_roles` with each role's provider and models; its `model` and `provider` fields show the analysis role.
+`llm_roles` is read only and comes from the `GENERATION_LLM_*` and `ANALYSIS_LLM_*` variables in `.env` (spec 0003). API keys and base URLs are never returned. `GET /api/v1/projects/{project_id}/traces` also returns `llm_roles` with each role's provider and models; its `model` and `provider` fields show the analysis role. Its `total_calls`, token, cost and per agent `traces` figures are the project's real recorded usage (see [Token Usage](#token-usage)).
 
 ### Save Settings
 

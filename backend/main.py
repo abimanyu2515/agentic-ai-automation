@@ -98,7 +98,7 @@ import fitz
 from fastapi import FastAPI, HTTPException, Body, Query, status, BackgroundTasks, UploadFile, File, Depends, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse, FileResponse
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -149,6 +149,10 @@ from sqlalchemy.orm import Session
 from backend.dependencies.auth_dependencies import get_db, get_current_user, has_permission, permitted_actions
 from backend.services.auth_service import hash_password, verify_password, create_access_token, create_refresh_token, decode_token
 from backend.services.audit_service import log_audit
+from backend.services.llm_context import LLMContextMiddleware
+from backend.services.token_usage_service import get_token_usage_service
+from backend.models.token_usage import TokenUsageFilters
+from backend.schemas.token_usage_dto import ModelPriceRow, TokenUsageCallsPage, TokenUsageSettings
 from backend.utils.crypto import encrypt_value
 from backend.database.db_models import UserDB, RoleDB, PermissionDB, RolePermissionDB, ProjectUserDB, RefreshTokenDB, AuditLogDB
 
@@ -167,6 +171,10 @@ app = FastAPI(
     description="Enterprise API backing the AI Test Automation Platform.",
     version="1.0.0"
 )
+
+
+# Attributes LLM token usage to the route and project of each API request.
+app.add_middleware(LLMContextMiddleware)
 
 
 @app.middleware("http")
@@ -2468,24 +2476,11 @@ def get_execution_junit(project_id: UUID, execution_id: UUID):
 
 @app.get("/api/v1/projects/{project_id}/traces")
 def get_activity_traces(project_id: UUID):
-    # Return dynamic LLM usage logs and costs mapped to project history
+    """LLM configuration plus the project's real recorded token usage."""
     settings = get_settings()
-    repo = project_service.repo
-    # Calculate mock/dynamic trace values based on generated count
-    requirements = repo.get_requirements(project_id)
-    sc_count = 0
-    tc_count = 0
-    for req in requirements:
-        scs = repo.get_scenarios(req.id)
-        sc_count += len(scs)
-        for sc in scs:
-            tc_count += len(repo.get_test_cases(sc.id))
-    
-    # Standard pricing model for tokens
-    input_tokens = sc_count * 850 + tc_count * 1200
-    output_tokens = sc_count * 450 + tc_count * 800
-    total_tokens = input_tokens + output_tokens
-    estimated_cost = (input_tokens * 0.00015 + output_tokens * 0.0006) / 100
+    filters = TokenUsageFilters(project_id=project_id)
+    summary = get_token_usage_service().summary(filters)
+    by_agent = get_token_usage_service().breakdown(filters, group_by="agent")["rows"]
 
     analysis = settings.llm_roles["analysis"]
     return {
@@ -2496,28 +2491,133 @@ def get_activity_traces(project_id: UUID):
             for role, config in settings.llm_roles.items()
         },
         "temperature": settings.llm.temperature,
-        "total_calls": sc_count + tc_count,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-        "estimated_cost_usd": round(estimated_cost, 4),
+        "total_calls": summary["calls"],
+        "input_tokens": summary["prompt_tokens"],
+        "output_tokens": summary["completion_tokens"],
+        "total_tokens": summary["total_tokens"],
+        "estimated_cost_usd": round(summary["cost_usd"], 4),
         "traces": [
             {
-                "agent": "Scenario Agent",
-                "calls": sc_count,
-                "latency_sec": round(sc_count * 1.45, 2),
-                "tokens": sc_count * 1300,
-                "cost": round(sc_count * 1300 * 0.000003, 4)
-            },
-            {
-                "agent": "TestCase Agent & Evaluation Agent",
-                "calls": tc_count * 2,
-                "latency_sec": round(tc_count * 2.15, 2),
-                "tokens": tc_count * 2000,
-                "cost": round(tc_count * 2000 * 0.0000045, 4)
+                "agent": row["key"],
+                "calls": row["calls"],
+                "latency_sec": round(row["avg_latency_ms"] * row["calls"] / 1000, 2),
+                "tokens": row["total_tokens"],
+                "cost": round(row["cost_usd"], 4),
             }
-        ]
+            for row in by_agent
+        ],
     }
+
+
+# ==========================================================
+# Token Utilization
+# ==========================================================
+
+def token_usage_filters(
+    start: datetime | None = Query(None, alias="from"),
+    end: datetime | None = Query(None, alias="to"),
+    project_id: UUID | None = None,
+    agent: str | None = None,
+    model: str | None = None,
+    role: str | None = None,
+    provider: str | None = None,
+    status: str | None = None,
+    operation: str | None = None,
+) -> TokenUsageFilters:
+    def aware(value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+    return TokenUsageFilters(
+        start=aware(start), end=aware(end), project_id=project_id, agent=agent, model=model,
+        role=role, provider=provider, status=status, operation=operation,
+    )
+
+
+def _token_usage_call(func, *args, **kwargs):
+    try:
+        return func(*args, **kwargs)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/v1/token-usage/summary")
+def get_token_usage_summary(
+    filters: TokenUsageFilters = Depends(token_usage_filters),
+    authorized: bool = Depends(has_permission("TokenUsage", "view")),
+):
+    return get_token_usage_service().summary(filters)
+
+
+@app.get("/api/v1/token-usage/timeseries")
+def get_token_usage_timeseries(
+    bucket: str = "day",
+    split_by: str | None = None,
+    filters: TokenUsageFilters = Depends(token_usage_filters),
+    authorized: bool = Depends(has_permission("TokenUsage", "view")),
+):
+    return _token_usage_call(get_token_usage_service().timeseries, filters, bucket=bucket, split_by=split_by)
+
+
+@app.get("/api/v1/token-usage/breakdown")
+def get_token_usage_breakdown(
+    group_by: str = "agent",
+    filters: TokenUsageFilters = Depends(token_usage_filters),
+    authorized: bool = Depends(has_permission("TokenUsage", "view")),
+):
+    return _token_usage_call(get_token_usage_service().breakdown, filters, group_by=group_by)
+
+
+@app.get("/api/v1/token-usage/calls", response_model=TokenUsageCallsPage)
+def get_token_usage_calls(
+    page: int = 1,
+    page_size: int = 25,
+    sort: str = "-created_at",
+    filters: TokenUsageFilters = Depends(token_usage_filters),
+    authorized: bool = Depends(has_permission("TokenUsage", "view")),
+):
+    return _token_usage_call(get_token_usage_service().calls, filters, page=page, page_size=page_size, sort=sort)
+
+
+@app.get("/api/v1/token-usage/facets")
+def get_token_usage_facets(
+    filters: TokenUsageFilters = Depends(token_usage_filters),
+    authorized: bool = Depends(has_permission("TokenUsage", "view")),
+):
+    return get_token_usage_service().facets(filters)
+
+
+@app.get("/api/v1/token-usage/export.csv")
+def export_token_usage_csv(
+    filters: TokenUsageFilters = Depends(token_usage_filters),
+    authorized: bool = Depends(has_permission("TokenUsage", "view")),
+):
+    content = get_token_usage_service().export_csv(filters)
+    filename = f"token-usage-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.csv"
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/v1/token-usage/pricing", response_model=list[ModelPriceRow])
+def get_token_usage_pricing(authorized: bool = Depends(has_permission("TokenUsage", "view"))):
+    return get_token_usage_service().pricing()
+
+
+@app.get("/api/v1/token-usage/settings", response_model=TokenUsageSettings)
+def get_token_usage_settings(authorized: bool = Depends(has_permission("TokenUsage", "view"))):
+    return get_token_usage_service().get_settings()
+
+
+@app.put("/api/v1/token-usage/settings", response_model=TokenUsageSettings)
+def update_token_usage_settings(
+    payload: TokenUsageSettings,
+    authorized: bool = Depends(has_permission("TokenUsage", "edit")),
+):
+    return get_token_usage_service().update_settings(payload)
 
 
 @app.get("/api/v1/scenarios/{scenario_id}/notes")

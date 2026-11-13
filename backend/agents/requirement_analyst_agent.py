@@ -105,7 +105,7 @@ class RequirementAnalystAgent(BaseAgent):
         Args:
             llm_service: LLM service instance (injected for testing)
         """
-        self.llm_service = llm_service or LLMService(role="analysis")
+        self.llm_service = llm_service or LLMService(role="analysis", agent="requirement_analyst_agent")
         self.repo = get_project_repository()
 
     def run(self, state: WorkflowState) -> WorkflowState:

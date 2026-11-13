@@ -14,6 +14,7 @@ This directory contains comprehensive documentation for the Agentic AI Automatio
 
 ### Core Features
 - [**LangSmith Tracing**](features/langsmith-tracing.md) - Unified observability and tracing
+- [**Token Utilization**](features/token-utilization.md) - Real LLM token usage and cost per agent, model and project
 - [**Professional Reporting**](features/professional-reporting.md) - Enhanced HTML report generation
 - [**Report Specification**](features/report-specification.md) - Report engine design and capabilities
 - [**Locator Fallback**](features/locator-fallback.md) - Hierarchical locator resolution
@@ -70,6 +71,7 @@ docs/
 │
 ├── features/                    # Feature documentation
 │   ├── langsmith-tracing.md
+│   ├── token-utilization.md
 │   ├── professional-reporting.md
 │   ├── report-specification.md
 │   ├── locator-fallback.md

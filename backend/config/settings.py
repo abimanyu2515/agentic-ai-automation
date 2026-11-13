@@ -140,6 +140,16 @@ class ObjectRepositoryConfig(BaseModel):
     harvest_page_budget_ms: int = 5000
 
 
+class TokenUsageConfig(BaseModel):
+    """Token Utilization feature. Values saved from the UI (token_usage_settings.json)
+    take precedence over these defaults."""
+    enabled: bool = True
+    monthly_budget_usd: float = Field(default=0.0, ge=0)  # 0 = no budget
+    alert_threshold_pct: float = Field(default=80.0, ge=0, le=100)
+    # {"<model>": {"input_per_1m": 0.15, "output_per_1m": 0.6}} in USD per 1M tokens
+    pricing_overrides: dict[str, dict[str, float]] = {}
+
+
 class JiraConfig(BaseModel):
     base_url: str = "https://your-domain.atlassian.net"
     email: str = ""
@@ -168,6 +178,7 @@ class Settings(BaseSettings):
     langsmith: LangSmithConfig = LangSmithConfig()
     jira: JiraConfig = JiraConfig()
     object_repository: ObjectRepositoryConfig = ObjectRepositoryConfig()
+    token_usage: TokenUsageConfig = TokenUsageConfig()
     # Read only from .env (never override.yaml); filled from llm.* when unset.
     llm_roles: dict[str, LLMRoleConfig] = {}
 

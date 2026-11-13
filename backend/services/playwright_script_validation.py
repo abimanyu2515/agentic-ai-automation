@@ -29,7 +29,128 @@ def validate_playwright_script(
     issues = _compile_typescript(script)
     issues.extend(_validate_locators(script, dom_context))
     issues.extend(_validate_assertions(script, dom_context, expected_result))
+    issues.extend(validate_step_order(script, dom_context))
     return issues
+
+
+_LITERAL = r"""(?:'([^'\\\n]*)'|"([^"\\\n]*)"|`([^`$\\]*)`)"""
+_LOCATOR_CALL = re.compile(r"\bpage\s*\.\s*locator\(\s*" + _LITERAL + r"\s*\)")
+_LOCATOR_ASSIGNMENT = re.compile(
+    r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?page\s*\.\s*locator\(\s*"
+    + _LITERAL + r"\s*\)"
+)
+_CLICK_AFTER = re.compile(r"\s*\.\s*click\s*\(")
+_NEW_TEST = re.compile(r"\bpage\s*\.\s*goto\s*\(")
+
+
+def _literal_value(match: re.Match, first_group: int) -> str:
+    return next(
+        value for value in match.groups()[first_group:first_group + 3] if value is not None
+    )
+
+
+def validate_step_order(script: str, dom_context: dict[str, Any] | None) -> list[str]:
+    """Flags a script that goes back to a multi-step form step it already left.
+
+    Reconnaissance tags each control of a wizard-like form with its `step` and
+    names each step's `next_button`. A script that clicks a step's next button
+    and later uses a control of that step (or clicks the button again) acts on
+    a hidden element and times out; seen live with optional product checkboxes
+    ticked after the product step's Next. Only backward moves are reported:
+    a jump forward can be a tab click the evidence does not model.
+    """
+    if not dom_context:
+        return []
+    step_of: dict[str, int] = {}
+    conflicting: set[str] = set()
+    names: dict[int, str] = {}
+    next_buttons: dict[str, int] = {}
+    prev_buttons: dict[str, int] = {}
+
+    def remember(selector: Any, step: Any) -> None:
+        if not selector or not isinstance(step, int):
+            return
+        selector = str(selector)
+        if step_of.get(selector, step) != step:
+            conflicting.add(selector)
+        step_of[selector] = step
+
+    forms_with_steps = [
+        form
+        for page in dom_context.get("pages", [])
+        for form in page.get("forms", [])
+        if form.get("steps")
+    ]
+    if len(forms_with_steps) != 1:
+        # Step numbers are per form; with several wizards they cannot be compared.
+        return []
+    form = forms_with_steps[0]
+    for step in form["steps"]:
+        number = step.get("step")
+        if not isinstance(number, int):
+            continue
+        names[number] = str(step.get("name") or f"Step {number}")
+        if step.get("next_button"):
+            next_buttons[str(step["next_button"])] = number
+            remember(step["next_button"], number)
+        if step.get("prev_button"):
+            prev_buttons[str(step["prev_button"])] = number
+            remember(step["prev_button"], number)
+    for item in [
+        *form.get("fields", []),
+        *form.get("hidden_buttons", []),
+        form.get("submit_button") or {},
+    ]:
+        remember(item.get("selector"), item.get("step"))
+        remember(item.get("click_selector"), item.get("step"))
+    for selector in conflicting:
+        step_of.pop(selector, None)
+    if not step_of:
+        return []
+
+    # Ordered uses: (position, selector or None for a new test, is_click).
+    events: list[tuple[int, str | None, bool]] = []
+    assigned_spans = []
+    for match in _LOCATOR_ASSIGNMENT.finditer(script):
+        name, selector = match.group(1), _literal_value(match, 1)
+        assigned_spans.append((match.start(), match.end()))
+        if selector not in step_of:
+            continue
+        uses = re.compile(
+            rf"(?:\b{re.escape(name)}\s*\.\s*(\w+)\s*\(|\bexpect\(\s*{re.escape(name)}\b)"
+        )
+        for use in uses.finditer(script, match.end()):
+            events.append((use.start(), selector, use.group(1) == "click"))
+    for match in _LOCATOR_CALL.finditer(script):
+        if any(start <= match.start() < end for start, end in assigned_spans):
+            continue
+        selector = _literal_value(match, 0)
+        if selector in step_of:
+            events.append((match.start(), selector, bool(_CLICK_AFTER.match(script, match.end()))))
+    for match in _NEW_TEST.finditer(script):
+        events.append((match.start(), None, False))
+    events.sort(key=lambda event: event[0])
+
+    issues: list[str] = []
+    current: int | None = None
+    for _, selector, is_click in events:
+        if selector is None:
+            current = None
+            continue
+        step = step_of[selector]
+        if current is not None and step < current:
+            issues.append(
+                f"Step order: '{selector}' is on step {step} ('{names.get(step, step)}'), "
+                f"but the script already left that step and is on step {current} "
+                f"('{names.get(current, current)}'); do everything step {step} needs before "
+                "clicking its next button, and click each next button once"
+            )
+        current = step if current is None or step > current else current
+        if is_click and selector in next_buttons and next_buttons[selector] == step:
+            current = max(current, step + 1)
+        elif is_click and selector in prev_buttons and prev_buttons[selector] == step:
+            current = step - 1
+    return list(dict.fromkeys(issues))
 
 
 def _compile_typescript(script: str) -> list[str]:
@@ -228,8 +349,11 @@ def _observed_selectors(dom_context: dict[str, Any]) -> list[tuple[str, int]]:
             ]:
                 if selector:
                     selectors.append((str(selector), int(match_count)))
-            for field in form.get("fields", []):
+            for field in [*form.get("fields", []), *form.get("hidden_buttons", [])]:
                 selector = field.get("selector")
                 if selector:
                     selectors.append((str(selector), int(field.get("match_count", 0))))
+                # Reconnaissance keeps a label click selector only when it is unique.
+                if field.get("click_selector"):
+                    selectors.append((str(field["click_selector"]), 1))
     return selectors

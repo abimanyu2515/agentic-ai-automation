@@ -65,6 +65,57 @@ class AgentDecision(BaseModel):
     reasoning: str = ""
 
 
+# What a clicked or selected element shows and carries. A styled choice is often
+# an empty label around a hidden input, so its value attribute, not its text, is
+# what ties it to a test data value when the trace becomes a template.
+_ELEMENT_FACTS_JS = """el => {
+  const own = ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) ? el : null;
+  const control = own || el.querySelector('input, select, textarea');
+  const facts = { text: (el.innerText || '').trim().replace(/\\s+/g, ' ').slice(0, 80) };
+  if (control) {
+    const type = (control.getAttribute('type') || '').toLowerCase();
+    for (const name of ['id', 'name', 'type', 'value']) {
+      if (name === 'value' && type === 'password') continue;
+      const value = control.getAttribute(name);
+      if (value) facts['control_' + name] = value.slice(0, 80);
+    }
+  }
+  return facts;
+}"""
+
+
+async def _element_facts(page: Page, selector: Optional[str]) -> Dict[str, str]:
+    if not selector:
+        return {}
+    try:
+        facts = await page.locator(selector).first.evaluate(_ELEMENT_FACTS_JS, timeout=2000)
+    except Exception:
+        return {}
+    return {key: value for key, value in (facts or {}).items() if value}
+
+
+def _missing_trace_clicks(
+    script: str, history: List[Dict[str, Any]], sample_data: Dict[str, str]
+) -> List[str]:
+    """Verified clicks the template dropped, such as a menu link before a form.
+
+    A click whose selector names a recorded data value (a chosen item) is
+    expected to be rewritten with a marker, so it is not required verbatim.
+    """
+    normalized = script.replace('"', "'")
+    values = [str(value).casefold() for value in sample_data.values() if len(str(value)) >= 3]
+    missing = []
+    for entry in history:
+        selector = entry.get("selector")
+        if entry.get("action") != "click" or not selector:
+            continue
+        if any(value in selector.casefold() for value in values):
+            continue
+        if selector.replace('"', "'") not in normalized and selector not in missing:
+            missing.append(selector)
+    return missing
+
+
 def _compact_elements(elements: List[Dict[str, Any]]) -> str:
     """One compact JSON line per element, without empty fields or the DOM index."""
     lines = []
@@ -162,7 +213,7 @@ async def generate_accurate_test_script(
     if not steps:
         raise ValueError("At least one test step is required for live script generation")
 
-    llm = llm or LLMService(role="generation")
+    llm = llm or LLMService(role="generation", agent="script_generator_agent")
     has_credentials = bool(username or password)
     logger.info(
         "ScriptGeneratorAgent started: target_url=%s steps=%s", target_url, len(steps)
@@ -236,7 +287,7 @@ async def generate_data_driven_template(
     if not steps:
         raise ValueError("At least one test step is required for live template recording")
 
-    llm = llm or LLMService(role="generation")
+    llm = llm or LLMService(role="generation", agent="script_generator_agent")
     has_credentials = bool(username or password)
     run_steps = [
         *(f"Make sure this precondition holds: {item}" for item in preconditions or []),
@@ -283,11 +334,13 @@ Live Verified Execution Trace (selectors proven on the live DOM, recorded with t
 {json.dumps(recorded_history, indent=2, ensure_ascii=False)}
 
 Strict Requirements:
-1. Import with `import {{ test, expect }} from '@playwright/test';`, declare `const BASE_URL = process.env.TARGET_URL || {json.dumps(target_url)};`, and start the test with `await page.goto(BASE_URL);`.
+1. Import with `import {{ test, expect }} from '@playwright/test';`, declare `const BASE_URL = process.env.TARGET_URL || {json.dumps(target_url)};` with exactly this URL, and start the test with `await page.goto(BASE_URL);`. Never replace it with a URL the trace reached later.
 2. Write exactly ONE test(...) block, titled with the Test Title verbatim.
-3. Use ONLY the verified selectors from the trace. Never invent or hallucinate selectors.
+3. Use ONLY the verified selectors from the trace. Never invent or hallucinate selectors. Keep every trace action, in trace order, including navigation clicks before a form (such as a menu link): the trace started at BASE_URL, and the application can record a choice when a link is clicked, so skipping it changes the page.
 4. Wherever the trace typed, selected, or checked a recorded test data value, use that field's marker as a string literal instead, for example fill('__TEST_DATA_01__'). Every marker listed above must appear in the script. A marker may hold an empty string; still apply it.
 5. When the trace typed a value one character per input box (such as a PIN or OTP), loop over the marker's characters and fill box i with character i, for example `const boxes = [<the verified box selectors in order>]; for (const [i, ch] of [...'__TEST_DATA_01__'].entries()) {{ await page.locator(boxes[i]).fill(ch); }}`. When a field is a list joined with '; ', the trace acted on each recorded item; write one loop over the marker instead, for example `for (const item of '__TEST_DATA_03__'.split('; ')) {{ await page.locator(<verified repeated container>).filter({{ hasText: item }}).locator(<verified control>).click(); }}`, deriving the container and control from the trace's selectors so the loop works for any item. Never keep a selector that hard-codes one item's name.
+5a. When a clicked choice stands for a test data value (a radio, checkbox, option card, or list item), build its selector from what the trace's `element` facts show carries that value: if `control_value` equals the recorded value, use the control's value attribute, for example `label:has(input[value='__TEST_DATA_04__'])`; use `hasText`/`:has-text()` with a marker only when the element's recorded `text` contains the recorded value. A control with empty `text` has no text to match, so never select it by text.
+5b. In a multi-step form or wizard, after each click that moves to the next step, assert that the first control the next step uses is visible before acting on it, with a message naming both steps, for example `await expect(page.locator('<that control>'), 'The "<next step>" step did not show its controls after "<previous step>"; the application may have rejected data entered earlier').toBeVisible();`. Assert the exact locator the next action uses. When that action clicks a label for a radio or checkbox (for example `label:has(...)` or `label[for=...]`), assert that label: styled choices hide their native input, so `toBeVisible()` on the input itself never passes, however long it waits.
 6. Assert the Expected Result with web-first assertions (`await expect(...).toBeVisible()`, `toHaveText(...)`, `await expect(page).toHaveURL(...)`), based on what the trace verified. Never branch on marker values.
 7. Group the code with step comments (`// --- Step 1: ... ---`).
 8. Return ONLY valid TypeScript code with no markdown fences or explanations.
@@ -295,14 +348,29 @@ Strict Requirements:
 {f"REPAIR FEEDBACK (fix these problems from the previous script): {repair_feedback[:2000]}" if repair_feedback else ""}
 """
 
-    final_text = await asyncio.to_thread(
-        llm.generate,
-        system="You are a senior QA automation engineer who writes TypeScript @playwright/test scripts.",
-        user=synthesis_prompt,
-        timeout=DEFAULT_LLM_TIMEOUT,
-        temperature=1.0,
-    )
-    clean_ts_code = _clean_ts_code(final_text)
+    clean_ts_code = ""
+    feedback = ""
+    for _ in range(2):
+        final_text = await asyncio.to_thread(
+            llm.generate,
+            system="You are a senior QA automation engineer who writes TypeScript @playwright/test scripts.",
+            user=synthesis_prompt + feedback,
+            timeout=DEFAULT_LLM_TIMEOUT,
+            temperature=1.0,
+        )
+        clean_ts_code = _clean_ts_code(final_text)
+        missing = _missing_trace_clicks(clean_ts_code, recorded_history, sample_data)
+        if not missing:
+            break
+        logger.info(
+            "ScriptGeneratorAgent template dropped verified clicks, regenerating: count=%s",
+            len(missing),
+        )
+        feedback = (
+            "\nREJECTED: your previous template left out these verified clicks from the trace: "
+            + ", ".join(missing[:10])
+            + ". Keep every trace action in trace order."
+        )
 
     logger.info(
         "ScriptGeneratorAgent template recording completed: verified_actions=%s",
@@ -423,22 +491,29 @@ Rules:
                         )
 
                     try:
+                        # Read before acting: a click can navigate away from the element.
+                        facts = (
+                            await _element_facts(page, decision.selector)
+                            if decision.action in ("click", "select_option")
+                            else {}
+                        )
                         await execute_live_playwright_action(
                             page, decision.action, decision.selector, action_value
                         )
                         await page.wait_for_timeout(600)  # Allow SPA state transitions
 
-                        recorded_history.append(
-                            {
-                                "step_number": idx,
-                                "step_goal": step_description,
-                                "url": page.url,
-                                "action": decision.action,
-                                "selector": decision.selector,
-                                "value": decision.value,
-                                "ts_playwright_code": decision.ts_playwright_code,
-                            }
-                        )
+                        entry = {
+                            "step_number": idx,
+                            "step_goal": step_description,
+                            "url": page.url,
+                            "action": decision.action,
+                            "selector": decision.selector,
+                            "value": decision.value,
+                            "ts_playwright_code": decision.ts_playwright_code,
+                        }
+                        if facts:
+                            entry["element"] = facts
+                        recorded_history.append(entry)
                         last_error = ""
                     except Exception as err:
                         last_error = str(err)

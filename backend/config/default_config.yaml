@@ -61,3 +61,11 @@ object_repository:
   harvest_enabled: true
   harvest_max_pages: 20
   harvest_page_budget_ms: 5000
+
+token_usage:
+  enabled: true              # record every LLM completion for the Token Utilization page
+  monthly_budget_usd: 0      # 0 = no budget; editable from the Token Utilization page
+  alert_threshold_pct: 80
+  # USD per 1M tokens. Overrides litellm's price map; use it for models litellm does not price.
+  # Keys: the model name (gemini-2.5-flash) or the litellm model string (gemini/gemini-2.5-flash).
+  pricing_overrides: {}

@@ -1,3 +1,4 @@
+from datetime import date
 import json
 
 import pytest
@@ -739,8 +740,8 @@ def _booking_dataset(index, fields=_BOOKING_FIELDS):
     values = {
         "email": f"guest{index}@example.test",
         "password": f"Secret{index}!",
-        "check_in_date": "2026-12-01",
-        "check_out_date": "2026-12-03",
+        "check_in_date": "2099-12-01",
+        "check_out_date": "2099-12-03",
         "card_number": "4111111111111111",
     }
     return {
@@ -1138,3 +1139,70 @@ def test_checkout_without_a_known_price_list_gets_no_guessed_totals():
     TestDataAgent(llm_service=_QueuedReplies([reply])).run(state)
 
     assert all(list(d) == _CHECKOUT_FIELDS for d in test_case.test_data_sets)
+
+
+def test_prompt_states_todays_date():
+    state, _ = _booking_state()
+    reply = TestCaseDataBatchResponse.model_validate({
+        "required_fields": _BOOKING_FIELDS,
+        "datasets": [_booking_dataset(index) for index in range(20)],
+    })
+    llm = _QueuedReplies([reply])
+
+    TestDataAgent(llm_service=llm, today=lambda: date(2026, 11, 11)).run(state)
+
+    assert "Today's date: 2026-11-11" in llm.prompts[0]
+
+
+def test_accepted_rows_with_a_past_future_type_date_are_requested_again():
+    """Seen live: insurance start dates a year in the past kept the price
+    table hidden, so every positive run failed on the price step."""
+    state, test_case = _booking_state()
+    stale = [
+        {
+            **_booking_dataset(index),
+            "test_data": {
+                **_booking_dataset(index)["test_data"],
+                "check_in_date": "12/01/2025",
+            },
+        }
+        for index in range(5)
+    ]
+    first = TestCaseDataBatchResponse.model_validate({
+        "required_fields": _BOOKING_FIELDS,
+        "datasets": [*stale, *(_booking_dataset(index) for index in range(100, 115))],
+    })
+    second = TestCaseDataBatchResponse.model_validate({
+        "datasets": [_booking_dataset(index) for index in range(200, 205)],
+    })
+    llm = _QueuedReplies([first, second])
+
+    TestDataAgent(llm_service=llm, today=lambda: date(2026, 11, 11)).run(state)
+
+    assert "Return exactly 5 NEW datasets" in llm.prompts[1]
+    assert all(row["check_in_date"] == "2099-12-01" for row in test_case.test_data_sets)
+    assert any("check_in_date was not after 2026-11-11" in log for log in state.logs)
+
+
+def _dated(outcome, **values):
+    return TestCaseDataResponse.model_validate({
+        "test_data": values,
+        "targeted_validation_rule": "rule",
+        "test_type": "positive" if outcome == "accepted" else "invalid",
+        "expected_outcome": outcome,
+    })
+
+
+def test_stale_future_dates_ignore_past_type_fields_and_rejected_rows():
+    today = date(2026, 11, 11)
+    stale = TestDataAgent._stale_future_dates
+
+    assert stale(_dated("accepted", start_date="12/01/2025"), today) == ["start_date"]
+    assert stale(_dated("accepted", start_date="2026-11-11"), today) == ["start_date"]
+    assert stale(_dated("accepted", start_date="01/02/2027"), today) == []
+    # 12/01/2026 reads as 1 December (future) or 12 January (past): keep it.
+    assert stale(_dated("accepted", start_date="12/01/2026"), today) == []
+    assert stale(_dated("accepted", date_of_birth="04/15/1990",
+                        date_of_manufacture="05/12/2020"), today) == []
+    assert stale(_dated("rejected", start_date="12/01/2025"), today) == []
+    assert stale(_dated("accepted", start_date="next month"), today) == []

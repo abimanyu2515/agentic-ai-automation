@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agentic AI Automation</title>
   <link rel="stylesheet" href="/css/styles.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="/css/token-utilization.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
 </head>
 <body>
@@ -129,6 +130,14 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
         </svg>
         LangSmith
+      </div>
+
+      <div class="nav-item" data-view="token-utilization" data-level="0">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
+        </svg>
+        Token Utilization
       </div>
 
       <div class="nav-item" data-view="settings" data-level="0" style="margin-top: auto;">
@@ -663,6 +672,15 @@
         <div id="langsmith-traces-container">
           <!-- Tracks loaded dynamically -->
         </div>
+      </div>
+
+      <!-- VIEW: Token Utilization -->
+      <div class="view-panel" id="token-utilization-view">
+        <div class="page-header">
+          <h1>Token Utilization</h1>
+        </div>
+        <p class="page-description">Real token usage and cost of every AI call made by the agents: scenarios, test cases, test data, scripts and analysis.</p>
+        <div id="token-utilization-root"></div>
       </div>
 
       <!-- VIEW: Settings -->
