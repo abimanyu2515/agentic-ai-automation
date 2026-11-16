@@ -6,7 +6,12 @@
   <title>Agentic AI Automation</title>
   <link rel="stylesheet" href="/css/styles.css">
   <link rel="stylesheet" href="/css/token-utilization.css">
+  <!-- Chart.js (dashboard and Token Utilization) and the chat assistant's Markdown
+       rendering (spec 0005): pinned versions, the Markdown sanitized before use.
+       Loaded before the Monaco AMD loader so they register as globals, not AMD modules. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
 </head>
 <body>
@@ -1378,7 +1383,7 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=21"></script>
+  <script type="module" src="/js/app.js?v=24"></script>
   <script>
     document.getElementById('login-form').addEventListener('submit', async function(e) {
       e.preventDefault();

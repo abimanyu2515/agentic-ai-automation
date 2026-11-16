@@ -7,6 +7,7 @@ import { RecoveryManager } from './recovery-manager';
 import { startHarvest, HarvestSession, HarvestSettings } from './object-harvest-session';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import ts from 'typescript';
 
 interface ExecutionRunnerOptions {
   executionId: string;
@@ -23,6 +24,29 @@ function objectRepositoryLogs(logs: string[] | undefined): string[] {
     .filter((line) => typeof line === 'string' && line.includes('[OBJREPO]'))
     .slice(0, 2000);
 }
+
+// Scripts are TypeScript, but new Function only parses JavaScript, so syntax
+// such as `process.env.X!` or `as string` is stripped first. Throws on a
+// syntax error so callers report it like any other script failure.
+function toJavaScript(script: string): string {
+  const transpiled = ts.transpileModule(script, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+    reportDiagnostics: true,
+  });
+  const syntaxError = transpiled.diagnostics?.find(
+    (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+  );
+  if (syntaxError) {
+    throw new SyntaxError(ts.flattenDiagnosticMessageText(syntaxError.messageText, '\n'));
+  }
+  return transpiled.outputText;
+}
+
+// Default wait for the expect() shim's web-first assertions when the script
+// passes no timeout. Pages that confirm after a server-side delay (a booking
+// that takes about 5s to show its order number) failed at 5000ms although
+// the page was correct.
+const EXPECT_TIMEOUT_MS = 15000;
 
 const HARVEST_OFF: HarvestSettings = { enabled: false, maxPages: 0, budgetMs: 0 };
 
@@ -122,7 +146,7 @@ export class ExecutionEngine {
       const cleanScript = script.replace(/import\s+[\s\S]*?from\s+['"].*?['"];?/g, '');
       const wrappedScript = `
         return (async ({ page, browser, context, screenshot, addLog, addTimelineEvent, test, expect }) => {
-          ${cleanScript}
+          ${toJavaScript(cleanScript)}
         })
       `;
       new Function(wrappedScript);
@@ -467,7 +491,7 @@ export class ExecutionEngine {
               const baseAssertions: any = {
                 toBeVisible: async (options?: { timeout?: number }) => {
                   if (actual && typeof actual.waitFor === 'function') {
-                    const timeout = options?.timeout || 5000;
+                    const timeout = options?.timeout || EXPECT_TIMEOUT_MS;
                     // A styled radio or checkbox hides its native input and shows its
                     // <label> instead, so the input never becomes visible. Treat such an
                     // input as visible once one of its labels is, as a user would see it.
@@ -508,7 +532,7 @@ export class ExecutionEngine {
                 },
                 toBeHidden: async (options?: { timeout?: number }) => {
                   if (actual && typeof actual.waitFor === 'function') {
-                    await actual.waitFor({ state: 'hidden', timeout: options?.timeout || 5000 });
+                    await actual.waitFor({ state: 'hidden', timeout: options?.timeout || EXPECT_TIMEOUT_MS });
                   } else if (actual && typeof actual.isHidden === 'function') {
                     const hidden = await actual.isHidden();
                     if (!hidden) {
@@ -520,7 +544,7 @@ export class ExecutionEngine {
                 },
                 toContainText: async (expected: string, options?: { timeout?: number }) => {
                   if (actual && typeof actual.textContent === 'function') {
-                    const timeout = options?.timeout || 5000;
+                    const timeout = options?.timeout || EXPECT_TIMEOUT_MS;
                     const startTime = Date.now();
                     let text = '';
                     while (Date.now() - startTime < timeout) {
@@ -537,7 +561,7 @@ export class ExecutionEngine {
                 },
                 toHaveText: async (expected: string, options?: { timeout?: number }) => {
                   if (actual && typeof actual.textContent === 'function') {
-                    const timeout = options?.timeout || 5000;
+                    const timeout = options?.timeout || EXPECT_TIMEOUT_MS;
                     const startTime = Date.now();
                     let text = '';
                     while (Date.now() - startTime < timeout) {
@@ -554,7 +578,7 @@ export class ExecutionEngine {
                 },
                 toHaveValue: async (expected: string, options?: { timeout?: number }) => {
                   if (actual && typeof actual.inputValue === 'function') {
-                    const timeout = options?.timeout || 5000;
+                    const timeout = options?.timeout || EXPECT_TIMEOUT_MS;
                     const startTime = Date.now();
                     let val = '';
                     while (Date.now() - startTime < timeout) {
@@ -577,7 +601,7 @@ export class ExecutionEngine {
                 },
                 toHaveAttribute: async (name: string, expected: string | RegExp, options?: { timeout?: number }) => {
                   if (actual && typeof actual.getAttribute === 'function') {
-                    const timeout = options?.timeout || 5000;
+                    const timeout = options?.timeout || EXPECT_TIMEOUT_MS;
                     const startTime = Date.now();
                     let val = '';
                     while (Date.now() - startTime < timeout) {
@@ -598,7 +622,7 @@ export class ExecutionEngine {
                 },
                 toHaveURL: async (expected: string | RegExp, options?: { timeout?: number }) => {
                   if (actual && typeof actual.url === 'function') {
-                    const timeout = options?.timeout || 5000;
+                    const timeout = options?.timeout || EXPECT_TIMEOUT_MS;
                     const startTime = Date.now();
                     let currentUrl = '';
                     while (Date.now() - startTime < timeout) {
@@ -617,7 +641,7 @@ export class ExecutionEngine {
                 },
                 toBeDisabled: async (options?: { timeout?: number }) => {
                   if (actual && typeof actual.isDisabled === 'function') {
-                    const timeout = options?.timeout || 5000;
+                    const timeout = options?.timeout || EXPECT_TIMEOUT_MS;
                     const startTime = Date.now();
                     let disabled = false;
                     while (Date.now() - startTime < timeout) {
@@ -632,7 +656,7 @@ export class ExecutionEngine {
                 },
                 toBeEnabled: async (options?: { timeout?: number }) => {
                   if (actual && typeof actual.isEnabled === 'function') {
-                    const timeout = options?.timeout || 5000;
+                    const timeout = options?.timeout || EXPECT_TIMEOUT_MS;
                     const startTime = Date.now();
                     let enabled = false;
                     while (Date.now() - startTime < timeout) {
@@ -647,7 +671,7 @@ export class ExecutionEngine {
                 },
                 toBeChecked: async (options?: { timeout?: number }) => {
                   if (actual && typeof actual.isChecked === 'function') {
-                    const timeout = options?.timeout || 5000;
+                    const timeout = options?.timeout || EXPECT_TIMEOUT_MS;
                     const startTime = Date.now();
                     let checked = false;
                     while (Date.now() - startTime < timeout) {
@@ -845,7 +869,7 @@ export class ExecutionEngine {
 
           const wrappedScript = `
             return (async ({ page, browser, context, screenshot, addLog, addTimelineEvent, test, expect }) => {
-              ${cleanScript}
+              ${toJavaScript(cleanScript)}
             })
           `;
           const userFunction = new Function(wrappedScript);

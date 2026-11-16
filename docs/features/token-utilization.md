@@ -17,6 +17,8 @@ Every completion **attempt** that goes through `LLMService` produces one `TokenU
 
 A retried `structured_generate` call produces one record per attempt, because each attempt is billed. Failed and rate limited attempts are recorded with zero tokens, so error rates are visible.
 
+Chat assistant replies (`LLMService.stream_chat`, agent `chat_assistant`) are streamed, so they are recorded once the stream ends, including when the client disconnects mid reply. The tokens come from the provider's usage chunk when it sends one; otherwise litellm's `stream_chunk_builder` counts the prompt and reply tokens. `stream_options` is not sent, because most configured providers reject it.
+
 Recording never breaks or slows an LLM call. Records are queued and written by a background thread. Any recording error is logged and swallowed. Set `token_usage.enabled: false` in `backend/config/default_config.yaml` to turn recording off.
 
 ## Cost

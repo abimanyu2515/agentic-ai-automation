@@ -405,7 +405,35 @@ def test_test_data_template_retries_once_when_model_omits_a_data_marker():
     assert llm_service.calls == 2
     assert "Alice Johnson" in result.generated_test_cases[0].playwright_script
     assert "alice@example.com" in result.generated_test_cases[0].playwright_script
-    assert any("retrying template generation once" in log for log in result.logs)
+    assert any("retrying template generation (1 of 2)" in log for log in result.logs)
+
+
+def test_multi_dataset_template_retry_hands_back_the_rejected_script():
+    """Live failure: a 20-field booking case lost __TEST_DATA_11__ on both of two attempts."""
+    state, repo, _ = _ticket_case()
+    without_subject = _TICKET_TEMPLATE.replace(
+        "  await page.getByLabel('Subject').fill('__TEST_DATA_03__');\n", ""
+    )
+    without_title_id = _TICKET_TEMPLATE.replace("__TEST_DATA_ID__ ", "")
+
+    class SlowlyFixingLLM:
+        def __init__(self):
+            self.prompts = []
+
+        def generate(self, *, system, user, **kwargs):
+            self.prompts.append(user)
+            return [without_subject, without_title_id, _TICKET_TEMPLATE][len(self.prompts) - 1]
+
+    llm = SlowlyFixingLLM()
+    result = PlaywrightAgent(llm_service=llm, repo=repo, test_data_template=True).run(state)
+
+    assert len(llm.prompts) == 3
+    first_retry, second_retry = llm.prompts[1], llm.prompts[2]
+    assert "REJECTED SCRIPT:\n" + without_subject.split("\n", 1)[0] in first_retry
+    assert "__TEST_DATA_03__ (subject)" in first_retry
+    assert "belong in the test title" in second_retry
+    assert "row.data[\"subject\"]" in result.generated_test_cases[0].playwright_script
+    assert any("retrying template generation (2 of 2)" in log for log in result.logs)
 
 
 def test_test_data_template_scripts_only_the_first_5_of_20_datasets():
@@ -650,6 +678,163 @@ def test_vault_login_datasets_are_recorded_live_with_credential_placeholders():
     assert calls[0]["sample_data"]["password"] == "{{TARGET_PASSWORD}}"
     assert "__TEST_DATA_04__ (tags): a list of items" in calls[0]["field_notes"]
     assert "{{vault:" not in str(calls[0])
+
+
+def test_page_control_field_gets_no_marker_so_the_template_never_needs_it():
+    """Live failure: "select_hotel_radio": "radio_0" became input[name="radio_0"]."""
+    requirement = Requirement(title="Hotel booking", description="Book a hotel.")
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Book a hotel",
+        description="Search and book a hotel.",
+        path_type="positive",
+    )
+    datasets = [
+        {"location": city, "select_hotel_radio": "radio_0"}
+        for city in ("Sydney", "Melbourne")
+    ]
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Book a hotel",
+        steps=["Select the location and search", "Select the first hotel's radio button"],
+        expected_result="The booking is confirmed",
+        test_data=datasets[0],
+        test_data_sets=datasets,
+        evaluation_status=EvaluationStatus.APPROVED,
+    )
+    state = WorkflowState(
+        requirement=requirement,
+        generated_scenarios=[scenario],
+        generated_test_cases=[test_case],
+    )
+    project = Project(
+        name="Hotels", target_url="https://hotels.example.test", requirements=[requirement.id]
+    )
+    calls = []
+
+    def recorder(**kwargs):
+        calls.append(kwargs)
+        # Uses only the location marker; the radio is found on the page.
+        return """import { test, expect } from '@playwright/test';
+test('__TEST_DATA_ID__ [__TEST_TYPE__] Book a hotel', async ({ page }) => {
+  await page.goto('https://hotels.example.test');
+  await page.locator('#location').selectOption('__TEST_DATA_01__');
+  await page.locator('#radiobutton_0').check();
+  await expect(page.locator('#order_no')).toBeVisible();
+});"""
+
+    result = PlaywrightAgent(
+        llm_service=StubLLMService(generate_response="unused"),
+        repo=type(
+            "HotelRepository",
+            (),
+            {
+                "list_projects": lambda self: [project],
+                "get_scenario": lambda self, scenario_id: scenario,
+            },
+        )(),
+        test_data_template=True,
+        template_recorder=recorder,
+    ).run(state)
+
+    assert len(calls) == 1
+    assert calls[0]["sample_data"] == {"location": "Sydney"}
+    assert calls[0]["markers"] == {"location": "__TEST_DATA_01__"}
+    script = result.generated_test_cases[0].playwright_script
+    assert any("recorded template on the live target app" in log for log in result.logs)
+    assert 'selectOption(row.data["location"])' in script
+    assert "#radiobutton_0" in script
+    assert 'name="radio_0"' not in script
+
+
+def test_dropdown_values_are_matched_to_the_options_seen_while_recording():
+    """Live failure: selectOption('MasterCard') timed out; the option is "Master Card"."""
+    requirement = Requirement(title="Hotel booking", description="Book a hotel.")
+    scenario = Scenario(
+        requirement_id=requirement.id,
+        scenario_name="Book a hotel",
+        description="Book and pay for a hotel.",
+        path_type="positive",
+    )
+    datasets = [
+        {"hotels": "Hotel Creek", "credit_card_type": "VISA", "expiry_year": "2027"},
+        {"hotels": "Hotel Cornice", "credit_card_type": "MasterCard", "expiry_year": "2028"},
+        {"hotels": "Hotel Sunshine", "credit_card_type": "american express", "expiry_year": "2022"},
+    ]
+    test_case = TestCase(
+        scenario_id=scenario.id,
+        title="Book a hotel",
+        steps=["Select the hotel", "Enter the card details and book"],
+        expected_result="The booking is confirmed",
+        test_data=datasets[0],
+        test_data_sets=datasets,
+        evaluation_status=EvaluationStatus.APPROVED,
+    )
+    state = WorkflowState(
+        requirement=requirement,
+        generated_scenarios=[scenario],
+        generated_test_cases=[test_case],
+    )
+    project = Project(
+        name="Hotels", target_url="https://hotels.example.test", requirements=[requirement.id]
+    )
+
+    def recorder(**kwargs):
+        kwargs["select_options"].update({
+            "#hotels": ["- Select Hotel -", "Hotel Creek", "Hotel Sunshine", "Hotel Corniche"],
+            "#cc_type": ["Select Credit Card Type", "American Express", "VISA", "Master Card", "Other", "AMEX", "MAST"],
+            "#cc_exp_year": ["Year", "2026", "2027", "2028"],
+        })
+        return """import { test, expect } from '@playwright/test';
+test('__TEST_DATA_ID__ [__TEST_TYPE__] Book a hotel', async ({ page }) => {
+  await page.goto('https://hotels.example.test');
+  await page.locator('#hotels').selectOption('__TEST_DATA_01__');
+  await page.locator("#cc_type").selectOption({ label: '__TEST_DATA_02__' });
+  await page.locator('#cc_exp_year').selectOption('__TEST_DATA_03__');
+  await expect(page.locator('#order_no')).toBeVisible();
+});"""
+
+    result = PlaywrightAgent(
+        llm_service=StubLLMService(generate_response="unused"),
+        repo=type(
+            "HotelRepository",
+            (),
+            {
+                "list_projects": lambda self: [project],
+                "get_scenario": lambda self, scenario_id: scenario,
+            },
+        )(),
+        test_data_template=True,
+        template_recorder=recorder,
+    ).run(state)
+
+    script = result.generated_test_cases[0].playwright_script
+    assert '"credit_card_type": "Master Card"' in script
+    assert '"credit_card_type": "American Express"' in script
+    assert '"hotels": "Hotel Corniche"' in script
+    assert "MasterCard" not in script and "Hotel Cornice" not in script
+    # A year is not a near miss of another year: it is kept and reported.
+    assert '"expiry_year": "2022"' in script
+    assert any("'2022' is not an option" in log for log in result.logs)
+    assert any("'MasterCard' changed to the dropdown's option 'Master Card'" in log for log in result.logs)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("VISA", "VISA"),
+        ("MAST", "MAST"),
+        ("MasterCard", "Master Card"),
+        ("master card", "Master Card"),
+        ("Hotel Cornice", "Hotel Corniche"),
+        ("2022", None),
+        ("Diners Club", None),
+    ],
+)
+def test_match_option_finds_the_option_a_value_means(value, expected):
+    options = ["Hotel Corniche", "VISA", "Master Card", "2026", "2027", "MAST"]
+
+    assert playwright_agent_module._match_option(value, options) == expected
 
 
 def test_data_driven_loop_script_hoists_imports_and_scopes_each_dataset():

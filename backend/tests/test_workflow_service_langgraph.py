@@ -147,7 +147,8 @@ def _coupon_datasets():
         TestCaseDataResponse(
             test_data={"coupon_code": f"OLD-{index:03d}"},
             targeted_validation_rule="Expired coupons are rejected.",
-            test_type="invalid" if index < 18 else "positive",
+            # The accepted rows sit inside the first 5, the ones that get scripted.
+            test_type="positive" if index in (3, 4) else "invalid",
         )
         for index in range(20)
     ])
@@ -174,7 +175,7 @@ class _TemplateLLM:
         )
 
 
-def test_generate_playwright_script_adds_20_datasets_and_one_test_each():
+def test_generate_playwright_script_adds_20_datasets_and_scripts_the_first_5():
     ws = WorkflowService()
     project, tc = _data_driven_case(ws)
     llm = _TemplateLLM()
@@ -193,8 +194,9 @@ def test_generate_playwright_script_adds_20_datasets_and_one_test_each():
     assert "for (const row of datasets)" in script
     assert "for (const row of acceptedDatasets)" in script
     assert script.count("import { test, expect }") == 1
-    assert all(f"OLD-{index:03d}" in script for index in range(20))
-    assert all(f"TD-{tc.id.hex[:8].upper()}-{index:02d}" in script for index in range(1, 21))
+    assert all(f"OLD-{index:03d}" in script for index in range(5))
+    assert "OLD-005" not in script
+    assert all(f"TD-{tc.id.hex[:8].upper()}-{index:02d}" in script for index in range(1, 6))
     # Real steps reach the model, and the two valid rows get their own template.
     assert "Enter the coupon code" in llm.prompts[0]
     assert len(llm.prompts) == 2
@@ -235,7 +237,7 @@ def test_generate_playwright_script_uses_read_only_evidence_and_repairs_once():
     assert inspector.calls == [False]
     assert all("LIVE PAGE EVIDENCE" in prompt for prompt in llm.prompts)
     assert any("REPAIR FEEDBACK" in prompt for prompt in llm.prompts)
-    assert all(f"TD-{tc.id.hex[:8].upper()}-{index:02d}" in updated_tc.playwright_script for index in range(1, 21))
+    assert all(f"TD-{tc.id.hex[:8].upper()}-{index:02d}" in updated_tc.playwright_script for index in range(1, 6))
     assert updated_tc.script_validation_status == "unverified"
 
 
@@ -281,8 +283,8 @@ def test_generate_playwright_script_uses_saved_datasets_over_live_generator():
         updated_tc = ws.generate_playwright_script(project.id, tc.id)
 
     script = updated_tc.playwright_script
-    assert all(f"TD-{tc.id.hex[:8].upper()}-{index:02d}" in script for index in range(1, 21))
-    assert all(f"OLD-{index:03d}" in script for index in range(20))
+    assert all(f"TD-{tc.id.hex[:8].upper()}-{index:02d}" in script for index in range(1, 6))
+    assert all(f"OLD-{index:03d}" in script for index in range(5))
     assert ws.repo.get_test_case(tc.id).playwright_script == script
 
 
@@ -327,7 +329,7 @@ def test_safe_project_records_each_template_live_with_a_sample_dataset():
     # One recording per outcome group, each run with that group's first dataset.
     assert [call["sample_data"] for call in calls] == [
         {"coupon_code": "OLD-000"},
-        {"coupon_code": "OLD-018"},
+        {"coupon_code": "OLD-003"},
     ]
     assert all(call["markers"] == {"coupon_code": "__TEST_DATA_01__"} for call in calls)
     assert all(call["username"] == "vault-user" for call in calls)
@@ -337,7 +339,7 @@ def test_safe_project_records_each_template_live_with_a_sample_dataset():
     script = updated_tc.playwright_script
     assert "const BASE_URL = process.env.TARGET_URL" in script
     assert script.count("page.locator('#coupon').fill(row.data[\"coupon_code\"])") == 2
-    assert all(f"OLD-{index:03d}" in script for index in range(20))
+    assert all(f"OLD-{index:03d}" in script for index in range(5))
     assert "__TEST_DATA_" not in script
 
 

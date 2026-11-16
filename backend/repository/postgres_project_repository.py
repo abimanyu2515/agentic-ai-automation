@@ -428,6 +428,7 @@ class PostgresProjectRepository(ProjectRepository):
                 db_req.business_domain = business_domain
             if attachments is not None:
                 db_req.attachments = attachments
+        self._flush_or_commit()
 
     def get_scenarios_for_project(self, project_id: UUID) -> list[Scenario]:
         session = self.session
@@ -545,6 +546,34 @@ class PostgresProjectRepository(ProjectRepository):
                 db_sc.jira_sync_retry_count = s.jira_sync_retry_count
                 db_sc.is_deleted = False
         self._flush_or_commit()
+
+    def delete_requirement(self, requirement_id: UUID, deleted_by: UUID | None = None) -> bool:
+        session = self.session
+        requirement = session.scalar(
+            select(RequirementDB).where(
+                RequirementDB.id == requirement_id,
+                RequirementDB.is_deleted.is_(False),
+            )
+        )
+        if requirement is None:
+            return False
+        now = datetime.now(timezone.utc)
+        requirement.is_deleted = True
+        requirement.deleted_at = now
+        requirement.deleted_by = deleted_by
+        for scenario in requirement.scenarios:
+            if scenario.is_deleted:
+                continue
+            scenario.is_deleted = True
+            scenario.deleted_at = now
+            scenario.deleted_by = deleted_by
+            for test_case in scenario.test_cases:
+                if not test_case.is_deleted:
+                    test_case.is_deleted = True
+                    test_case.deleted_at = now
+                    test_case.deleted_by = deleted_by
+        self._flush_or_commit()
+        return True
 
     def update_scenario(self, scenario: Scenario) -> Scenario | None:
         session = self.session

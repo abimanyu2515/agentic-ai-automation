@@ -1,10 +1,17 @@
 from datetime import datetime, timezone
+import logging
 from uuid import UUID, uuid4
 from typing import Callable, Any
 
 from backend.models.execution_result import ExecutionResult, ExecutionStatus
 from backend.models.test_case import TestCase, TestCaseStatus
 from backend.repository.project_repository import get_project_repository
+
+logger = logging.getLogger(__name__)
+
+# Live event logs of batch runs, keyed by batch ID. The batch stream route and
+# the chat assistant's status refresh read them. In memory, per process.
+active_batch_events: dict[str, list[dict]] = {}
 
 # Event Dispatcher for decoupling execution completion from report compilation
 _execution_completed_listeners: list[Callable[[UUID, ExecutionResult], Any]] = []
@@ -28,6 +35,204 @@ class ExecutionService:
     @property
     def repo(self):
         return get_project_repository()
+
+    def start_test_case_run(
+        self, project_id: UUID, test_case_id: UUID, background_tasks=None, workflow_service=None,
+    ) -> UUID:
+        """Start the existing single-case execution flow and return its execution ID."""
+        from threading import Thread
+        from uuid import uuid4
+
+        from backend.services.workflow_service import active_execution_events, run_execution_and_stream
+        if self.repo.get_test_case(test_case_id) is None:
+            raise ValueError(f"Test case {test_case_id} not found")
+        execution_id = uuid4()
+        # Reset the test case's event log before queueing, so a reader never
+        # mistakes the previous run's "Completed" event for this run's.
+        active_execution_events[str(test_case_id)] = []
+        if workflow_service is None:
+            from backend.services.workflow_service import WorkflowService
+
+            workflow_service = WorkflowService()
+        if background_tasks is not None:
+            background_tasks.add_task(
+                run_execution_and_stream, workflow_service, project_id, test_case_id, execution_id, background_tasks,
+            )
+        else:
+            Thread(
+                target=run_execution_and_stream,
+                args=(workflow_service, project_id, test_case_id, execution_id, None),
+                name=f"chat-execution-{execution_id}",
+                daemon=True,
+            ).start()
+        return execution_id
+
+    def start_batch_run(
+        self,
+        project_id: UUID,
+        test_case_ids: list[UUID],
+        background_tasks=None,
+        *,
+        enforce_project_scope: bool = True,
+    ) -> UUID:
+        """Run the existing sequential batch workflow and expose its event stream."""
+        from threading import Thread
+        from backend.models.batch_context import BatchContext, QueueItem
+        from backend.models.execution_result import ExecutionStatus
+        from backend.services.batch_queue_manager import BatchQueueManager
+        from backend.services.object_repository_service import ObjectRepositoryService
+        from backend.services.playwright_runner import PlaywrightRunner
+
+        if enforce_project_scope:
+            selected = {case.id: case for case in self.repo.get_test_cases_for_project(project_id)}
+            requested = [selected.get(case_id) for case_id in test_case_ids]
+        else:
+            requested = [self.repo.get_test_case(case_id) for case_id in test_case_ids]
+            selected = {case.id: case for case in requested if case is not None}
+        runnable = [case for case in requested if case and case.playwright_script]
+        if not runnable:
+            raise ValueError("No runnable test cases selected")
+
+        batch_id = uuid4()
+        batch_id_text = str(batch_id)
+        events: list[dict] = []
+        active_batch_events[batch_id_text] = events
+        renderer = ObjectRepositoryService(project_repo=self.repo).renderer()
+        queue = []
+        for index, case in enumerate(runnable):
+            title = case.title.lower()
+            required_state = "LOGIN"
+            if "search" in title:
+                required_state = "SEARCH"
+            elif "select" in title or "result" in title:
+                required_state = "RESULTS"
+            elif "book" in title:
+                required_state = "BOOKING"
+            elif "confirm" in title:
+                required_state = "CONFIRMATION"
+            queue.append(QueueItem(
+                task_id=f"TASK-{index + 1}",
+                testcase_id=case.id,
+                required_state=required_state,
+                playwright_script=renderer.render(case),
+                dataset_row=index,
+                priority=1,
+                estimated_duration=30.0,
+            ))
+        context = BatchContext(batch_id=batch_id_text, project_id=project_id, queue=queue)
+        events.append({"status": "Started", "log": "Initializing batch queue runner..."})
+
+        def append_event(status: str, message: str, current_item=None) -> None:
+            total = len(context.queue)
+            completed = context.passed + context.failed + context.skipped
+            remaining = total - completed
+            events.append({
+                "status": status,
+                "log": message,
+                "progress": int(completed / total * 100) if total else 0,
+                "total_tasks": total,
+                "remaining_tasks": remaining,
+                "passed_count": context.passed,
+                "failed_count": context.failed,
+                "skipped_count": context.skipped,
+                "current_state": context.current_state,
+                "next_required_state": current_item.required_state if current_item else "N/A",
+                "navigation_decision": context.navigation_decision or "N/A",
+                "current_retry": context.current_retry_count,
+                "current_dataset_row": context.current_dataset_row if context.current_dataset_row is not None else 0,
+                "etr": f"{remaining * 30}s" if remaining else "0s",
+            })
+
+        def run() -> None:
+            marker_lines: dict[str, list[str]] = {}
+
+            def schedule(callback, *args, name: str) -> None:
+                if background_tasks is not None:
+                    background_tasks.add_task(callback, *args)
+                else:
+                    Thread(target=callback, args=args, name=name, daemon=True).start()
+
+            def on_runner_log(line):
+                active_item = next((item for item in context.queue if item.status == "running"), None)
+                if active_item and "[OBJREPO]" in str(line):
+                    marker_lines.setdefault(active_item.task_id, []).append(str(line))
+                append_event("Running", str(line), active_item)
+
+            try:
+                from backend.services.jira_sync_service import sync_execution_started
+
+                for case in runnable:
+                    schedule(
+                        sync_execution_started,
+                        case.scenario_id,
+                        name=f"batch-jira-start-{case.id}",
+                    )
+                manager = BatchQueueManager(repo=self.repo, runner=PlaywrightRunner(), on_log=on_runner_log)
+                manager.run_batch(context)
+
+                from backend.agents.execution_agent import _STATUS_MAP
+                from backend.models.test_case import TestCaseStatus
+                from backend.services.object_repository_harvest import read_harvest_file
+                from backend.services.playwright_runner import ARTIFACTS_ROOT
+                from backend.services.report_service import ReportService
+
+                report_service = ReportService(repo=self.repo)
+                for item in context.queue:
+                    case = selected[item.testcase_id]
+                    case.status = _STATUS_MAP.get(item.status, TestCaseStatus.BLOCKED)
+                    self.repo.update_test_case(case)
+                    artifacts = context.artifacts.get(item.task_id, {})
+                    screenshot = artifacts.get("screenshots") or []
+                    result = ExecutionResult(
+                        test_case_id=case.id,
+                        test_cycle_id=batch_id,
+                        status=(
+                            ExecutionStatus(item.status)
+                            if item.status in {status.value for status in ExecutionStatus}
+                            else ExecutionStatus.ERROR
+                        ),
+                        duration_seconds=item.duration,
+                        error_message=item.error_message,
+                        screenshot_path=screenshot[0].get("path") if screenshot else None,
+                        video_path=artifacts.get("video"),
+                        trace_path=artifacts.get("trace"),
+                        timeline=artifacts.get("timeline", []),
+                    )
+                    result._raw_payload = {
+                        "timeline": artifacts.get("timeline", []),
+                        "logs": artifacts.get("logs", []),
+                        "console": artifacts.get("console", []),
+                    }
+                    self.repo.save_execution_result(project_id, result)
+                    self.apply_object_repository_markers(
+                        project_id, result.id, marker_lines.get(item.task_id, [])
+                    )
+                    self.apply_object_repository_harvest(
+                        project_id,
+                        case.id,
+                        result.id,
+                        read_harvest_file(ARTIFACTS_ROOT / str(item.testcase_id)),
+                    )
+                    report_service.compile_reports_with_engine_selection(project_id, result)
+
+                    from backend.services.jira_sync_service import sync_execution_finished
+
+                    schedule(
+                        sync_execution_finished,
+                        case.scenario_id,
+                        result.id,
+                        name=f"batch-jira-sync-{result.id}",
+                    )
+                append_event("Completed", "Batch execution complete.")
+            except Exception as error:
+                logger.exception("Batch execution failed: batch_id=%s", batch_id_text)
+                append_event("Error", f"Batch execution failed: {error}")
+
+        if background_tasks is not None:
+            background_tasks.add_task(run)
+        else:
+            Thread(target=run, name=f"chat-batch-{batch_id_text}", daemon=True).start()
+        return batch_id
 
     def apply_object_repository_markers(self, project_id: UUID, execution_id: UUID, lines: list[str]) -> int:
         """The single place run markers become element and locator health (spec 0004, AC-10).

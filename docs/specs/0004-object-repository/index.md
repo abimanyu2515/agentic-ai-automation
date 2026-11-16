@@ -135,7 +135,13 @@ Recon measures `match_count` for each locator it builds (a `count()` per built l
 // <object-repository> generated, do not edit
 const __OBJREPO = { "login_page.login_button": [{ "s": "role", "v": "button", "o": { "name": "Log in" } }, { "s": "css", "v": "#login" }] };
 const __OBJREPO_TIMEOUT = 3000;
-async function orx(page, key) {
+const __ORX_METHODS = ["click", "dblclick", "fill", "clear", /* ...other Locator action and read methods */ "screenshot"];
+function orx(page, key) {
+  const found = __orxFind(page, key);
+  for (const m of __ORX_METHODS) found[m] = (...args) => found.then((loc) => loc[m](...args));
+  return found;
+}
+async function __orxFind(page, key) {
   const log = (m) => (typeof addLog === 'function' ? addLog(m) : console.log(m));
   const chain = __OBJREPO[key];
   if (!chain) { log('[OBJREPO] ' + JSON.stringify({ key, index: -1, tried: 0, ok: false })); throw new Error('Object repository element ' + key + ' is not in the repository'); }
@@ -151,7 +157,7 @@ async function orx(page, key) {
 }
 // </object-repository>
 ```
-Generated scripts use it like this: `const btn = await orx(page, 'login_page.login_button'); await btn.click();`. The Selenium version is a Python `orx(driver, key)` that returns a `WebElement` and logs no markers. Its strategies translate as follows:
+Generated scripts use it like this: `const btn = await orx(page, 'login_page.login_button'); await btn.click();`. `orx` returns the lookup Promise with the common Locator methods attached, so the chained form `await orx(page, 'login_page.login_button').click();` works too. Models often write that form, and on a bare Promise it failed with `orx(...).click is not a function`. Other Locator methods, such as `filter` or `locator`, need the awaited form. The Selenium version is a Python `orx(driver, key)` that returns a `WebElement` and logs no markers. Its strategies translate as follows:
 - `css` and `xpath`: used directly
 - `test_id`: `[data-testid="v"]`
 - `placeholder`: `[placeholder="v"]`

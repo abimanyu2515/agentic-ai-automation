@@ -39,6 +39,44 @@ MAX_INTERACTIVE_ELEMENTS = 80
 USERNAME_PLACEHOLDER = "{{TARGET_USERNAME}}"
 PASSWORD_PLACEHOLDER = "{{TARGET_PASSWORD}}"
 
+# Words that mark a step as a check of the page rather than an action on it.
+_VERIFY_WORDS = re.compile(
+    r"\b(verify|verifies|verified|validate|confirm|check|assert|ensure|should|expected)\b",
+    re.IGNORECASE,
+)
+_ASSERT_ACTIONS = ("assert_visible", "assert_text")
+
+# Sent back when a verification step reports done without checking the page.
+_VERIFY_FEEDBACK = (
+    "This step verifies a result, but no assertion was recorded for it. Before "
+    "returning done, record an assert_visible or assert_text action on the CURRENT "
+    "page (see Current URL) that proves the expected result, using an element from "
+    "Live Interactive Elements or text from the Live ARIA Snapshot. Do not assert a "
+    "control used on an earlier page, such as a login field after logging in."
+)
+
+
+# Each trace entry's url is the page it ran on, so assertions can stay on that page.
+_ASSERTION_PAGE_RULE = (
+    "Take every assertion from the trace: an assert_visible or assert_text entry's "
+    "selector, or an entry's url for `toHaveURL`. Each trace entry's url is the page "
+    "it ran on. Never assert that a control filled or clicked on an earlier page is "
+    "still visible after the page changed (for example a login field after logging "
+    "in); that check fails whenever the step succeeds. When the trace has no "
+    "assertion for the final page, assert its url with `toHaveURL`."
+)
+
+
+def _is_verification_step(raw_step: Union[str, Dict[str, Any]]) -> bool:
+    """True when the step asks to check the page, so it needs a recorded assertion."""
+    if isinstance(raw_step, str):
+        return bool(_VERIFY_WORDS.search(raw_step))
+    expected = str(raw_step.get("expected_result") or raw_step.get("expectedResult") or "")
+    if expected.strip() and expected.strip().upper() != "N/A":
+        return True
+    action = str(raw_step.get("action") or raw_step.get("step") or "")
+    return bool(_VERIFY_WORDS.search(action))
+
 
 class AgentDecision(BaseModel):
     action: Literal[
@@ -184,6 +222,21 @@ def _credentials_script_rule(
     return rule
 
 
+async def _option_labels(page: Page, selector: Optional[str]) -> List[str]:
+    """A dropdown's option labels, then their values (selectOption accepts
+    either), without repeats; [] when they cannot be read."""
+    if not selector:
+        return []
+    try:
+        pairs = await page.locator(selector).first.evaluate(
+            "el => Array.from(el.options || []).map(o => [o.label || o.text, o.value])"
+        )
+    except Exception:
+        return []
+    texts = [str(pair[0]) for pair in pairs] + [str(pair[1]) for pair in pairs]
+    return list(dict.fromkeys(text.strip() for text in texts if text and text.strip()))
+
+
 def _clean_ts_code(text: Optional[str]) -> str:
     clean_ts_code = re.sub(
         r"^```(?:typescript|ts)?\n?|```$", "", (text or "").strip(), flags=re.IGNORECASE | re.MULTILINE
@@ -238,7 +291,7 @@ Strict Requirements:
 1. Output MUST be written in TypeScript using `import {{ test, expect }} from '@playwright/test';`.
 2. Use ONLY the verified selectors from `Live Verified Execution Trace`. Never invent or hallucinate selectors.
 3. Group the code with clear step comments (`// --- Step 1: ... ---`).
-4. Include proper Playwright Web-First Assertions (`await expect(...).toBeVisible()`, `await expect(...).toHaveText(...)`, `await expect(page).toHaveURL(...)`) for all verification steps, plus dynamic sorting/math checks if required by a step.
+4. Include proper Playwright Web-First Assertions (`await expect(...).toBeVisible()`, `await expect(...).toHaveText(...)`, `await expect(page).toHaveURL(...)`) for all verification steps, plus dynamic sorting/math checks if required by a step. {_ASSERTION_PAGE_RULE}
 5. Return ONLY valid TypeScript code with no markdown fences or explanations.
 {_credentials_script_rule(6, has_credentials)}
 """
@@ -271,10 +324,15 @@ async def generate_data_driven_template(
     username: Optional[str] = None,
     password: Optional[str] = None,
     field_notes: str = "",
+    select_options: Optional[Dict[str, List[str]]] = None,
 ) -> str:
     """
     Records one dataset's run on the live target app, then writes a reusable
     @playwright/test template from the verified trace.
+
+    When select_options is given, it is filled with selector -> the option
+    labels of every dropdown the recording picked from, so the caller can
+    check other datasets' values against the real options.
 
     The steps run with sample_data's values. The template uses each field's
     marker (from markers) in place of its value, so PlaywrightAgent can run
@@ -310,7 +368,8 @@ async def generate_data_driven_template(
         len(run_steps),
     )
     recorded_history = await _record_verified_trace(
-        target_url, run_steps, test_title, llm, username, password, run_context
+        target_url, run_steps, test_title, llm, username, password, run_context,
+        select_options=select_options,
     )
 
     field_lines = "\n".join(
@@ -341,7 +400,7 @@ Strict Requirements:
 5. When the trace typed a value one character per input box (such as a PIN or OTP), loop over the marker's characters and fill box i with character i, for example `const boxes = [<the verified box selectors in order>]; for (const [i, ch] of [...'__TEST_DATA_01__'].entries()) {{ await page.locator(boxes[i]).fill(ch); }}`. When a field is a list joined with '; ', the trace acted on each recorded item; write one loop over the marker instead, for example `for (const item of '__TEST_DATA_03__'.split('; ')) {{ await page.locator(<verified repeated container>).filter({{ hasText: item }}).locator(<verified control>).click(); }}`, deriving the container and control from the trace's selectors so the loop works for any item. Never keep a selector that hard-codes one item's name.
 5a. When a clicked choice stands for a test data value (a radio, checkbox, option card, or list item), build its selector from what the trace's `element` facts show carries that value: if `control_value` equals the recorded value, use the control's value attribute, for example `label:has(input[value='__TEST_DATA_04__'])`; use `hasText`/`:has-text()` with a marker only when the element's recorded `text` contains the recorded value. A control with empty `text` has no text to match, so never select it by text.
 5b. In a multi-step form or wizard, after each click that moves to the next step, assert that the first control the next step uses is visible before acting on it, with a message naming both steps, for example `await expect(page.locator('<that control>'), 'The "<next step>" step did not show its controls after "<previous step>"; the application may have rejected data entered earlier').toBeVisible();`. Assert the exact locator the next action uses. When that action clicks a label for a radio or checkbox (for example `label:has(...)` or `label[for=...]`), assert that label: styled choices hide their native input, so `toBeVisible()` on the input itself never passes, however long it waits.
-6. Assert the Expected Result with web-first assertions (`await expect(...).toBeVisible()`, `toHaveText(...)`, `await expect(page).toHaveURL(...)`), based on what the trace verified. Never branch on marker values.
+6. Assert the Expected Result with web-first assertions (`await expect(...).toBeVisible()`, `toHaveText(...)`, `await expect(page).toHaveURL(...)`), based on what the trace verified. Never branch on marker values. {_ASSERTION_PAGE_RULE}
 7. Group the code with step comments (`// --- Step 1: ... ---`).
 8. Return ONLY valid TypeScript code with no markdown fences or explanations.
 {_credentials_script_rule(9, has_credentials, any(value in (USERNAME_PLACEHOLDER, PASSWORD_PLACEHOLDER) for value in sample_data.values()))}
@@ -387,8 +446,12 @@ async def _record_verified_trace(
     username: Optional[str],
     password: Optional[str],
     run_context: str = "",
+    select_options: Optional[Dict[str, List[str]]] = None,
 ) -> List[Dict[str, Any]]:
-    """Runs each step on the live page and returns the actions that worked."""
+    """Runs each step on the live page and returns the actions that worked.
+
+    Fills select_options, when given, with each picked dropdown's option labels.
+    """
     headless = os.environ.get("HEADLESS_AGENT", "true").lower() != "false"
     recorded_history: List[Dict[str, Any]] = []
     has_credentials = bool(username or password)
@@ -423,6 +486,12 @@ async def _record_verified_trace(
                 sub_attempts = 0
                 llm_failures = 0
                 last_error = ""
+                # A verification step must record a check of the current page.
+                # Without one, the synthesis only has selectors from earlier
+                # pages and asserts those, such as a login field after login.
+                needs_assertion = _is_verification_step(raw_step)
+                step_asserted = False
+                verify_nudged = False
                 last_llm_error: Optional[LLMServiceError] = None
 
                 while not step_completed and sub_attempts < 6:
@@ -481,6 +550,12 @@ Rules:
                         continue
 
                     if decision.action == "done":
+                        if needs_assertion and not step_asserted and not verify_nudged:
+                            # Ask once; a second done is accepted so a step
+                            # with nothing to assert cannot loop.
+                            verify_nudged = True
+                            last_error = _VERIFY_FEEDBACK
+                            continue
                         step_completed = True
                         break
 
@@ -514,6 +589,12 @@ Rules:
                         if facts:
                             entry["element"] = facts
                         recorded_history.append(entry)
+                        if decision.action in _ASSERT_ACTIONS:
+                            step_asserted = True
+                        if decision.action == "select_option" and select_options is not None:
+                            labels = await _option_labels(page, decision.selector)
+                            if labels:
+                                select_options[decision.selector] = labels
                         last_error = ""
                     except Exception as err:
                         last_error = str(err)

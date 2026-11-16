@@ -91,10 +91,12 @@ import json
 import asyncio
 import io
 import logging
+import os
+import shlex
+import sys
 import zipfile
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-import fitz
 from fastapi import FastAPI, HTTPException, Body, Query, status, BackgroundTasks, UploadFile, File, Depends, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse, FileResponse
@@ -107,6 +109,7 @@ from backend.config.settings import get_settings
 from backend.services.project_service import ProjectService
 from backend.services.workflow_service import WorkflowService
 from backend.services.grounded_playwright_service import GroundedPlaywrightScriptService
+from backend.services.script_generation_jobs import ScriptGenerationJobs
 from backend.schemas.project_dto import ProjectCreate, ProjectResponse
 from backend.repository.project_repository import ProjectURLConflictError
 from backend.services.project_configuration import (
@@ -141,12 +144,25 @@ from backend.services.object_repository_service import (
     ScriptRenderer,
 )
 from backend.services.object_repository_scan import ObjectRepositoryScanService
+from backend.services.chat_service import ChatError, ChatService, allowed_action_types, guard_disconnect
+from backend.services.chat_actions import ChatActionExecutor, action_audit_fields
+from backend.schemas.chat_dto import (
+    ChatActionConfirm,
+    ChatHelpCreate,
+    ChatMessageCreate,
+    ChatMessageItem,
+    ChatMessagePage,
+    ChatThreadItem,
+    ChatThreadPage,
+)
 from backend.models.document import Document
 from backend.models.execution_result import ExecutionResult, ExecutionStatus
 import backend.services.report_service
 
 from sqlalchemy.orm import Session
-from backend.dependencies.auth_dependencies import get_db, get_current_user, has_permission, permitted_actions
+from backend.dependencies.auth_dependencies import (
+    check_permission, get_db, get_current_user, has_permission, permitted_actions, require_project_access,
+)
 from backend.services.auth_service import hash_password, verify_password, create_access_token, create_refresh_token, decode_token
 from backend.services.audit_service import log_audit
 from backend.services.llm_context import LLMContextMiddleware
@@ -175,6 +191,38 @@ app = FastAPI(
 
 # Attributes LLM token usage to the route and project of each API request.
 app.add_middleware(LLMContextMiddleware)
+
+
+def _configured_worker_count() -> int:
+    """Best-effort worker count for warning about in-process chat controls."""
+    counts = []
+    for name in ("WEB_CONCURRENCY", "UVICORN_WORKERS"):
+        value = os.environ.get(name)
+        if value:
+            try:
+                counts.append(int(value))
+            except ValueError:
+                logger.warning("Ignoring invalid %s value: %r", name, value)
+    arguments = shlex.split(os.environ.get("UVICORN_CMD_ARGS", "")) + sys.argv[1:]
+    for index, argument in enumerate(arguments):
+        if argument == "--workers" and index + 1 < len(arguments):
+            try:
+                counts.append(int(arguments[index + 1]))
+            except ValueError:
+                logger.warning("Ignoring invalid uvicorn --workers value: %r", arguments[index + 1])
+        elif argument.startswith("--workers="):
+            try:
+                counts.append(int(argument.split("=", 1)[1]))
+            except ValueError:
+                logger.warning("Ignoring invalid uvicorn --workers value: %r", argument)
+    return max(counts, default=1)
+
+
+def _warn_chat_multi_worker() -> None:
+    if get_settings().chat.enabled and _configured_worker_count() > 1:
+        logger.warning(
+            "Chat turn locks and rate limits are process-local; multi-worker deployments do not share them"
+        )
 
 
 @app.middleware("http")
@@ -249,6 +297,16 @@ def on_startup():
     except Exception as e:
         print(f"[Vault] Migration failed: {e}")
 
+    # Chat assistant (spec 0005): actions whose worker died with the last
+    # process become failed, and replies cut off by it become interrupted.
+    _warn_chat_multi_worker()
+    if get_settings().chat.enabled:
+        try:
+            chat_service.purge_idle()
+            chat_service.recover_after_restart()
+        except Exception:
+            logging.getLogger(__name__).exception("Chat startup recovery failed")
+
     # Launch JIRA Sync Retry Worker loop in event loop
     from backend.services.jira_sync_service import jira_retry_worker
     import asyncio
@@ -257,6 +315,12 @@ def on_startup():
 # Initialize application services
 project_service = ProjectService()
 workflow_service = WorkflowService()
+# Calls through the module global so tests can swap workflow_service.
+script_generation_jobs = ScriptGenerationJobs(
+    lambda project_id, test_case_id, framework: workflow_service.generate_playwright_script(
+        project_id, test_case_id, automation_framework=framework
+    )
+)
 grounded_playwright_service = GroundedPlaywrightScriptService()
 object_repository_service = ObjectRepositoryService()
 object_repository_scan_service = ObjectRepositoryScanService(object_repository_service)
@@ -619,197 +683,11 @@ class TestCycleResponse(BaseModel):
 
 @app.get("/api/v1/projects/{project_id}/dashboard-metrics", response_model=DashboardMetricsResponse)
 def get_dashboard_metrics(project_id: UUID, scope: str = "project", id: str | None = None):
-    p = project_service.get_project(project_id)
-    if not p:
+    from backend.services.dashboard_metrics import compute_dashboard_metrics
+
+    if not project_service.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
-
-    reqs = project_service.get_requirements(project_id)
-    scenarios = project_service.get_scenarios_for_project(project_id)
-    test_cases = project_service.get_test_cases_for_project(project_id)
-    executions = project_service.repo.get_execution_results(project_id)
-
-    # Filter based on scope
-    if scope == "release" and id:
-        try:
-            rel_id = UUID(id)
-            reqs = [r for r in reqs if r.release_id == rel_id]
-            scenarios = [s for s in scenarios if any(r.id == s.requirement_id for r in reqs)]
-            test_cases = [tc for tc in test_cases if any(s.id == tc.scenario_id for s in scenarios)]
-            executions = [ex for ex in executions if any(tc.id == ex.test_case_id for tc in test_cases)]
-        except Exception:
-            pass
-    elif scope == "cycle" and id:
-        try:
-            cy_id = UUID(id)
-            cycle = project_service.repo.get_test_cycle(cy_id)
-            if cycle:
-                rel_id = cycle.release_id
-                reqs = [r for r in reqs if r.release_id == rel_id]
-                scenarios = [s for s in scenarios if any(r.id == s.requirement_id for r in reqs)]
-                test_cases = [tc for tc in test_cases if any(s.id == tc.scenario_id for s in scenarios)]
-                executions = [ex for ex in executions if ex.test_cycle_id == cy_id]
-        except Exception:
-            pass
-
-    # Empty indicator
-    is_empty = len(reqs) == 0 and len(executions) == 0
-
-    # Counts
-    totalReqs = len(reqs)
-    totalScenarios = len(scenarios)
-    totalTestCases = len(test_cases)
-    totalExecutions = len(executions)
-
-    passed_execs = [ex for ex in executions if ex.status == "passed" or (hasattr(ex.status, "value") and ex.status.value == "passed")]
-    passedExecutions = len(passed_execs)
-    failedExecutions = totalExecutions - passedExecutions
-    passRatio = f"{int(round((passedExecutions / totalExecutions) * 100))}%" if totalExecutions > 0 else "0%"
-
-    # Coverage
-    manualCount = 0
-    apiCount = 0
-    uiCount = 0
-    for tc in test_cases:
-        exec_type = getattr(tc, "execution_type", None) or "Automated Testing"
-        if exec_type == "Manual Testing":
-            manualCount += 1
-        elif "api" in tc.title.lower() or (tc.steps and any("api" in s.lower() for s in tc.steps)):
-            apiCount += 1
-        else:
-            uiCount += 1
-    automatedCount = uiCount + apiCount
-    coveragePct = f"{int(round((automatedCount / totalTestCases) * 100))}%" if totalTestCases > 0 else "0%"
-
-    # Execution status pie chart data
-    passedCount = 0
-    failedCount = 0
-    yetToExecuteCount = 0
-    for tc in test_cases:
-        tc_execs = [ex for ex in executions if str(ex.test_case_id) == str(tc.id)]
-        if not tc_execs:
-            yetToExecuteCount += 1
-        else:
-            sorted_execs = sorted(tc_execs, key=lambda x: x.executed_at, reverse=True)
-            latest = sorted_execs[0]
-            status_val = latest.status.value if hasattr(latest.status, "value") else latest.status
-            if status_val == "passed":
-                passedCount += 1
-            else:
-                failedCount += 1
-
-    # Scenarios approval donut
-    approvedCount = len([s for s in scenarios if s.approved])
-    rejectedCount = len([s for s in scenarios if getattr(s, "rejected", False)])
-    pendingCount = len(scenarios) - approvedCount - rejectedCount
-
-    # Trend line/bar data (last 7 days)
-    dailyData = {}
-    for ex in executions:
-        if not ex.executed_at:
-            continue
-        date_str = ex.executed_at.strftime("%b %d")
-        if date_str not in dailyData:
-            dailyData[date_str] = {"passed": 0, "failed": 0}
-        status_val = ex.status.value if hasattr(ex.status, "value") else ex.status
-        if status_val == "passed":
-            dailyData[date_str]["passed"] += 1
-        else:
-            dailyData[date_str]["failed"] += 1
-    sorted_dates = sorted(dailyData.keys(), key=lambda d: datetime.strptime(d + f" {datetime.now().year}", "%b %d %Y"))
-    recent_dates = sorted_dates[-7:]
-    trendPassed = [dailyData[d]["passed"] for d in recent_dates]
-    trendFailed = [dailyData[d]["failed"] for d in recent_dates]
-
-    # Domains distribution
-    domainCounts = {}
-    for r in reqs:
-        dom = r.business_domain or "general"
-        domainCounts[dom] = domainCounts.get(dom, 0) + 1
-    domainLabels = list(domainCounts.keys())
-    domainCountsData = list(domainCounts.values())
-
-    # Test Case Priority
-    priorityHighCount = 0
-    priorityMediumCount = 0
-    priorityLowCount = 0
-    for tc in test_cases:
-        prio = (tc.priority or "medium").lower()
-        if prio == "high":
-            priorityHighCount += 1
-        elif prio == "low":
-            priorityLowCount += 1
-        else:
-            priorityMediumCount += 1
-
-    # Defect Status (Open, Resolved, Retest Pending, Closed)
-    defectOpenCount = 0
-    defectResolvedCount = 0
-    defectRetestCount = 0
-    defectClosedCount = 0
-    for ex in executions:
-        status_val = ex.status.value if hasattr(ex.status, "value") else ex.status
-        if status_val == "failed":
-            if getattr(ex, "retest_pending_candidate", False):
-                defectRetestCount += 1
-            else:
-                defectOpenCount += 1
-        elif status_val == "passed":
-            if getattr(ex, "retest_pending_candidate", False) or getattr(ex, "jira_bug_id", None):
-                defectResolvedCount += 1
-            else:
-                defectClosedCount += 1
-
-    # Fetch Top 5 Recent Executions
-    sorted_executions = sorted(executions, key=lambda x: x.executed_at, reverse=True)[:5]
-    recent_execs_list = []
-    for ex in sorted_executions:
-        tc = next((t for t in test_cases if str(t.id) == str(ex.test_case_id)), None)
-        tc_name = tc.title if tc else "Unknown Test Case"
-        tc_custom_id = getattr(tc, "custom_id", None) or (f"TC-{str(tc.id)[:4].upper()}" if tc else "TC-XXX")
-        status_val = ex.status.value if hasattr(ex.status, "value") else ex.status
-        recent_execs_list.append(
-            DashboardRecentExecution(
-                id=ex.id,
-                test_case_id=ex.test_case_id,
-                tcName=tc_name,
-                tcCustomId=tc_custom_id,
-                status=status_val,
-                duration_seconds=ex.duration_seconds,
-                executed_at=ex.executed_at.strftime("%I:%M %p") if ex.executed_at else "N/A"
-            )
-        )
-
-    return DashboardMetricsResponse(
-        totalReqs=totalReqs,
-        totalScenarios=totalScenarios,
-        totalTestCases=totalTestCases,
-        totalExecutions=totalExecutions,
-        passRatio=passRatio,
-        coveragePct=coveragePct,
-        uiCount=uiCount,
-        apiCount=apiCount,
-        manualCount=manualCount,
-        passedCount=passedCount,
-        failedCount=failedCount,
-        yetToExecuteCount=yetToExecuteCount,
-        approvedCount=approvedCount,
-        rejectedCount=rejectedCount,
-        pendingCount=pendingCount,
-        trendLabels=recent_dates,
-        trendPassed=trendPassed,
-        trendFailed=trendFailed,
-        domainLabels=domainLabels,
-        domainCountsData=domainCountsData,
-        priorityHighCount=priorityHighCount,
-        priorityMediumCount=priorityMediumCount,
-        priorityLowCount=priorityLowCount,
-        defectOpenCount=defectOpenCount,
-        defectResolvedCount=defectResolvedCount,
-        defectRetestCount=defectRetestCount,
-        defectClosedCount=defectClosedCount,
-        recentExecutions=recent_execs_list,
-        isEmpty=is_empty
-    )
+    return DashboardMetricsResponse(**compute_dashboard_metrics(project_service.repo, project_id, scope, id))
 
 
 @app.get("/api/v1/dashboard/all-metrics", response_model=DashboardMetricsResponse)
@@ -1708,6 +1586,8 @@ def read_settings():
             role: config.model_dump(exclude={"api_key", "api_base"})
             for role, config in settings.llm_roles.items()
         },
+        # Spec 0005: the frontend renders the chat button only when this is true.
+        "chat_enabled": settings.chat.enabled,
         "workflow": {
             "mode": settings.workflow.mode,
             "human_review_enabled": settings.workflow.human_review_enabled,
@@ -1988,6 +1868,47 @@ def generate_playwright_script(project_id: UUID, test_case_id: UUID, payload: Ge
         raise HTTPException(status_code=500, detail=f"Script generation failed: {exc}")
 
 
+def _script_generation_job_response(job) -> dict:
+    return {
+        "job_id": str(job.id),
+        "test_case_id": str(job.test_case_id),
+        "status": job.status,
+        "error": job.error or None,
+        "error_status": job.error_status,
+        "test_case": _test_case_response(job.test_case) if job.test_case is not None else None,
+    }
+
+
+@app.post(
+    "/api/v1/projects/{project_id}/testcases/{test_case_id}/generate-script/jobs",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_script_generation_job(
+    project_id: UUID,
+    test_case_id: UUID,
+    payload: GenerateScriptPayload = Body(default=GenerateScriptPayload()),
+    user: UserDB = Depends(get_current_user),
+):
+    """Start script generation in the background; poll the returned job until it finishes."""
+    job = script_generation_jobs.start(project_id, test_case_id, payload.framework)
+    return _script_generation_job_response(job)
+
+
+@app.get("/api/v1/projects/{project_id}/script-generation-jobs/{job_id}")
+def get_script_generation_job(
+    project_id: UUID,
+    job_id: UUID,
+    user: UserDB = Depends(get_current_user),
+):
+    job = script_generation_jobs.get(project_id, job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Script generation job not found. The backend may have restarted; generate the script again.",
+        )
+    return _script_generation_job_response(job)
+
+
 @app.post(
     "/api/v1/projects/{project_id}/testcases/validate-scripts",
     status_code=status.HTTP_202_ACCEPTED,
@@ -2005,19 +1926,11 @@ def validate_project_scripts(
             status_code=400,
             detail="Confirm that the selected project is a safe test environment.",
         )
-    project = project_service.get_project(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if user.role not in {"Superadmin", "Admin"} and project.owner_id != user.id:
-        assignment = db.query(ProjectUserDB.id).filter(
-            ProjectUserDB.project_id == project_id,
-            ProjectUserDB.user_id == user.id,
-        ).first()
-        if not assignment:
-            raise HTTPException(
-                status_code=403,
-                detail="You must be assigned to this project to validate its scripts.",
-            )
+    require_project_access(
+        user, project_id, db,
+        detail="You must be assigned to this project to validate its scripts.",
+        projects=project_service,
+    )
     try:
         cases = grounded_playwright_service.reserve_batch(
             project_id,
@@ -2045,14 +1958,14 @@ def validate_project_scripts(
 
 @app.post("/api/v1/projects/{project_id}/testcases/{test_case_id}/execute")
 def execute_test_case(project_id: UUID, test_case_id: UUID, background_tasks: BackgroundTasks):
-    # Ensure test case exists before firing background run
-    if not project_service.repo.get_test_case(test_case_id):
-        raise HTTPException(status_code=404, detail="Test case not found")
-        
-    import uuid
-    execution_id = uuid.uuid4()
-    from backend.services.workflow_service import run_execution_and_stream
-    background_tasks.add_task(run_execution_and_stream, workflow_service, project_id, test_case_id, execution_id, background_tasks)
+    from backend.services.execution_service import ExecutionService
+
+    try:
+        execution_id = ExecutionService().start_test_case_run(
+            project_id, test_case_id, background_tasks, workflow_service=workflow_service,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     return {"status": "started", "execution_id": str(execution_id)}
 
 
@@ -2080,174 +1993,20 @@ def get_execution_stream(project_id: UUID, test_case_id: UUID):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-active_batch_events = {}
+from backend.services.execution_service import active_batch_events
+
 
 @app.post("/api/v1/projects/{project_id}/batches/execute")
 def execute_batch(project_id: UUID, test_case_ids: list[UUID], background_tasks: BackgroundTasks):
-    import time
-    import datetime
-    import uuid
-    from backend.models.batch_context import BatchContext, QueueItem
-    from backend.services.batch_queue_manager import BatchQueueManager
-    from backend.services.playwright_runner import PlaywrightRunner
+    from backend.services.execution_service import ExecutionService
 
-    batch_uuid = uuid.uuid4()
-    batch_id = str(batch_uuid)
-    
-    # Compile queue items
-    queue = []
-    runnable_test_cases = []
-    renderer = object_repository_service.renderer()
-    for i, tc_id in enumerate(test_case_ids):
-        tc = project_service.repo.get_test_case(tc_id)
-        if tc and tc.playwright_script:
-            runnable_test_cases.append(tc)
-            required_state = "LOGIN"
-            title_lower = tc.title.lower()
-            if "search" in title_lower:
-                required_state = "SEARCH"
-            elif "select" in title_lower or "result" in title_lower:
-                required_state = "RESULTS"
-            elif "book" in title_lower:
-                required_state = "BOOKING"
-            elif "confirm" in title_lower:
-                required_state = "CONFIRMATION"
-
-            item = QueueItem(
-                task_id=f"TASK-{i+1}",
-                requirement_id=None,
-                testcase_id=tc.id,
-                required_state=required_state,
-                playwright_script=renderer.render(tc),
-                dataset_row=i,
-                priority=1,
-                estimated_duration=30.0,
-                status="queued"
-            )
-            queue.append(item)
-
-    if not queue:
-        raise HTTPException(status_code=400, detail="No runnable test cases selected")
-
-    context = BatchContext(
-        batch_id=batch_id,
-        project_id=project_id,
-        queue=queue
-    )
-
-    events = []
-    active_batch_events[batch_id] = events
-
-    def log_batch_event(status, log, current_item=None):
-        total_tasks = len(context.queue)
-        completed_tasks = context.passed + context.failed + context.skipped
-        progress = int((completed_tasks / total_tasks) * 100) if total_tasks > 0 else 0
-        
-        remaining = total_tasks - completed_tasks
-        etr = f"{remaining * 30}s" if remaining > 0 else "0s"
-
-        events.append({
-            "status": status,
-            "log": log,
-            "progress": progress,
-            "total_tasks": total_tasks,
-            "remaining_tasks": remaining,
-            "passed_count": context.passed,
-            "failed_count": context.failed,
-            "skipped_count": context.skipped,
-            "current_state": context.current_state,
-            "next_required_state": current_item.required_state if current_item else "N/A",
-            "navigation_decision": context.navigation_decision or "N/A",
-            "current_retry": context.current_retry_count,
-            "current_dataset_row": context.current_dataset_row if context.current_dataset_row is not None else 0,
-            "etr": etr
-        })
-
-    def run_async_batch():
-        log_batch_event("Started", "Initializing batch queue runner...")
-        
-        # Transition JIRA stories to "In Progress"
-        from backend.services.jira_sync_service import sync_execution_started
-        for tc in runnable_test_cases:
-            try:
-                background_tasks.add_task(sync_execution_started, tc.scenario_id)
-            except Exception:
-                pass
-                
-        runner = PlaywrightRunner()
-        marker_lines: dict[str, list[str]] = {}
-
-        def on_runner_log(line):
-            active_item = next((it for it in context.queue if it.status == "running"), None)
-            if active_item and "[OBJREPO]" in str(line):
-                marker_lines.setdefault(active_item.task_id, []).append(str(line))
-            log_batch_event("Running", line, active_item)
-
-        qm = BatchQueueManager(
-            repo=project_service.repo,
-            runner=runner,
-            on_log=on_runner_log
+    try:
+        batch_id = ExecutionService().start_batch_run(
+            project_id, test_case_ids, background_tasks, enforce_project_scope=False,
         )
-        
-        try:
-            qm.run_batch(context)
-            # Sync back results and trigger reports
-            for item in context.queue:
-                tc = next((t for t in runnable_test_cases if t.id == item.testcase_id), None)
-                if tc:
-                    from backend.agents.execution_agent import _STATUS_MAP
-                    from backend.models.test_case import TestCaseStatus
-                    tc.status = _STATUS_MAP.get(item.status, TestCaseStatus.BLOCKED)
-                    project_service.repo.update_test_case(tc)
-                    
-                    screenshot_val = None
-                    if context.artifacts.get(item.task_id, {}).get("screenshots"):
-                        screenshot_val = context.artifacts[item.task_id]["screenshots"][0].get("path")
-
-                    res = ExecutionResult(
-                        test_case_id=tc.id,
-                        test_cycle_id=batch_uuid,
-                        status=ExecutionStatus(item.status) if item.status in ["passed", "failed"] else ExecutionStatus.ERROR,
-                        duration_seconds=item.duration,
-                        error_message=item.error_message,
-                        screenshot_path=screenshot_val,
-                        video_path=context.artifacts.get(item.task_id, {}).get("video"),
-                        trace_path=context.artifacts.get(item.task_id, {}).get("trace")
-                    )
-                    res._raw_payload = {
-                        "timeline": context.artifacts.get(item.task_id, {}).get("timeline", []),
-                        "logs": context.artifacts.get(item.task_id, {}).get("logs", []),
-                        "console": context.artifacts.get(item.task_id, {}).get("console", [])
-                    }
-                    project_service.repo.save_execution_result(project_id, res)
-                    from backend.services.execution_service import ExecutionService
-                    ExecutionService().apply_object_repository_markers(
-                        project_id, res.id, marker_lines.get(item.task_id, [])
-                    )
-                    # Each queue item runs in its own directory, so the file
-                    # is attributed to this test case (spec 0004, AC-18).
-                    from backend.services.object_repository_harvest import read_harvest_file
-                    from backend.services.playwright_runner import ARTIFACTS_ROOT
-                    ExecutionService().apply_object_repository_harvest(
-                        project_id, tc.id, res.id, read_harvest_file(ARTIFACTS_ROOT / str(item.testcase_id))
-                    )
-
-                    # Trigger report generation
-                    from backend.services.report_service import ReportService
-                    rs = ReportService(repo=project_service.repo)
-                    # Use engine selection method to respect feature flag
-                    rs.compile_reports_with_engine_selection(project_id, res)
-
-                    # Trigger JIRA execution finished update
-                    from backend.services.jira_sync_service import sync_execution_finished
-                    background_tasks.add_task(sync_execution_finished, tc.scenario_id, res.id)
-                    
-            log_batch_event("Completed", "Batch execution complete.")
-        except Exception as e:
-            log_batch_event("Error", f"Execution crashed: {e}")
-
-    background_tasks.add_task(run_async_batch)
-    return {"status": "started", "batch_id": batch_id}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "started", "batch_id": str(batch_id)}
 
 
 @app.get("/api/v1/projects/{project_id}/batches/{batch_id}/stream")
@@ -3518,6 +3277,239 @@ def reset_demo_data(user: UserDB = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Error resetting demo data: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================================
+# Chat assistant (spec 0005)
+# ==========================================================
+
+def _chat_action_audit(event: str, *, user_id, project_id, action: dict) -> None:
+    """AC-22: one audit entry per confirm, cancel, and final result. Runs in
+    worker threads too, so it opens its own session."""
+    from backend.database.db import SessionLocal
+
+    permission = action.get("permission") or {}
+    db = SessionLocal()
+    try:
+        log_audit(
+            db,
+            UUID(str(user_id)) if user_id else None,
+            project_id,
+            f"CHAT_ACTION_{event}",
+            permission.get("module") or "CHAT",
+            action_audit_fields(event, action),
+        )
+    finally:
+        db.close()
+
+
+# The executor reads workflow_service through the module global so tests can swap it.
+chat_service = ChatService(
+    action_executor=ChatActionExecutor(
+        workflow_service=lambda: workflow_service,
+        project_service=project_service,
+        script_jobs=lambda: script_generation_jobs,
+        execution_service=lambda: __import__(
+            "backend.services.execution_service", fromlist=["ExecutionService"]
+        ).ExecutionService(),
+        audit=_chat_action_audit,
+    ),
+)
+
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+def require_chat_enabled():
+    """When CHAT_ENABLED is false every chat route answers 404."""
+    if not get_settings().chat.enabled:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+def _chat_http_error(exc: ChatError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
+@app.post("/api/v1/projects/{project_id}/chat/messages", dependencies=[Depends(require_chat_enabled)])
+def post_chat_message(
+    project_id: UUID,
+    payload: ChatMessageCreate,
+    request: Request,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = require_project_access(user, project_id, db, projects=project_service)
+    # AC-11: the model is offered only the actions the user may run here.
+    # Decided before the stream starts, while the request session is open.
+    allowed = allowed_action_types(lambda module, action: check_permission(db, user, project_id, module, action))
+    try:
+        turn = chat_service.prepare_turn(
+            project, user.id, payload.content, payload.thread_id, payload.view_context, allowed_actions=allowed,
+        )
+    except ChatError as exc:
+        raise _chat_http_error(exc)
+    return StreamingResponse(
+        guard_disconnect(request, chat_service.stream_turn(turn)),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
+
+
+@app.post("/api/v1/projects/{project_id}/chat/threads/{thread_id}/retry", dependencies=[Depends(require_chat_enabled)])
+def retry_chat_message(
+    project_id: UUID,
+    thread_id: UUID,
+    request: Request,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = require_project_access(user, project_id, db, projects=project_service)
+    allowed = allowed_action_types(lambda module, action: check_permission(db, user, project_id, module, action))
+    try:
+        turn = chat_service.prepare_retry(project, user.id, thread_id, allowed_actions=allowed)
+    except ChatError as exc:
+        raise _chat_http_error(exc)
+    return StreamingResponse(
+        guard_disconnect(request, chat_service.stream_turn(turn)),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
+
+
+@app.post("/api/v1/chat/help", dependencies=[Depends(require_chat_enabled)])
+def post_chat_help(
+    payload: ChatHelpCreate,
+    request: Request,
+    user: UserDB = Depends(get_current_user),
+):
+    try:
+        chat_service.check_rate_limit(user.id)
+    except ChatError as exc:
+        raise _chat_http_error(exc)
+    return StreamingResponse(
+        guard_disconnect(request, chat_service.stream_help(user.id, payload.content, payload.history)),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
+
+
+@app.get(
+    "/api/v1/projects/{project_id}/chat/threads",
+    response_model=ChatThreadPage,
+    dependencies=[Depends(require_chat_enabled)],
+)
+def list_chat_threads(
+    project_id: UUID,
+    cursor: Optional[str] = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=50),
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_project_access(user, project_id, db, projects=project_service)
+    try:
+        threads, next_cursor = chat_service.list_threads(project_id, user.id, cursor, limit)
+    except ChatError as exc:
+        raise _chat_http_error(exc)
+    return ChatThreadPage(
+        items=[ChatThreadItem(id=t.id, title=t.title, last_activity_at=t.last_activity_at) for t in threads],
+        next_cursor=next_cursor,
+    )
+
+
+@app.get(
+    "/api/v1/projects/{project_id}/chat/threads/{thread_id}/messages",
+    response_model=ChatMessagePage,
+    dependencies=[Depends(require_chat_enabled)],
+)
+def list_chat_messages(
+    project_id: UUID,
+    thread_id: UUID,
+    before_seq: Optional[int] = Query(default=None, ge=1),
+    limit: int = Query(default=50, ge=1, le=100),
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_project_access(user, project_id, db, projects=project_service)
+    try:
+        messages, has_more = chat_service.list_messages(project_id, user.id, thread_id, before_seq, limit)
+    except ChatError as exc:
+        raise _chat_http_error(exc)
+    return ChatMessagePage(
+        items=[ChatMessageItem(**m.model_dump(include=set(ChatMessageItem.model_fields))) for m in messages],
+        has_more=has_more,
+    )
+
+
+@app.delete(
+    "/api/v1/projects/{project_id}/chat/threads/{thread_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_chat_enabled)],
+)
+def delete_chat_thread(
+    project_id: UUID,
+    thread_id: UUID,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_project_access(user, project_id, db, projects=project_service)
+    try:
+        chat_service.delete_thread(project_id, user.id, thread_id)
+    except ChatError as exc:
+        raise _chat_http_error(exc)
+
+
+@app.post(
+    "/api/v1/projects/{project_id}/chat/messages/{message_id}/action/confirm",
+    dependencies=[Depends(require_chat_enabled)],
+)
+def confirm_chat_action(
+    project_id: UUID,
+    message_id: UUID,
+    payload: Optional[ChatActionConfirm] = Body(default=None),
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = require_project_access(user, project_id, db, projects=project_service)
+    try:
+        return chat_service.confirm_action(
+            project, user.id, message_id, payload.confirm_text if payload else None,
+            can=lambda module, action: check_permission(db, user, project_id, module, action),
+        )
+    except ChatError as exc:
+        raise _chat_http_error(exc)
+
+
+@app.post(
+    "/api/v1/projects/{project_id}/chat/messages/{message_id}/action/cancel",
+    dependencies=[Depends(require_chat_enabled)],
+)
+def cancel_chat_action(
+    project_id: UUID,
+    message_id: UUID,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = require_project_access(user, project_id, db, projects=project_service)
+    try:
+        return chat_service.cancel_action(project, user.id, message_id)
+    except ChatError as exc:
+        raise _chat_http_error(exc)
+
+
+@app.get(
+    "/api/v1/projects/{project_id}/chat/messages/{message_id}/action",
+    dependencies=[Depends(require_chat_enabled)],
+)
+def get_chat_action(
+    project_id: UUID,
+    message_id: UUID,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = require_project_access(user, project_id, db, projects=project_service)
+    try:
+        return chat_service.get_action(project, user.id, message_id)
+    except ChatError as exc:
+        raise _chat_http_error(exc)
 
 
 app.mount("/", StaticFiles(directory="frontend", html=True), name="static")

@@ -1,7 +1,9 @@
-import { API } from './api.js?v=17';
-import { ObjectRepositoryView } from './object-repository.js?v=1';
+import { API } from './api.js?v=20';
+import { ChatPanel } from './chat.js?v=3';
+import { OpenRows, ROW_VIEWS } from './chat-context.js?v=1';
+import { ObjectRepositoryView } from './object-repository.js?v=2';
 import { TokenUtilizationView } from './token-utilization.js?v=1';
-import { Components, escapeHTML } from './components.js?v=3';
+import { Components, escapeHTML } from './components.js?v=4';
 
 class App {
   constructor() {
@@ -28,6 +30,11 @@ class App {
     this.testDataAgentRunning = false;
     this.generatingTestDataCaseIds = new Set();
     this.expandedTestCaseIds = new Set();
+    this.chatPanel = null;
+    // Chat context (spec 0005 open item rules): open rows per view, in memory only.
+    this.openRows = new OpenRows();
+    this.triageExecutionId = null;
+    this.installChatRowHooks();
   }
 
   async init() {
@@ -73,6 +80,7 @@ class App {
         this.currentRelease = null;
         this.currentTestCycle = null;
         localStorage.removeItem('active_project_id');
+        window.dispatchEvent(new CustomEvent('app:project-changed'));
         const relSelect = document.getElementById('release-select');
         if (relSelect) relSelect.style.display = 'none';
         const cySelect = document.getElementById('cycle-select');
@@ -1039,6 +1047,7 @@ class App {
       this.currentProjectId = projectId;
       this.currentProject = await API.getProject(projectId);
       localStorage.setItem('active_project_id', projectId);
+      window.dispatchEvent(new CustomEvent('app:project-changed'));
       
       document.getElementById('sidebar-container').style.display = 'flex';
       document.getElementById('project-select-wrapper').style.display = 'flex';
@@ -1883,6 +1892,7 @@ class App {
   }
 
   async renderScenarios() {
+    this.resetOpenRows('scenarios');
     this.renderScenariosRequirementDropdown();
     const container = document.getElementById('scenarios-list-container');
     
@@ -2220,6 +2230,7 @@ class App {
   }
 
   async renderTestCases() {
+    this.resetOpenRows('testcases');
     this.renderTestCasesRequirementDropdown();
     const container = document.getElementById('testcases-list-container');
     
@@ -2933,6 +2944,7 @@ class App {
   }
 
   async renderScenarioApproval() {
+    this.resetOpenRows('scenario-approval');
     this.renderScenarioApprovalRequirementDropdown();
     const container = document.getElementById('scenario-approval-list-container');
     if (!container) return;
@@ -3063,6 +3075,7 @@ class App {
   }
 
   async renderTestCaseApproval() {
+    this.resetOpenRows('testcase-approval');
     this.renderTestCaseApprovalRequirementDropdown();
     const container = document.getElementById('testcase-approval-list-container');
     if (!container) return;
@@ -4009,6 +4022,10 @@ class App {
 
   closeModal(modalId) {
     document.getElementById(modalId).classList.remove('active');
+    if (modalId === 'triage-modal' && this.triageExecutionId) {
+      this.triageExecutionId = null;
+      this.notifyChatContext();
+    }
   }
 
   initSearchableLOB() {
@@ -4342,6 +4359,7 @@ class App {
       }
       
       await this.loadSettings();
+      this.mountChat();
       await this.loadProjects();
 
       if (isAdmin) {
@@ -4360,7 +4378,12 @@ class App {
       this.selectedRequirementId = localStorage.getItem('playwright_active_req_id') || null;
       this.activePlaywrightTestCaseId = localStorage.getItem('playwright_active_testcase_id') || null;
 
-      window.addEventListener('hashchange', () => this.handleRouting());
+      window.addEventListener('hashchange', () => {
+        // A route change closes the triage modal's chat context.
+        if (this.triageExecutionId) this.closeModal('triage-modal');
+        this.notifyChatContext();
+        this.handleRouting();
+      });
       await this.handleRouting();
     } else {
       document.getElementById('login-overlay').style.display = 'flex';
@@ -4371,6 +4394,144 @@ class App {
 
   isAdmin() {
     return this.userRole === 'Superadmin' || this.userRole === 'Admin';
+  }
+
+  // Chat assistant (spec 0005): shown only when the server reports it enabled.
+  mountChat() {
+    if (!this.settings || !this.settings.chat_enabled) {
+      if (this.chatPanel) this.chatPanel.unmount();
+      this.chatPanel = null;
+      return;
+    }
+    if (!this.chatPanel) this.chatPanel = new ChatPanel(this);
+    this.chatPanel.mount();
+  }
+
+  // The screen and open item a chat message is about (spec 0005, view
+  // context vocabulary). The server treats it as untrusted and drops
+  // anything that is not in the selected project.
+  getChatContext() {
+    const hash = (window.location.hash || '').replace('#/', '');
+    const routeExecutionId = hash.startsWith('execution/') ? hash.split('/')[1] || null : null;
+    const view = routeExecutionId ? 'execution-workspace' : (hash || 'dashboard');
+    const item = (item_type, item_id) => ({ view, item_type, item_id });
+    const none = item(null, null);
+
+    if (ROW_VIEWS[view]) {
+      const openId = this.openRows.current(view);
+      if (openId) return item(ROW_VIEWS[view], openId);
+      // Requirement fallback: only a requirement loaded for this project.
+      const requirementId = this.selectedRequirementId;
+      if (requirementId && (this.requirements || []).some(r => r.id === requirementId)) {
+        return item('requirement', requirementId);
+      }
+      return none;
+    }
+    if (view === 'execution-workspace') {
+      if (routeExecutionId) return item('execution', routeExecutionId);
+      return this.activePlaywrightTestCaseId ? item('test_case', this.activePlaywrightTestCaseId) : none;
+    }
+    if (view === 'playwright') {
+      return this.activePlaywrightTestCaseId ? item('test_case', this.activePlaywrightTestCaseId) : none;
+    }
+    if (view === 'executions') {
+      return this.triageExecutionId ? item('execution', this.triageExecutionId) : none;
+    }
+    if (view === 'object-repository' && this.objectRepositoryView && this.objectRepositoryView.selectedPageId) {
+      return item('object_repository_page', this.objectRepositoryView.selectedPageId);
+    }
+    // The Test Data Agent screen runs for a whole requirement and has no
+    // single open test case, so it sends no item.
+    return none;
+  }
+
+  // Display name for the chat context line (AC-27), from data already loaded.
+  getChatItemName(itemType, itemId) {
+    const titleOf = (list, id) => {
+      const found = (list || []).find(entry => entry.id === id);
+      return found ? (found.requirement_title || found.title || found.scenario_name || found.name || null) : null;
+    };
+    if (itemType === 'requirement') return titleOf(this.requirements, itemId);
+    if (itemType === 'scenario') return titleOf(this.scenarios, itemId);
+    if (itemType === 'test_case') return titleOf(this.testCases, itemId);
+    if (itemType === 'execution') {
+      const execution = (this.executions || []).find(entry => entry.id === itemId);
+      const testCaseName = execution ? titleOf(this.testCases, execution.test_case_id) : null;
+      return testCaseName || String(itemId).slice(0, 8);
+    }
+    if (itemType === 'object_repository_page') {
+      return titleOf(this.objectRepositoryView && this.objectRepositoryView.pages, itemId);
+    }
+    return null;
+  }
+
+  notifyChatContext() {
+    window.dispatchEvent(new CustomEvent('chat:context-changed'));
+  }
+
+  // A full re-render of a list view (or its requirement dropdown changing)
+  // leaves nothing open there, matching the screen.
+  resetOpenRows(view) {
+    this.openRows.clear(view);
+    this.notifyChatContext();
+  }
+
+  currentRouteView() {
+    const hash = (window.location.hash || '').replace('#/', '');
+    return hash || 'dashboard';
+  }
+
+  // Record open rows explicitly from the row toggles and the edit buttons,
+  // never by watching the DOM.
+  installChatRowHooks() {
+    const wrap = (name, itemType) => {
+      const original = window[name];
+      if (typeof original !== 'function' || original.chatWrapped) return;
+      const wrapped = (id) => {
+        original(id);
+        const view = this.currentRouteView();
+        if (ROW_VIEWS[view] === itemType) {
+          this.openRows.toggle(view, id);
+          this.notifyChatContext();
+        }
+      };
+      wrapped.chatWrapped = true;
+      window[name] = wrapped;
+    };
+    wrap('toggleScenarioRow', 'scenario');
+    wrap('toggleTestCaseRow', 'test_case');
+
+    window.chatRowEdit = (itemType, id, editing) => {
+      const view = this.currentRouteView();
+      if (ROW_VIEWS[view] !== itemType) return;
+      if (editing) this.openRows.startEdit(view, id);
+      else this.openRows.endEdit(view, id);
+      this.notifyChatContext();
+    };
+
+    window.addEventListener('app:project-changed', () => {
+      this.openRows.clearAll();
+      this.triageExecutionId = null;
+      this.notifyChatContext();
+    });
+
+    // AC-16: a chat action succeeded; reload the current view if it shows
+    // the data that changed.
+    window.addEventListener('chat:data-changed', e => {
+      const views = (e.detail && e.detail.views) || [];
+      if (this.currentProject && views.includes(this.currentRouteView())) this.refreshProjectData();
+    });
+  }
+
+  // The link on a finished chat action card (AC-15). The view's data is
+  // reloaded first, since the action may have run while another view was open.
+  async openChatLink(view, id) {
+    if (!this.currentProject || !view) return;
+    if (id && ['scenarios', 'testcases'].includes(view) && (this.requirements || []).some(r => r.id === id)) {
+      this.selectedRequirementId = id;
+    }
+    await this.refreshProjectData();
+    this.navigateTo(view);
   }
 
   async loadRolesAndPermissions() {
@@ -4469,6 +4630,10 @@ class App {
     }
     
     sessionStorage.clear();
+    if (this.chatPanel) {
+      this.chatPanel.unmount();
+      this.chatPanel = null;
+    }
     document.getElementById('login-overlay').style.display = 'flex';
     document.getElementById('sidebar-container').style.display = 'none';
     document.getElementById('project-select-wrapper').style.display = 'none';
@@ -4740,8 +4905,10 @@ class App {
       jiraBugElement.textContent = 'N/A';
     }
 
-    // Show modal
-    modal.style.display = 'flex';
+    // Show modal. The overlay is shown by its `active` class.
+    this.openModal('triage-modal');
+    this.triageExecutionId = executionId;
+    this.notifyChatContext();
   }
 
   renderConfiguredTools(tools) {

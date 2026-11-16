@@ -89,6 +89,62 @@ def test_failed_call_records_an_error_and_still_raises(token_usage_service):
     assert record.total_tokens == 0 and record.cost_usd == 0
 
 
+def _stream_chunk(content: str, usage=None):
+    from litellm.types.utils import Delta, ModelResponseStream, StreamingChoices
+
+    chunk = ModelResponseStream(model="gpt-4o-mini", choices=[StreamingChoices(delta=Delta(content=content))])
+    if usage is not None:
+        chunk.usage = usage
+    return chunk
+
+
+def test_streamed_chat_reply_records_tokens_for_the_chat_assistant(token_usage_service):
+    """The chat assistant streams; its tokens must reach the Token Utilization page."""
+    service = LLMService(config=_CONFIG, agent="chat_assistant")
+    stream = [_stream_chunk("Hello "), _stream_chunk("there, how can I help?")]
+    with patch("backend.services.llm.completion", return_value=iter(stream)):
+        text = "".join(c.text or "" for c in service.stream_chat([{"role": "user", "content": "Hi"}]))
+
+    assert text == "Hello there, how can I help?"
+    [record] = _all(token_usage_service)
+    assert record.agent == "chat_assistant" and record.status == "success"
+    assert record.prompt_tokens > 0 and record.completion_tokens > 0
+
+
+def test_streamed_reply_uses_provider_usage_when_sent(token_usage_service):
+    from litellm.types.utils import Usage
+
+    usage = Usage(prompt_tokens=321, completion_tokens=12, total_tokens=333)
+    service = LLMService(config=_CONFIG, agent="chat_assistant")
+    with patch("backend.services.llm.completion", return_value=iter([_stream_chunk("ok", usage)])):
+        list(service.stream_chat([{"role": "user", "content": "Hi"}]))
+
+    [record] = _all(token_usage_service)
+    assert (record.prompt_tokens, record.completion_tokens) == (321, 12)
+
+
+def test_abandoned_stream_still_records_its_tokens(token_usage_service):
+    service = LLMService(config=_CONFIG, agent="chat_assistant")
+    stream = [_stream_chunk("partial "), _stream_chunk("never read")]
+    with patch("backend.services.llm.completion", return_value=iter(stream)):
+        reply = service.stream_chat([{"role": "user", "content": "Hi"}])
+        next(reply)
+        reply.close()  # client disconnect
+
+    [record] = _all(token_usage_service)
+    assert record.status == "success" and record.completion_tokens > 0
+
+
+def test_failed_stream_start_records_an_error(token_usage_service):
+    service = LLMService(config=_CONFIG, agent="chat_assistant")
+    with patch("backend.services.llm.completion", side_effect=TimeoutError("slow")):
+        with pytest.raises(LLMServiceError):
+            list(service.stream_chat([{"role": "user", "content": "Hi"}]))
+
+    [record] = _all(token_usage_service)
+    assert record.status == "error" and record.error_type == "TimeoutError"
+
+
 def test_recorder_failure_never_breaks_the_llm_call(token_usage_service):
     service = LLMService(config=_CONFIG)
     with patch.object(token_usage_service.store, "add_many", side_effect=RuntimeError("disk full")), \

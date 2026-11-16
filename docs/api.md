@@ -437,6 +437,39 @@ The new script's `script_validation_status` is reset to `unverified`. Selenium a
 **Response**: `200` — `TestCaseResponse`
 **Error**: `400` if data or script generation fails, `404` if the test case, scenario, or requirement is not found, `500` on unexpected errors.
 
+This call holds the request open until generation finishes, which can take longer than a client or proxy timeout. The frontend uses the background job routes below instead.
+
+---
+
+### Start Script Generation Job
+
+```
+POST /api/v1/projects/{project_id}/testcases/{test_case_id}/generate-script/jobs
+```
+
+Runs the same generation as **Generate Script** in a background thread and returns at once. Requires a signed-in user. **Request Body**: same as Generate Script. If a job for this test case is already running, that job is returned instead of starting a second one.
+
+**Response**: `202`:
+
+```json
+{"job_id": "uuid", "test_case_id": "uuid", "status": "running", "error": null, "error_status": null, "test_case": null}
+```
+
+### Get Script Generation Job
+
+```
+GET /api/v1/projects/{project_id}/script-generation-jobs/{job_id}
+```
+
+Poll every few seconds until `status` is no longer `running`. It then ends in one of two states:
+
+- **`completed`**: `test_case` holds the `TestCaseResponse`.
+- **`failed`**: `error` holds the message and `error_status` holds the status that Generate Script would have returned (`400`, `404` or `500`).
+
+Jobs are kept in memory for one hour after they finish. A backend restart loses running jobs.
+
+**Error**: `404` if the job is unknown, belongs to another project, or was lost in a restart.
+
 ---
 
 ### Update Playwright Script
@@ -799,6 +832,165 @@ Returns decrypted username and password from vault. Falls back to first non-null
 
 ---
 
+## Chat Assistant
+
+Spec 0005. All routes need a bearer token and access to the project (Superadmin or Admin, the project owner, or a project assignment): an unknown project returns `404`, no access returns `403`. A thread that belongs to another user, or to another project, returns `404`. When `CHAT_ENABLED` is false every chat route returns `404`.
+
+### Send Chat Message
+
+```
+POST /api/v1/projects/{project_id}/chat/messages
+```
+
+**Request Body**:
+
+```json
+{
+  "thread_id": "uuid or omitted",
+  "content": "Why did this fail?",
+  "view_context": {"view": "playwright", "item_type": "test_case", "item_id": "uuid"}
+}
+```
+
+`content` is 1 to 4000 characters and not blank. Without `thread_id` a new thread is created, titled with the first 80 characters of the message (whitespace collapsed). `view_context` is untrusted: an unknown view or item type, or an item that is not in this project, is dropped without an error. The user message is saved before the model is called.
+
+**Response**: `200` with `text/event-stream`. Each event is an `event:` name and a JSON `data:` line:
+
+| Event | Data | When |
+|---|---|---|
+| `thread` | `{thread_id, title}` | first, only when a thread was just created |
+| `message_start` | `{user_message_id, assistant_message_id}` | the reply row exists (empty) |
+| `token` | `{text}` | each piece of the reply |
+| `tool` | `{name, state}` | a read tool starts (`state: "start"`) or ends (`"end"`); the panel shows "Looking up test cases…" |
+| `action` | `{message_id, action}` | the assistant proposed an action (shape under *Chat Actions*); the turn ends after it |
+| `done` | `{assistant_message_id}` | the full reply is saved |
+| `error` | `{code, message, retryable}` | the reply stopped; the partial text is saved with `interrupted: true` |
+
+The assistant answers over the project's data with read tools: `get_project_overview`, `list_requirements`, `get_requirement`, `list_scenarios`, `list_test_cases`, `get_test_case`, `list_executions`, `get_execution`, `get_dashboard_metrics`, and `list_object_repository_pages`. Every ID a tool is given must belong to the path's project, otherwise the tool answers "not found in this project". No tool returns credentials, and test data values under keys that look like secrets (`password`, `token`, `secret`, `key`) are sent as `"[redacted]"`. Each call is saved as a hidden `tool` row (never returned by the messages route), with its result cut to `CHAT_TOOL_RESULT_CHARS` (default 4000) by dropping list rows from the end (`"truncated": true`, `"total": N`). A message makes at most `CHAT_MAX_TOOL_STEPS` (default 6) tool calls; past that, the reply ends with a note that the answer may be incomplete.
+
+`code` is `llm_busy` (the chat pool's max wait ran out; message "The assistant is busy, try again in a moment"), `llm_error`, or `internal`. A client that disconnects mid reply also leaves the partial text saved as interrupted.
+
+**Errors**: `404` thread not found, `422` invalid content.
+
+### List Chat Threads
+
+```
+GET /api/v1/projects/{project_id}/chat/threads?cursor=<opaque>&limit=20
+```
+
+The caller's threads on this project, most recent activity first. `limit` is 1 to 50 (default 20).
+
+**Response**: `200` — `{"items": [{"id": "uuid", "title": "...", "last_activity_at": "ISO 8601"}], "next_cursor": "opaque or null"}`
+
+**Errors**: `422` invalid cursor.
+
+### List Chat Messages
+
+```
+GET /api/v1/projects/{project_id}/chat/threads/{thread_id}/messages?before_seq=<int>&limit=50
+```
+
+The visible messages of a thread (user and assistant rows; tool rows are never returned), in `seq` order. Without `before_seq` it returns the newest `limit` messages (1 to 100, default 50); with it, the newest `limit` messages below that `seq`. `has_more` says whether older messages remain.
+
+**Response**: `200` — `{"items": [{"id": "uuid", "seq": 1, "role": "user", "content": "...", "interrupted": false, "action": null, "created_at": "ISO 8601"}], "has_more": false}`
+
+### Retry a Chat Reply
+
+```
+POST /api/v1/projects/{project_id}/chat/threads/{thread_id}/retry
+```
+
+Retries the last user message when its assistant reply was interrupted or ended with an unconfirmed action proposal. A completed assistant reply cannot be retried. The response is the same `text/event-stream` format as Send Chat Message; retry removes the old partial reply and its hidden tool rows while retaining the user message. The request counts toward the shared per-user chat rate limit.
+
+**Errors**: `404` thread not found, `409` no retryable turn or a reply is already in progress, `429` rate limit exceeded.
+
+### Help Without a Project
+
+```
+POST /api/v1/chat/help
+```
+
+Body: `{"content": "How do I import a requirement?", "history": [{"role": "user | assistant", "content": "..."}]}`. Content has the same 1-to-4000-character validation as a project message. Help answers use only the built-in app guide; history is limited to the last 10 user/assistant messages and 4000 characters per entry. Help turns are not persisted and share the per-user rate limit with project messages and retries. The response is `text/event-stream` with `message_start`, `token`, `done`, or `error` events; it does not include a thread event or project tools.
+
+### Delete a Chat Thread
+
+```
+DELETE /api/v1/projects/{project_id}/chat/threads/{thread_id}
+```
+
+Deletes the caller's thread and its messages. Returns `204`; a thread owned by another user or project returns `404`, and an active reply returns `409`. Idle threads are also purged at startup and when listing threads, according to the configured chat retention period.
+
+### Chat Actions
+
+The assistant can propose a change, but never makes one by itself. With a project selected, the model is offered one `propose_<type>` tool per action type the user holds the permission for on this project. A valid proposal is saved on the assistant message as an `action` with status `proposed` and shown as a card with Run and Cancel; at most one action per assistant message. Sending a new message in the thread moves every earlier `proposed` action to `expired`.
+
+Supported action types:
+
+| Type | Params | Permission | Danger | Result link |
+|---|---|---|---|---|
+| `generate_scenarios` | `requirement_id`, `count` 1–10 (default 3), `mode` `append` or `replace` | Scenarios / create | `change`; `delete` for `replace` when existing scenarios will be removed | `scenarios` |
+| `generate_test_cases` | `requirement_id` | TestCases / create | `change` | `testcases` |
+| `generate_script` | `test_case_id`, optional `framework` | Playwright / create | `change` | `playwright` |
+| `run_test_case` | `test_case_id` | Executions / create | `change` | `executions` |
+| `run_batch` | `test_case_ids` (1–50, each with a script) | Executions / create | `change` | `executions` |
+| `create_requirement` | `title`, `description`, optional `priority`, `business_domain` | Requirements / create | `change` | `requirements` |
+| `update_requirement` | `requirement_id`, non-empty `changes` | Requirements / edit | `change` | `requirements` |
+| `delete_requirement` | `requirement_id` | Requirements / delete | `delete` | `requirements` |
+| `update_scenario` | `scenario_id`, non-empty `changes` | Scenarios / edit | `change` | `scenarios` |
+| `duplicate_scenario` | `scenario_id` | Scenarios / create | `change` | `scenarios` |
+| `delete_scenario` | `scenario_id` | Scenarios / delete | `delete` | `scenarios` |
+| `update_test_case` | `test_case_id`, non-empty `changes` | TestCases / edit | `change` | `testcases` |
+| `review_test_case` | `test_case_id`, `decision` `approved` or `rejected` | TestCases / edit | `change` | `testcases` |
+| `generate_test_data` | `test_case_id` (Playwright project and test case only) | TestCases / edit | `change` | `testcases` |
+| `delete_test_case` | `test_case_id` | TestCases / delete | `delete` | `testcases` |
+| `delete_execution` | `execution_id` | Executions / delete | `delete` | `executions` |
+| `delete_failed_executions` | server-selected currently failed execution IDs | Executions / delete | `delete` | `executions` |
+
+`replace` generates first and deletes the old scenarios only after generation succeeds, so a failed run leaves them in place. Delete actions require typing exactly `DELETE`. Edit cards show the previous and proposed values; requirement deletion also lists its dependent scenarios and test cases. The batch action uses the existing sequential queue manager, shared browser state, recovery, execution records, artifacts, and reports.
+
+**Action shape**:
+
+```json
+{
+  "action_id": "uuid",
+  "type": "generate_scenarios",
+  "params": {"requirement_id": "uuid", "count": 3, "mode": "append"},
+  "summary": "text written by the model, shown as secondary text",
+  "targets": [{"type": "requirement", "id": "uuid", "name": "Login works"}],
+  "danger": "none | change | delete",
+  "permission": {"module": "Scenarios", "action": "create"},
+  "affects": ["scenarios"],
+  "status": "proposed | queued | running | succeeded | failed | cancelled | expired",
+  "job_ref": {"kind": "inline", "id": null},
+  "result": {"summary": "Created 3 scenarios", "link_view": "scenarios", "link_id": "uuid"},
+  "error": null,
+  "confirmed_by": "user uuid or null",
+  "updated_at": "ISO 8601"
+}
+```
+
+```
+POST /api/v1/projects/{project_id}/chat/messages/{message_id}/action/confirm
+```
+
+Body: `{"confirm_text": "DELETE"}` (needed only when `danger` is `delete`; anything else in the body is ignored). Confirm runs the params saved with the proposal. Checks, in order: thread owner (`404`), the action's permission (`403`, "You no longer have permission"), `confirm_text` exactly `DELETE` for deletes (`422`), every target still in the project (`422`, "This item changed or no longer exists, ask again"), then an atomic move out of `proposed` (`409` when it was expired, cancelled, or already confirmed). Returns the updated action, usually `running`.
+
+```
+POST /api/v1/projects/{project_id}/chat/messages/{message_id}/action/cancel
+```
+
+Moves a `proposed` action to `cancelled`. Returns the action. **Errors**: `404`, `409` not `proposed`.
+
+```
+GET /api/v1/projects/{project_id}/chat/messages/{message_id}/action
+```
+
+The action with its current status. The panel polls it every 3 seconds while the status is `queued` or `running`, and reloads the affected view once it reaches `succeeded`. **Errors**: `404`.
+
+Every confirm, cancel, and final result writes an audit entry (`CHAT_ACTION_CONFIRMED`, `CHAT_ACTION_CANCELLED`, `CHAT_ACTION_SUCCEEDED`, `CHAT_ACTION_FAILED`) with the user, project, action type, target IDs, outcome, and `source: "chat"`. At startup, an action left `queued` or `running` by the previous process becomes `failed` with "Interrupted by a server restart", and a reply cut off by the restart is marked interrupted.
+
+---
+
 ## Settings
 
 ### Read Settings
@@ -818,14 +1010,17 @@ Returns all configuration sections (LLM, Workflow, Browser, RAG, Generation, Eva
     "generation": { "provider": "gemini", "models": ["model-a", "model-b"], "max_concurrent": 2,
                     "min_interval_seconds": 4, "cooldown_seconds": 60, "max_wait_seconds": 180 },
     "analysis": { "provider": "nvidia", "models": ["model-n"], "max_concurrent": 2,
-                  "min_interval_seconds": 0, "cooldown_seconds": 60, "max_wait_seconds": 180 }
+                  "min_interval_seconds": 0, "cooldown_seconds": 60, "max_wait_seconds": 180 },
+    "chat": { "provider": "nvidia", "models": ["model-n"], "max_concurrent": 4,
+              "min_interval_seconds": 0, "cooldown_seconds": 60, "max_wait_seconds": 30 }
   },
+  "chat_enabled": true,
   "workflow": { "mode": "sequential", "human_review_enabled": true, ... },
   ...
 }
 ```
 
-`llm_roles` is read only and comes from the `GENERATION_LLM_*` and `ANALYSIS_LLM_*` variables in `.env` (spec 0003). API keys and base URLs are never returned. `GET /api/v1/projects/{project_id}/traces` also returns `llm_roles` with each role's provider and models; its `model` and `provider` fields show the analysis role. Its `total_calls`, token, cost and per agent `traces` figures are the project's real recorded usage (see [Token Usage](#token-usage)).
+`llm_roles` is read only and comes from the `GENERATION_LLM_*`, `ANALYSIS_LLM_*`, and `CHAT_LLM_*` variables in `.env` (specs 0003 and 0005). Any unset `CHAT_LLM_*` value falls back to the resolved analysis role; the chat pool has its own limits (`CHAT_LLM_MAX_CONCURRENT` 4, `CHAT_LLM_COOLDOWN_SECONDS` 60, `CHAT_LLM_MAX_WAIT_SECONDS` 30). `chat_enabled` mirrors `CHAT_ENABLED`; the frontend shows the chat button only when it is true. API keys and base URLs are never returned. `GET /api/v1/projects/{project_id}/traces` also returns `llm_roles` with each role's provider and models; its `model` and `provider` fields show the analysis role. Its `total_calls`, token, cost and per agent `traces` figures are the project's real recorded usage (see [Token Usage](#token-usage)).
 
 ### Save Settings
 

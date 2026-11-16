@@ -1141,6 +1141,65 @@ def test_checkout_without_a_known_price_list_gets_no_guessed_totals():
     assert all(list(d) == _CHECKOUT_FIELDS for d in test_case.test_data_sets)
 
 
+@pytest.mark.parametrize(
+    ("field", "values", "expected"),
+    [
+        # Seen live: a guessed radio button name used as a selector.
+        ("select_hotel_radio", ["radio_0", "radio_0"], True),
+        ("select_hotel", ["radiobutton_0", "radiobutton_1"], True),
+        ("search_button_selector", ["Search"], True),
+        ("hotel", ["#hotel-list", "#hotel-list"], True),
+        # Real data, even in a field named after a radio or checkbox.
+        ("hotel_radio", ["Hotel Creek", "Creek"], False),
+        ("terms_checkbox", ["true", "false"], False),
+        ("hotels", ["Hotel Creek", "Hotel Sunshine"], False),
+        ("room_number", ["101", "205"], False),
+        ("address", ["#12 Main Street"], False),
+        ("location", ["", ""], False),
+    ],
+)
+def test_names_page_control_tells_control_names_from_test_data(field, values, expected):
+    from backend.agents.test_data_agent import names_page_control
+
+    assert names_page_control(field, values) is expected
+
+
+def test_page_control_fields_are_dropped_from_every_dataset():
+    datasets = [
+        TestCaseDataResponse(
+            test_data={"location": city, "select_hotel_radio": "radio_0"},
+            targeted_validation_rule="Booking succeeds",
+            test_type="positive",
+        )
+        for city in ("Sydney", "Melbourne")
+    ]
+    state = WorkflowState(requirement=None)
+
+    TestDataAgent(llm_service=object())._drop_page_control_fields(state, datasets)
+
+    assert [dataset.test_data for dataset in datasets] == [
+        {"location": "Sydney"},
+        {"location": "Melbourne"},
+    ]
+    assert any("select_hotel_radio" in log for log in state.logs)
+
+
+def test_a_dataset_made_only_of_page_control_fields_is_kept():
+    datasets = [
+        TestCaseDataResponse(
+            test_data={"select_hotel_radio": "radio_0"},
+            targeted_validation_rule="Booking succeeds",
+            test_type="positive",
+        )
+    ]
+
+    TestDataAgent(llm_service=object())._drop_page_control_fields(
+        WorkflowState(requirement=None), datasets
+    )
+
+    assert datasets[0].test_data == {"select_hotel_radio": "radio_0"}
+
+
 def test_prompt_states_todays_date():
     state, _ = _booking_state()
     reply = TestCaseDataBatchResponse.model_validate({

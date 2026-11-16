@@ -1,5 +1,7 @@
 const API_BASE = '/api/v1';
 const TEST_CASE_GENERATION_TIMEOUT_MS = 20 * 60 * 1000;
+const SCRIPT_GENERATION_POLL_MS = 3000;
+const SCRIPT_GENERATION_MAX_WAIT_MS = 60 * 60 * 1000;
 
 let isRefreshing = false;
 let refreshSubscribers = [];
@@ -133,7 +135,148 @@ async function request(url, options = {}) {
   }
 }
 
+// Exchange the refresh token for a new access token, sharing one refresh
+// with any concurrent `request` calls. Resolves to the new token or null.
+function refreshAccessToken() {
+  const refreshToken = sessionStorage.getItem('refresh_token');
+  if (!refreshToken) return Promise.resolve(null);
+  const waiter = new Promise(resolve => subscribeTokenRefresh(resolve));
+  if (!isRefreshing) {
+    isRefreshing = true;
+    fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken })
+    })
+      .then(res => (res.ok ? res.json() : Promise.reject(new Error('Refresh failed'))))
+      .then(data => {
+        sessionStorage.setItem('access_token', data.access_token);
+        isRefreshing = false;
+        onRefreshed(data.access_token);
+      })
+      .catch(() => {
+        isRefreshing = false;
+        onRefreshed(null);
+      });
+  }
+  return waiter;
+}
+
+async function errorFromResponse(response) {
+  let message = `HTTP error! Status: ${response.status}`;
+  let detail = null;
+  try {
+    const body = await response.json();
+    if (body && body.detail) {
+      detail = body.detail;
+      message = typeof detail === 'string' ? detail : (detail.message || message);
+    }
+  } catch (e) {}
+  const error = new Error(message);
+  error.status = response.status;
+  error.detail = detail;
+  return error;
+}
+
+// POST that answers with server sent events (spec 0005). Uses the same token
+// as `request` and refreshes it once on a 401 before the stream starts.
+// Calls onEvent(name, data) per event; resolves when the stream ends.
+async function streamRequest(path, body, onEvent, signal) {
+  const send = token => fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify(body),
+    signal
+  });
+
+  let response = await send(sessionStorage.getItem('access_token'));
+  if (response.status === 401) {
+    const token = await refreshAccessToken();
+    if (!token) {
+      handleAuthFailure();
+      throw new Error('Session expired. Please sign in again.');
+    }
+    response = await send(token);
+  }
+  if (!response.ok) throw await errorFromResponse(response);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const dispatch = block => {
+    let name = 'message';
+    const data = [];
+    for (const line of block.split('\n')) {
+      if (line.startsWith(':')) continue; // keep alive comment
+      if (line.startsWith('event:')) name = line.slice(6).trim();
+      else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+    }
+    if (!data.length) return;
+    let parsed = null;
+    try { parsed = JSON.parse(data.join('\n')); } catch (e) { return; }
+    onEvent(name, parsed);
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+    let boundary;
+    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+      dispatch(buffer.slice(0, boundary));
+      buffer = buffer.slice(boundary + 2);
+    }
+  }
+  if (buffer.trim()) dispatch(buffer);
+}
+
 export const API = {
+  // Chat assistant (spec 0005)
+  async sendChatMessage(projectId, body, onEvent, signal) {
+    return streamRequest(`/projects/${projectId}/chat/messages`, body, onEvent, signal);
+  },
+
+  async sendChatHelp(body, onEvent, signal) {
+    return streamRequest('/chat/help', body, onEvent, signal);
+  },
+
+  async retryChatMessage(projectId, threadId, onEvent, signal) {
+    return streamRequest(`/projects/${projectId}/chat/threads/${threadId}/retry`, {}, onEvent, signal);
+  },
+
+  async getChatThreads(projectId, cursor = null) {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+    return request(`/projects/${projectId}/chat/threads${query}`);
+  },
+
+  async getChatMessages(projectId, threadId, beforeSeq = null) {
+    const query = beforeSeq ? `?before_seq=${beforeSeq}` : '';
+    return request(`/projects/${projectId}/chat/threads/${threadId}/messages${query}`);
+  },
+
+  async deleteChatThread(projectId, threadId) {
+    return request(`/projects/${projectId}/chat/threads/${threadId}`, { method: 'DELETE' });
+  },
+
+  // Only confirm_text is sent: the server runs the params saved with the proposal.
+  async confirmChatAction(projectId, messageId, confirmText = null) {
+    return request(`/projects/${projectId}/chat/messages/${messageId}/action/confirm`, {
+      method: 'POST',
+      body: JSON.stringify({ confirm_text: confirmText })
+    });
+  },
+
+  async cancelChatAction(projectId, messageId) {
+    return request(`/projects/${projectId}/chat/messages/${messageId}/action/cancel`, { method: 'POST' });
+  },
+
+  async getChatAction(projectId, messageId) {
+    return request(`/projects/${projectId}/chat/messages/${messageId}/action`);
+  },
+
   // Projects
   async getProjects() {
     return request('/projects');
@@ -394,15 +537,41 @@ export const API = {
 
   // Playwright Code Generation
   async generatePlaywrightScript(projectId, testCaseId, framework) {
-    // Playwright scripts also generate the case's 20 datasets first when missing.
-    const options = {
-      method: 'POST',
-      signal: AbortSignal.timeout(600000)
-    };
+    // Generation runs the steps live with many LLM calls and can outlast any
+    // HTTP timeout, so the backend runs it as a job and this polls until it
+    // finishes. Resolves with the updated test case, as the old call did.
+    const options = { method: 'POST' };
     if (framework) {
       options.body = JSON.stringify({ framework });
     }
-    return request(`/projects/${projectId}/testcases/${testCaseId}/generate-script`, options);
+    let job = await request(
+      `/projects/${projectId}/testcases/${testCaseId}/generate-script/jobs`,
+      options
+    );
+    const deadline = Date.now() + SCRIPT_GENERATION_MAX_WAIT_MS;
+    let pollFailures = 0;
+    while (job.status === 'running') {
+      if (Date.now() > deadline) {
+        throw new Error("Script generation is still running on the backend after 60 minutes. Check the backend logs; the script is saved to the test case when it finishes.");
+      }
+      await new Promise(resolve => setTimeout(resolve, SCRIPT_GENERATION_POLL_MS));
+      try {
+        job = await request(`/projects/${projectId}/script-generation-jobs/${job.job_id}`);
+        pollFailures = 0;
+      } catch (error) {
+        // A lost job (backend restart) or expired session will not recover.
+        if (error.status === 404 || /Session expired/.test(error.message)) throw error;
+        // Ride out a brief network or server hiccup.
+        pollFailures += 1;
+        if (pollFailures >= 5) throw error;
+      }
+    }
+    if (job.status === 'failed') {
+      const error = new Error(job.error || 'Script generation failed.');
+      error.status = job.error_status;
+      throw error;
+    }
+    return job.test_case;
   },
 
   async saveTestCaseScript(projectId, testCaseId, script) {

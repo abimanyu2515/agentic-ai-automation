@@ -20,7 +20,7 @@ from backend.services.llm import LLMRateLimitTimeout, LLMService, reset_role_poo
 
 _ROLE_ENV_KEYS = [
     f"{role}_LLM_{name}"
-    for role in ("GENERATION", "ANALYSIS")
+    for role in ("GENERATION", "ANALYSIS", "CHAT")
     for name in (
         "PROVIDER", "MODELS", "MODEL", "API_KEY", "API_BASE", "MAX_CONCURRENT",
         "MIN_INTERVAL_SECONDS", "COOLDOWN_SECONDS", "MAX_WAIT_SECONDS",
@@ -99,10 +99,36 @@ def test_models_list_is_trimmed_deduplicated_and_blanks_dropped(clear_role_env):
 def test_only_llm_keys_send_both_roles_to_the_legacy_provider(clear_role_env):
     legacy = LLMConfig(provider="nvidia", model="legacy", api_key="k", api_base="https://nv.test/v1")
     roles = _build_llm_roles(legacy)
-    for role in roles.values():
+    for name in ("generation", "analysis"):
+        role = roles[name]
         assert (role.provider, role.models, role.api_key, role.api_base) == ("nvidia", ["legacy"], "k", "https://nv.test/v1")
         assert (role.max_concurrent, role.cooldown_seconds, role.max_wait_seconds) == (2, 60, 180)
     assert roles["analysis"].min_interval_seconds == 0
+
+
+# Chat role (spec 0005, AC-24)
+
+def test_chat_role_falls_back_to_the_resolved_analysis_role(clear_role_env):
+    clear_role_env.setenv("ANALYSIS_LLM_MODEL", "analysis-model")
+    clear_role_env.setenv("ANALYSIS_LLM_API_KEY", "a-key")
+    roles = _build_llm_roles(LLMConfig(provider="nvidia", model="legacy", api_key="k", api_base="https://nv.test/v1"))
+    chat = roles["chat"]
+    assert (chat.provider, chat.models, chat.api_key, chat.api_base) == (
+        "nvidia", ["analysis-model"], "a-key", "https://nv.test/v1",
+    )
+    # The chat pool has its own defaults so a busy chat fails fast.
+    assert (chat.max_concurrent, chat.cooldown_seconds, chat.max_wait_seconds) == (4, 60, 30)
+
+
+def test_chat_role_env_values_win(clear_role_env):
+    clear_role_env.setenv("CHAT_LLM_PROVIDER", "gemini")
+    clear_role_env.setenv("CHAT_LLM_MODEL", "chat-model")
+    clear_role_env.setenv("CHAT_LLM_MAX_WAIT_SECONDS", "5")
+    roles = _build_llm_roles(LLMConfig(provider="nvidia", model="legacy", api_key="k", api_base="https://nv.test/v1"))
+    chat = roles["chat"]
+    assert (chat.provider, chat.models, chat.max_wait_seconds) == ("gemini", ["chat-model"], 5)
+    # A different provider never inherits another provider's endpoint.
+    assert chat.api_base is None
 
 
 def test_blank_role_values_count_as_unset(clear_role_env):
@@ -348,7 +374,8 @@ def test_settings_endpoint_returns_roles_without_keys():
     from backend.main import app
 
     body = TestClient(app).get("/api/v1/settings").json()
-    assert set(body["llm_roles"]) == {"generation", "analysis"}
+    assert set(body["llm_roles"]) == {"generation", "analysis", "chat"}
+    assert isinstance(body["chat_enabled"], bool)
     for role in body["llm_roles"].values():
         assert set(role) == {
             "provider", "models", "max_concurrent", "min_interval_seconds", "cooldown_seconds", "max_wait_seconds",

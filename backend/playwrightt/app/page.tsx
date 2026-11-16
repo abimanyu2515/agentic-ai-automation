@@ -639,9 +639,9 @@ function PlaywrightWorkspaceContent() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Panel - Script Editor */}
-          <div className="lg:col-span-1 space-y-4">
+        <div className="grid grid-cols-1 gap-6">
+          {/* Script Editor, then Recent Executions, then Status */}
+          <div className="space-y-4">
             <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
               <h2 className="text-lg font-semibold mb-3 flex items-center justify-between text-foreground">
                 <span className="flex items-center gap-2">
@@ -752,6 +752,21 @@ function PlaywrightWorkspaceContent() {
               )}
             </div>
 
+            {/* Recent Executions - below the Monaco Editor */}
+            <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
+              <h2 className="text-lg font-semibold mb-4 text-foreground">Recent Executions</h2>
+              <ExecutionList
+                executions={executions}
+                queue={queue}
+                current={current}
+                onStatusChange={handleStatusChange}
+                onRerun={(rerunScript) => {
+                  setScript(rerunScript);
+                  handleExecute(rerunScript);
+                }}
+              />
+            </div>
+
             {/* Status Summary */}
             <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
               <h3 className="font-semibold mb-3 text-foreground">Status</h3>
@@ -778,23 +793,6 @@ function PlaywrightWorkspaceContent() {
                   </span>
                 </div>
               </div>
-            </div>
-          </div>
-
-          {/* Right Panel - Execution List */}
-          <div className="lg:col-span-2">
-            <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
-              <h2 className="text-lg font-semibold mb-4 text-foreground">Recent Executions</h2>
-              <ExecutionList
-                executions={executions}
-                queue={queue}
-                current={current}
-                onStatusChange={handleStatusChange}
-                onRerun={(rerunScript) => {
-                  setScript(rerunScript);
-                  handleExecute(rerunScript);
-                }}
-              />
             </div>
           </div>
         </div>
