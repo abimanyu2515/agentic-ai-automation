@@ -1,5 +1,5 @@
 // Object Repository view (spec 0004): pages, elements, locator editing, and scans.
-import { API } from './api.js?v=17';
+import { API } from './api.js?v=20';
 import { escapeHTML } from './components.js?v=4';
 
 const STRATEGIES = ['role', 'label', 'placeholder', 'text', 'test_id', 'css', 'xpath'];

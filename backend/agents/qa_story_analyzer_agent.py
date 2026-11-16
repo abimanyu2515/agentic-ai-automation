@@ -121,7 +121,7 @@ class QAStoryAnalyzerAgent(BaseAgent):
         Args:
             llm_service: LLM service instance (injected for testing)
         """
-        self.llm_service = llm_service or LLMService(role="analysis")
+        self.llm_service = llm_service or LLMService(role="analysis", agent="qa_story_analyzer_agent")
 
     def run(self, state: WorkflowState) -> WorkflowState:
         """

@@ -1,7 +1,8 @@
-import { API } from './api.js?v=19';
+import { API } from './api.js?v=20';
 import { ChatPanel } from './chat.js?v=3';
 import { OpenRows, ROW_VIEWS } from './chat-context.js?v=1';
 import { ObjectRepositoryView } from './object-repository.js?v=2';
+import { TokenUtilizationView } from './token-utilization.js?v=1';
 import { Components, escapeHTML } from './components.js?v=4';
 
 class App {
@@ -1197,7 +1198,7 @@ class App {
   }
 
   navigateTo(viewName) {
-    const projectRequired = !['settings', 'project-start', 'project', 'dashboard'].includes(viewName);
+    const projectRequired = !['settings', 'project-start', 'project', 'dashboard', 'token-utilization'].includes(viewName);
     if (!this.currentProject && projectRequired) {
       this.showProjectStartScreen();
       return;
@@ -1240,6 +1241,10 @@ class App {
     if (viewName === 'object-repository') {
       this.objectRepositoryView = this.objectRepositoryView || new ObjectRepositoryView();
       this.objectRepositoryView.render(this.currentProject);
+    }
+    if (viewName === 'token-utilization') {
+      this.tokenUtilizationView = this.tokenUtilizationView || new TokenUtilizationView();
+      this.tokenUtilizationView.render(this.currentProject);
     }
 
     const scopeBtns = ['btn-db-scope-project', 'btn-db-scope-release', 'btn-db-scope-cycle'];
@@ -3231,8 +3236,8 @@ class App {
       return;
     }
 
-    if (['dashboard', 'requirements', 'scenarios', 'testcases', 'jira-traceability', 'testdatagent', 'playwright', 'executions', 'reports', 'langsmith', 'settings', 'execution-workspace', 'project-start', 'project', 'object-repository'].includes(view)) {
-      if (view !== 'project' && this.currentProject) {
+    if (['dashboard', 'requirements', 'scenarios', 'testcases', 'jira-traceability', 'testdatagent', 'playwright', 'executions', 'reports', 'langsmith', 'settings', 'execution-workspace', 'project-start', 'project', 'object-repository', 'token-utilization'].includes(view)) {
+      if (view !== 'project' && view !== 'token-utilization' && this.currentProject) {
         await this.refreshProjectData().catch(e => console.error("Router refresh error:", e));
       }
       this.navigateTo(view);
@@ -4571,6 +4576,7 @@ class App {
       if (view === 'object-repository') moduleName = 'ObjectRepository';
       if (view === 'reports') moduleName = 'Reports';
       if (view === 'settings') moduleName = 'Settings';
+      if (view === 'token-utilization') moduleName = 'TokenUsage';
       
       if (window.hasPermission(moduleName, 'view')) {
         item.style.display = 'flex';
@@ -4974,7 +4980,7 @@ class App {
     
     const modules = [
       'Dashboard', 'Requirements', 'Scenarios', 'TestCases', 
-      'Playwright', 'Execution', 'Reports', 'Users', 'Roles', 'Permissions', 'Settings'
+      'Playwright', 'Execution', 'Reports', 'Users', 'Roles', 'Permissions', 'Settings', 'TokenUsage'
     ];
     const actions = ['view', 'create', 'edit', 'delete', 'approve'];
     

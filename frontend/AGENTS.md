@@ -12,6 +12,7 @@ The frontend is a vanilla HTML, CSS, and JavaScript single page application serv
 | `frontend/js/app.js` | Main application state, event handlers, project selection, rendering, and workflow actions |
 | `frontend/js/api.js` | Authenticated API requests and endpoint wrappers |
 | `frontend/js/components.js` | Shared HTML rendering helpers and reusable tables |
+| `frontend/js/token-utilization.js` | Token Utilization view: usage and cost charts, breakdowns, call log, budget and pricing |
 | `frontend/css/styles.css` | Global layout, themes, forms, tables, and dashboard styling |
 
 ## Conventions

@@ -70,6 +70,7 @@ VIEW_ITEM_TYPES: dict[str, frozenset[str]] = {
     "execution-workspace": frozenset({"execution", "test_case"}),
     "executions": frozenset({"execution"}),
     "object-repository": frozenset({"object_repository_page"}),
+    "token-utilization": frozenset(),
 }
 
 BUSY_MESSAGE = "The assistant is busy, try again in a moment"
@@ -203,7 +204,7 @@ class ChatService:
         if self._llm_service is None:
             from backend.services.llm import LLMService
 
-            self._llm_service = LLMService(role="chat")
+            self._llm_service = LLMService(role="chat", agent="chat_assistant")
         return self._llm_service
 
     @property

@@ -342,7 +342,9 @@ __runnerTest.afterEach(async () => {
             escaped_state_path = storage_state_path.replace("\\", "/")
             spec_content += f"\n\ntest.afterEach(async ({{ page }}) => {{\n  try {{\n    await page.context().storageState({{ path: '{escaped_state_path}' }});\n  }} catch (e) {{\n    console.error('Failed to save storage state:', e);\n  }}\n}});\n"
         
-        (run_dir / "test.spec.ts").write_text(spec_content)
+        # Node reads the spec as UTF-8; the Windows default (cp1252) would turn
+        # characters such as » into U+FFFD at run time.
+        (run_dir / "test.spec.ts").write_text(spec_content, encoding="utf-8")
         config_path = run_dir / "playwright.config.ts"
 
         storage_state_config = ""
@@ -356,7 +358,8 @@ __runnerTest.afterEach(async () => {
                 timeout_ms=self.timeout_seconds * 1000,
                 storage_state_config=storage_state_config,
                 headless_js="true" if headless else "false"
-            )
+            ),
+            encoding="utf-8",
         )
 
         hard_timeout = self.timeout_seconds + 15
@@ -451,7 +454,7 @@ __runnerTest.afterEach(async () => {
             )
 
         try:
-            report = json.loads(report_path.read_text())
+            report = json.loads(report_path.read_text(encoding="utf-8"))
         except Exception as exc:
             return PlaywrightRunResult(
                 status="error",

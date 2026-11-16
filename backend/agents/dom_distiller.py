@@ -11,7 +11,18 @@ from playwright.async_api import Page
 
 DOM_EXTRACTION_JS = r"""
 () => {
-  const query = 'a, button, input, select, textarea, [role="button"], [role="link"], [role="checkbox"], [role="tab"], [data-testid], [data-test], h1, h2, h3';
+  // Labels of checkboxes and radios are listed because styled forms often
+  // cover the native input, so only a click on its label toggles it.
+  const query = 'a, button, input, select, textarea, label:has(input[type="checkbox"]), label:has(input[type="radio"]), [role="button"], [role="link"], [role="checkbox"], [role="tab"], [data-testid], [data-test], h1, h2, h3';
+  const labelSelector = (el) => {
+    const input = el.querySelector('input[type="checkbox"], input[type="radio"]');
+    if (el.id && !/^[0-9]|[:.]/.test(el.id)) return `label#${el.id}`;
+    if (input && input.id && !/^[0-9]|[:.]/.test(input.id)) return `label:has(#${input.id})`;
+    if (input && input.name && input.getAttribute('value')) {
+      return `label:has(input[name="${input.name}"][value="${input.getAttribute('value')}"])`;
+    }
+    return null;
+  };
   const nodes = Array.from(document.querySelectorAll(query));
 
   return nodes
@@ -38,7 +49,9 @@ DOM_EXTRACTION_JS = r"""
       const text = (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80);
 
       let recommendedSelector = tag;
-      if (testId) recommendedSelector = `[data-testid="${testId}"]`;
+      const optionLabel = tag === 'label' ? labelSelector(el) : null;
+      if (optionLabel) recommendedSelector = optionLabel;
+      else if (testId) recommendedSelector = `[data-testid="${testId}"]`;
       else if (dataTest) recommendedSelector = `[data-test="${dataTest}"]`;
       else if (id && !/^[0-9]|[:.]/.test(id)) recommendedSelector = `#${id}`;
       else if (name) recommendedSelector = `${tag}[name="${name}"]`;

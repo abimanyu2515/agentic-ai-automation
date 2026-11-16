@@ -216,7 +216,7 @@ class ReportService:
             class EnhancedStepsList(BaseModel):
                 steps: list[EnhancedStep]
 
-            llm = LLMService(role="analysis")
+            llm = LLMService(role="analysis", agent="report_service")
 
             tc_title = test_case.title if test_case else "Playwright Automation Test"
             tc_expected = getattr(test_case, "expected_result", "") if test_case else ""
@@ -1227,7 +1227,7 @@ Example transformations:
             # Initialize Execution Analyzer
             print("[ReportService] Step 6 - Creating ExecutionAnalyzer")
             print(f"[ExecutionAnalyzer] Instantiating LLMService...")
-            llm_service = LLMService(role="analysis")
+            llm_service = LLMService(role="analysis", agent="report_service")
             print("[ReportService] Step 7 - LLMService created")
             print(f"[ExecutionAnalyzer] Instantiating ExecutionAnalyzer...")
             analyzer = ExecutionAnalyzer(llm_service=llm_service)

@@ -19,7 +19,11 @@ from backend.models.requirement import Requirement
 from backend.agents.execution_analysis_agent import ExecutionAnalysisAgent
 from backend.agents.defect_management_agent import DefectManagementAgent
 from backend.repository.project_repository import get_project_repository
-from backend.services.playwright_script_validation import validate_playwright_script
+from backend.services.llm_context import llm_operation
+from backend.services.playwright_script_validation import (
+    validate_playwright_script,
+    validate_step_order,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +86,7 @@ class WorkflowService:
     def repo(self):
         return get_project_repository()
 
+    @llm_operation("ingest_requirement")
     def ingest_requirement(self, project_id: UUID, requirement: Requirement) -> Requirement:
         """Orchestrate requirement ingestion, LLM enrichment, and optional feature mapping via LangGraph."""
         from backend.graph.workflow import build_graph
@@ -97,6 +102,7 @@ class WorkflowService:
 
         return final_state.requirement
 
+    @llm_operation("generate_scenarios")
     def generate_scenarios(self, project_id: UUID, requirement_id: UUID, count: int, mode: str = "append") -> list[Scenario]:
         project = self.repo.get_project(project_id)
         if not project:
@@ -127,6 +133,7 @@ class WorkflowService:
         self.repo.save_scenarios(final_state.generated_scenarios)
         return final_state.generated_scenarios
 
+    @llm_operation("generate_backlog")
     def generate_backlog(self, project_id: UUID, requirement_id: UUID) -> list[Scenario]:
         """Orchestrate backlog generation from scenarios via LangGraph."""
         project = self.repo.get_project(project_id)
@@ -155,6 +162,7 @@ class WorkflowService:
 
         return final_state.generated_scenarios
 
+    @llm_operation("generate_test_cases")
     def generate_test_cases(self, project_id: UUID, requirement_id: UUID) -> list[TestCase]:
         project = self.repo.get_project(project_id)
         if not project:
@@ -190,6 +198,7 @@ class WorkflowService:
         self.repo.save_test_cases(final_state.generated_test_cases)
         return final_state.generated_test_cases
 
+    @llm_operation("generate_test_data")
     def generate_test_data_test_cases(
         self,
         project_id: UUID,
@@ -203,6 +212,7 @@ class WorkflowService:
                 generate_scripts,
             )
 
+    @llm_operation("generate_test_data")
     def generate_test_data_for_test_case(
         self,
         project_id: UUID,
@@ -329,6 +339,7 @@ class WorkflowService:
 
         return state.test_data_report or {}, test_case
 
+    @llm_operation("generate_test_data_script")
     def generate_test_data_script_for_test_case(
         self,
         project_id: UUID,
@@ -552,6 +563,9 @@ class WorkflowService:
             issues.append("Script does not assert the expected result")
         if not dom_context:
             return issues
+        # A control used after its multi-step form step was left is hidden and
+        # times out; the step map comes from evidence, so it is safe to repair.
+        issues.extend(validate_step_order(script, dom_context))
         try:
             found = validate_playwright_script(script, dom_context)
         except RuntimeError:
@@ -757,6 +771,7 @@ class WorkflowService:
 
         return test_data_state.test_data_report, case_state.generated_test_cases
 
+    @llm_operation("generate_script")
     def generate_playwright_script(self, project_id: UUID, test_case_id: UUID, automation_framework: str = "Playwright") -> TestCase:
         test_case = self.repo.get_test_case(test_case_id)
         if not test_case:
@@ -876,6 +891,7 @@ class WorkflowService:
 active_execution_events = {}
 
 
+@llm_operation("execute_test_case")
 def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID, test_case_id: UUID, execution_id: UUID = None, background_tasks = None) -> None:
     tc_id_str = str(test_case_id)
     events = []
