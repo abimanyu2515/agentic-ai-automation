@@ -65,12 +65,14 @@ Design Decision:
 
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+import difflib
 import json
 import re
 from typing import Callable
 from uuid import UUID
 
 from backend.agents.base import BaseAgent
+from backend.agents.test_data_agent import names_page_control
 from backend.models.state import WorkflowState
 from backend.models.test_case import TestCase
 from backend.services.llm import LLMService
@@ -181,6 +183,8 @@ def _describe_data_fields(
     """
     notes = {}
     for field in datasets[0] if datasets else []:
+        if field not in markers:  # a page-control field, which has no marker
+            continue
         marker = markers[field]
         values = [str(dataset.get(field, "")) for dataset in datasets]
         example = json.dumps(
@@ -233,12 +237,67 @@ def _describe_data_fields(
 # stay stored on the test case but get no generated test.
 _MAX_SCRIPT_DATASETS = 5
 
+# Extra template requests when the model's script leaves out a required marker.
+_TEMPLATE_MARKER_RETRIES = 2
+
 # Loop variable name and leading comment for each dataset outcome group.
 _DATASET_GROUPS = {
     "case": ("datasets", "Datasets that follow the test case's expected result"),
     "accepted": ("acceptedDatasets", "Datasets the application should accept"),
     "rejected": ("rejectedDatasets", "Datasets the application should reject"),
 }
+
+
+def _data_markers(test_case: TestCase) -> dict[str, str]:
+    """field -> marker for the fields a template fills from the dataset.
+
+    A field that names a page control (seen live: "select_hotel_radio":
+    "radio_0") gets no marker. Requiring every marker forced that guessed name
+    into a selector, input[name="radio_0"], which timed out; the step itself
+    says which control to use. The field stays in the dataset rows.
+    """
+    datasets = test_case.test_data_sets or [test_case.test_data]
+    fields = [
+        field for field in test_case.test_data
+        if not names_page_control(
+            field, [str(dataset.get(field, "")) for dataset in datasets]
+        )
+    ] or list(test_case.test_data)
+    return {
+        field: f"__TEST_DATA_{index:02d}__"
+        for index, field in enumerate(fields, start=1)
+    }
+
+
+# A template line that picks a dropdown option from a data marker, such as
+# page.locator('#cc_type').selectOption('__TEST_DATA_12__').
+_SELECT_FROM_MARKER = re.compile(
+    r"""locator\(\s*(['"`])(?P<selector>.+?)\1\s*\)(?:\.first\(\))?"""
+    r"""\.selectOption\(\s*(?:\{\s*label\s*:\s*)?(['"`])(?P<marker>__TEST_DATA_\d+__)\3"""
+)
+# How close a dataset value must be to a real option to be replaced by it,
+# such as "Hotel Cornice" for "Hotel Corniche".
+_OPTION_MATCH_CUTOFF = 0.85
+
+
+def _option_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _match_option(value: str, options: list[str]) -> str | None:
+    """The real option a dataset value means, or None when none is close.
+
+    Seen live: "MasterCard" for the option "Master Card". selectOption
+    matches exactly, so the test waited 30 seconds and failed.
+    """
+    if value in options:
+        return value
+    by_key = {_option_key(option): option for option in reversed(options)}
+    key = _option_key(value)
+    if key in by_key:
+        return by_key[key]
+    close = difflib.get_close_matches(key, list(by_key), n=1, cutoff=_OPTION_MATCH_CUTOFF)
+    return by_key[close[0]] if close else None
 
 
 def _strip_code_fences(text: str) -> str:
@@ -458,6 +517,7 @@ class PlaywrightAgent(BaseAgent):
                 replacements.update({
                     markers[key]: self._escape_js_string_content(str(value))
                     for key, value in test_case.test_data.items()
+                    if key in markers
                 })
                 test_case.playwright_script = self._apply_template_values(
                     template_script,
@@ -516,11 +576,21 @@ class PlaywrightAgent(BaseAgent):
             marker for marker in markers.values()
             if marker not in template_script
         ]
-        if missing_markers:
+        # Cases with many fields often lose one or two markers. Each retry
+        # hands back the rejected script so the model only adds what is
+        # missing, instead of rewriting everything and dropping others.
+        for attempt in range(1, _TEMPLATE_MARKER_RETRIES + 1):
+            if not missing_markers:
+                break
             state.add_log(
                 f"{self.name}: template omitted {len(missing_markers)} "
-                "required data marker(s); retrying template generation once"
+                f"required data marker(s); retrying template generation "
+                f"({attempt} of {_TEMPLATE_MARKER_RETRIES})"
             )
+            title_markers = [
+                marker for marker in missing_markers
+                if marker in ("__TEST_DATA_ID__", "__TEST_TYPE__")
+            ]
             template_script = self._generate_script(
                 template_case,
                 framework,
@@ -529,14 +599,23 @@ class PlaywrightAgent(BaseAgent):
                 template_feedback=(
                     "Your previous script template was rejected because it omitted "
                     "these exact required markers: "
-                    f"{', '.join(missing_markers)}. Regenerate the complete script "
-                    "and preserve every required marker exactly as provided in the "
+                    f"{', '.join(missing_markers)}. Return the complete script with "
+                    "every required marker kept exactly as provided in the "
                     "test_data, title, and expected result. Do not omit fields."
                     + "".join(
                         f"\n{field_notes[marker]}"
                         for marker in missing_markers
                         if field_notes and marker in field_notes
                     )
+                    + (
+                        f"\n- {', '.join(title_markers)} belong in the test title. Use "
+                        f"exactly test({json.dumps(template_case.title)}, ...)."
+                        if title_markers else ""
+                    )
+                    + "\nStart from your rejected script below. Keep its steps and "
+                    "locators, and add an action or assertion for each missing "
+                    "marker at the step that uses that field.\n"
+                    "REJECTED SCRIPT:\n" + template_script
                 ),
                 dom_context=state.dom_context,
                 repair_feedback=state.repair_feedback,
@@ -562,8 +641,13 @@ class PlaywrightAgent(BaseAgent):
         target_url: str | None,
         state: WorkflowState,
         field_notes: dict[str, str] | None = None,
+        dropdowns: dict[str, list[str]] | None = None,
     ) -> str | None:
-        """Template recorded on the live app with one dataset, or None to fall back."""
+        """Template recorded on the live app with one dataset, or None to fall back.
+
+        Fills dropdowns, when given, with field -> the real options of the
+        dropdown the template picks that field's value from.
+        """
         if self.template_recorder is None or not target_url:
             return None
         # A vault reference becomes the recorder's {{TARGET_USERNAME}} or
@@ -576,8 +660,10 @@ class PlaywrightAgent(BaseAgent):
                 else str(value)
             )
             for key, value in sample_data.items()
+            if key in markers
         }
         values = {markers[key]: value for key, value in sample_data.items()}
+        select_options: dict[str, list[str]] = {}
         try:
             script = self.template_recorder(
                 target_url=target_url,
@@ -595,6 +681,7 @@ class PlaywrightAgent(BaseAgent):
                 ],
                 repair_feedback=state.repair_feedback,
                 field_notes="\n".join((field_notes or {}).values()),
+                select_options=select_options,
             )
         except Exception as exc:
             state.add_log(
@@ -614,7 +701,43 @@ class PlaywrightAgent(BaseAgent):
             )
             return None
         state.add_log(f"{self.name}: recorded template on the live target app")
+        if dropdowns is not None:
+            field_of = {marker: field for field, marker in markers.items()}
+            for match in _SELECT_FROM_MARKER.finditer(script):
+                field = field_of.get(match.group("marker"))
+                options = select_options.get(match.group("selector"))
+                if field and options:
+                    dropdowns[field] = options
         return script
+
+    def _match_dropdown_values(
+        self,
+        rows: list[dict],
+        dropdowns: dict[str, list[str]],
+        state: WorkflowState,
+    ) -> None:
+        """Replace each dataset's dropdown value with the real option it means.
+
+        A value with no close option is kept and logged: its test will fail
+        at that dropdown, and the log says which value to fix.
+        """
+        for row in rows:
+            for field, options in dropdowns.items():
+                value = row["data"].get(field, "")
+                if not value.strip() or _LIST_SEPARATOR in value:
+                    continue
+                option = _match_option(value, options)
+                if option is None:
+                    state.add_log(
+                        f"{self.name}: {row['id']} {field} value {value!r} is not an "
+                        f"option of its dropdown; options are {', '.join(options[:15])}"
+                    )
+                elif option != value:
+                    row["data"][field] = option
+                    state.add_log(
+                        f"{self.name}: {row['id']} {field} {value!r} changed to the "
+                        f"dropdown's option {option!r}"
+                    )
 
     def _generate_multi_dataset_script(
         self,
@@ -651,6 +774,7 @@ class PlaywrightAgent(BaseAgent):
         templates: dict[str, str] = {}
         rows: dict[str, list[dict]] = {}
         markers: dict[str, str] = {}
+        dropdowns: dict[str, list[str]] = {}
         for index, (dataset, profile) in enumerate(zip(datasets, profiles), start=1):
             outcome = profile.get("expected_outcome") or case_outcome
             group = "case" if outcome == case_outcome else outcome
@@ -665,7 +789,8 @@ class PlaywrightAgent(BaseAgent):
                 )
                 field_notes = _describe_data_fields(markers, datasets)
                 template_script = self._record_template(
-                    template_case, markers, dataset, target_url, state, field_notes
+                    template_case, markers, dataset, target_url, state, field_notes,
+                    dropdowns,
                 ) or self._generate_template(
                     template_case, markers, framework, target_url, state, field_notes
                 )
@@ -684,11 +809,15 @@ class PlaywrightAgent(BaseAgent):
                 f"{self.name}: used separate templates for accepted and rejected "
                 f"datasets of '{test_case.title}'"
             )
+        if dropdowns:
+            for group_rows in rows.values():
+                self._match_dropdown_values(group_rows, dropdowns, state)
 
         expressions = {"__TEST_DATA_ID__": "row.id", "__TEST_TYPE__": "row.type"}
         expressions.update({
             markers[key]: f"row.data[{json.dumps(key)}]"
             for key in test_case.test_data
+            if key in markers
         })
         return self._data_driven_loop_script([
             (*_DATASET_GROUPS[group], templates[group], expressions, rows[group])
@@ -750,13 +879,12 @@ class PlaywrightAgent(BaseAgent):
         expected_result: str,
     ) -> tuple[TestCase, dict[str, str]]:
         """Template input that keeps the real steps, with data values as markers."""
-        markers = {
-            key: f"__TEST_DATA_{index:02d}__"
-            for index, key in enumerate(test_case.test_data, start=1)
-        }
+        markers = _data_markers(test_case)
 
         def mark(text: str) -> str:
             for key, value in test_case.test_data.items():
+                if key not in markers:
+                    continue
                 value = str(value)
                 if len(value.strip()) < 2:
                     continue
@@ -772,9 +900,7 @@ class PlaywrightAgent(BaseAgent):
             "preconditions": [mark(item) for item in test_case.preconditions],
             "steps": [mark(item) for item in test_case.steps],
             "expected_result": expected_result,
-            "test_data": {
-                key: markers[key] for key in test_case.test_data
-            },
+            "test_data": dict(markers),
         })
         markers.update({
             "__TEST_DATA_ID__": "__TEST_DATA_ID__",
@@ -876,10 +1002,7 @@ class PlaywrightAgent(BaseAgent):
 
     @staticmethod
     def _test_data_template_case(test_case: TestCase) -> tuple[TestCase, dict[str, str]]:
-        markers = {
-            key: f"__TEST_DATA_{index:02d}__"
-            for index, key in enumerate(test_case.test_data, start=1)
-        }
+        markers = _data_markers(test_case)
         template_case = test_case.model_copy(update={
             "title": "Test data __TEST_DATA_ID__: __TEST_TYPE__",
             "steps": [
@@ -887,9 +1010,7 @@ class PlaywrightAgent(BaseAgent):
                 "Verify the expected_result for the supplied test_data values.",
             ],
             "expected_result": "__EXPECTED_RESULT__",
-            "test_data": {
-                key: markers[key] for key in test_case.test_data
-            },
+            "test_data": dict(markers),
         })
         markers.update({
             "__TEST_DATA_ID__": "__TEST_DATA_ID__",

@@ -15,11 +15,14 @@ calls, paces calls per model and cools a model down after a 429.
 LLMService(config=...) skips all of that.
 """
 
+import json
 import logging
 import re
 import threading
 import time
-from typing import Callable, TypeVar
+from dataclasses import dataclass
+from typing import Callable, Iterator, TypeVar
+from uuid import uuid4
 
 from litellm import completion
 from litellm.exceptions import RateLimitError
@@ -80,6 +83,41 @@ class LLMServiceError(Exception):
     doesn't validate against the expected schema. Agents catch this, not
     litellm's own exception types - callers shouldn't need to know which
     provider SDK is underneath."""
+
+
+@dataclass
+class ChatToolCall:
+    """A finished tool call, put back together from its streamed pieces.
+    `arguments` is None when the model sent JSON that does not parse; the
+    raw text is kept in `raw_arguments` so the caller can report it."""
+    id: str
+    name: str
+    arguments: dict | None
+    raw_arguments: str = ""
+
+
+@dataclass
+class ChatChunk:
+    """One piece of a streamed chat reply (spec 0005): either text, or a
+    finished tool call (sent after the model's text, at the end of the stream)."""
+    text: str = ""
+    tool_call: ChatToolCall | None = None
+
+
+def _finish_tool_call(call: dict) -> ChatToolCall:
+    raw = call.get("arguments") or ""
+    try:
+        arguments = json.loads(raw) if raw.strip() else {}
+    except ValueError:
+        arguments = None
+    if arguments is not None and not isinstance(arguments, dict):
+        arguments = None
+    return ChatToolCall(
+        id=call.get("id") or f"call_{uuid4().hex[:24]}",
+        name=call.get("name") or "",
+        arguments=arguments,
+        raw_arguments=raw,
+    )
 
 
 class LLMRateLimitTimeout(LLMServiceError):
@@ -176,6 +214,10 @@ def _get_pool(role: str) -> _RolePool:
         if role not in _pools:
             _pools[role] = _RolePool(role)
         return _pools[role]
+
+
+def role_config_models(role: str) -> list[str]:
+    return get_settings().llm_roles[role].models
 
 
 def reset_role_pools(**pool_kwargs) -> None:
@@ -378,6 +420,135 @@ class LLMService:
         if self.role is None:
             return None
         return _WaitBudget(get_settings().llm_roles[self.role].max_wait_seconds)
+
+    def stream_chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
+        *,
+        timeout: int = DEFAULT_LLM_TIMEOUT,
+    ) -> Iterator[ChatChunk]:
+        """Stream a chat reply as ChatChunks (spec 0005).
+
+        A role call holds one pool slot for the whole stream. The role's max
+        wait counts only until the first chunk: a 429 before then cools the
+        model down and moves on to the next one, the same as _complete. Any
+        failure after the first chunk is raised as LLMServiceError, so the
+        caller can save the partial reply. Closing the iterator early (a
+        client disconnect) releases the slot.
+        """
+        self._require_valid_config()
+        tool_kwargs: dict = {"tools": tools} if tools else {}
+        if tools and tool_choice:
+            tool_kwargs["tool_choice"] = tool_choice
+        if self.role is None:
+            try:
+                stream = completion(
+                    model=self._model_string(),
+                    messages=messages,
+                    api_base=self._api_base(),
+                    api_key=self.config.api_key,
+                    timeout=timeout,
+                    stream=True,
+                    **tool_kwargs,
+                )
+            except Exception as exc:
+                raise LLMServiceError(f"LLM call failed ({self.config.provider}/{self.config.model}): {exc}") from exc
+            yield from self._stream_chunks(iter(stream), None, self.config)
+            return
+
+        pool = _get_pool(self.role)
+        budget = self._new_budget()
+        while True:
+            start = pool.now()
+            try:
+                model, role_config = pool.acquire(start + budget.remaining)
+            except _PoolWaitExceeded:
+                budget.waited += pool.now() - start
+                raise LLMRateLimitTimeout(
+                    f"{self.role} LLM rate limited: models {role_config_models(self.role)} unavailable "
+                    f"after {budget.waited:.0f}s"
+                ) from None
+            waited = pool.now() - start
+            budget.waited += waited
+            budget.remaining = max(budget.remaining - waited, 0.0)
+            config = self._config_for(role_config, model)
+            logger.info("LLM stream role=%s model=%s queue_wait=%.2fs", self.role, model, waited)
+
+            try:
+                stream = iter(completion(
+                    model=self._model_string(config),
+                    messages=messages,
+                    api_base=self._api_base(config),
+                    api_key=config.api_key,
+                    timeout=timeout,
+                    num_retries=0,
+                    stream=True,
+                    metadata={"llm_role": self.role, "llm_model": model, "tags": [self.role, model]},
+                    **tool_kwargs,
+                ))
+                # Providers often report a 429 on the first read, not the call.
+                first = next(stream, None)
+            except RateLimitError as exc:
+                pool.release()
+                seconds = _cooldown_seconds(exc, role_config.cooldown_seconds)
+                pool.report_429(model, seconds)
+                logger.warning(
+                    "LLM 429 role=%s model=%s cooldown=%.0fs; trying the next available model",
+                    self.role, model, seconds,
+                )
+                continue
+            except Exception as exc:
+                pool.release()
+                raise LLMServiceError(f"LLM call failed ({config.provider}/{config.model}): {exc}") from exc
+
+            try:
+                yield from self._stream_chunks(stream, first, config)
+            finally:
+                pool.release()
+            return
+
+    @staticmethod
+    def _stream_chunks(stream, first, config: LLMConfig) -> Iterator[ChatChunk]:
+        def pieces():
+            if first is not None:
+                yield first
+            yield from stream
+
+        # Tool calls arrive in pieces keyed by index: the id and name first,
+        # then the arguments JSON a few characters at a time.
+        calls: dict[int, dict] = {}
+        try:
+            for chunk in pieces():
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+                delta = getattr(choices[0], "delta", None)
+                if delta is None:
+                    continue
+                text = getattr(delta, "content", None)
+                if text:
+                    yield ChatChunk(text=text)
+                for piece in getattr(delta, "tool_calls", None) or []:
+                    index = getattr(piece, "index", None)
+                    if index is None:
+                        index = len(calls)
+                    call = calls.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                    if getattr(piece, "id", None):
+                        call["id"] = piece.id
+                    function = getattr(piece, "function", None)
+                    if function is not None:
+                        if getattr(function, "name", None):
+                            call["name"] = function.name
+                        if getattr(function, "arguments", None):
+                            call["arguments"] += function.arguments
+        except GeneratorExit:
+            raise
+        except Exception as exc:
+            raise LLMServiceError(f"LLM stream failed ({config.provider}/{config.model}): {exc}") from exc
+        for index in sorted(calls):
+            yield ChatChunk(tool_call=_finish_tool_call(calls[index]))
 
     def generate(self, *, system: str, user: str, timeout: int = 30, **kwargs) -> str:
         """Plain text completion. Returns the raw response content."""

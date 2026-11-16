@@ -164,7 +164,13 @@ class ScenarioAgent(BaseAgent):
             max_tokens=max(4096, self.scenario_count * 512),
         )
 
-        for item in batch.scenarios:
+        # The prompt asks for scenario_count, but the model may return more.
+        # Keep the requested number so callers (and chat cards) get what they asked for.
+        if len(batch.scenarios) > self.scenario_count:
+            state.add_log(
+                f"{self.name} kept the first {self.scenario_count} of {len(batch.scenarios)} scenarios returned"
+            )
+        for item in batch.scenarios[: self.scenario_count]:
             state.generated_scenarios.append(
                 Scenario(
                     requirement_id=state.requirement.id,
@@ -177,5 +183,5 @@ class ScenarioAgent(BaseAgent):
                 )
             )
 
-        state.add_log(f"{self.name} generated {len(batch.scenarios)} scenarios")
+        state.add_log(f"{self.name} generated {min(len(batch.scenarios), self.scenario_count)} scenarios")
         return state

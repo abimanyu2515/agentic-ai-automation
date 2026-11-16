@@ -144,6 +144,44 @@ LIST_FIELD_PATTERN = re.compile(r"product|item")
 PRICE_CHECK_PATTERN = re.compile(r"\b(price|prices|total|totals|subtotal|tax|taxes|amount)\b")
 CENT = Decimal("0.01")
 
+# Seen live: "select_hotel_radio": "radio_0", a guessed name of the page's
+# radio button. The script used it as a selector and timed out, since the
+# real name was "radiobutton_0". A dataset holds what a tester types or picks,
+# never how the page names its controls; the script finds those on the page.
+PAGE_CONTROL_NAME_PATTERN = re.compile(
+    r"(^|_)(selector|locator|xpath|css_selector|element_id|dom_id|html_id)(_|$)"
+)
+PAGE_CONTROL_KIND_PATTERN = re.compile(
+    r"(^|_)(radio|radios|radio_button|radiobutton|checkbox|check_box)(_|$)"
+)
+# A control id such as radio_0, radiobutton_0, or rb1.
+CONTROL_ID_VALUE_PATTERN = re.compile(r"[a-z][a-z_-]*[_-]?\d+", re.IGNORECASE)
+# A selector, or an id that names its control's kind.
+PAGE_CONTROL_VALUE_PATTERN = re.compile(
+    r"(radio|radiobutton|radio_button|checkbox|check_box|chk|btn|button|input)[_-]?\d+"
+    r"|#[a-z][\w-]*|//\S+|[a-z]+\[[^\]]+\]",
+    re.IGNORECASE,
+)
+
+
+def names_page_control(field: str, values: list[str]) -> bool:
+    """True when a field names a page control (a radio button's name, an
+    element id, a selector) instead of holding a value a tester enters."""
+    name = _snake_case(field)
+    if PAGE_CONTROL_NAME_PATTERN.search(name):
+        return True
+    filled = [value.strip() for value in values if value.strip()]
+    if not filled:
+        return False
+    if all(PAGE_CONTROL_VALUE_PATTERN.fullmatch(value) for value in filled):
+        return True
+    # A radio or checkbox field may hold real data ("Hotel Creek", "true");
+    # only control ids such as radio_0 are references.
+    return bool(PAGE_CONTROL_KIND_PATTERN.search(name)) and all(
+        CONTROL_ID_VALUE_PATTERN.fullmatch(value) for value in filled
+    )
+
+
 # A flow that creates its own account needs that account's new credentials.
 ACCOUNT_CREATION_PATTERN = re.compile(
     r"\b(register|registers|registration|sign ?up|signs ?up|"
@@ -634,6 +672,7 @@ class TestDataAgent(BaseAgent):
                 f"(collected {len(collected)}){reason}. Please try again."
             )
 
+        self._drop_page_control_fields(state, generated_datasets)
         input_datasets = [dataset.test_data for dataset in generated_datasets]
         data_ids = [
             f"TD-{test_case.id.hex[:8].upper()}-{index:02d}"
@@ -1183,6 +1222,33 @@ class TestDataAgent(BaseAgent):
                 continue
             cleaned[key] = value
         return cleaned
+
+    def _drop_page_control_fields(
+        self,
+        state: WorkflowState,
+        datasets: list[TestCaseDataResponse],
+    ) -> None:
+        """Remove fields that name page controls, judged across all datasets,
+        so the script never builds a selector from a guessed control name."""
+        fields = list(datasets[0].test_data) if datasets else []
+        dropped = [
+            field for field in fields
+            if names_page_control(
+                field, [dataset.test_data.get(field, "") for dataset in datasets]
+            )
+        ]
+        # A dataset needs at least one field; keep them all rather than none.
+        if not dropped or len(dropped) == len(fields):
+            return
+        for dataset in datasets:
+            dataset.test_data = {
+                key: value for key, value in dataset.test_data.items()
+                if key not in dropped
+            }
+        state.add_log(
+            f"{self.name}: dropped fields that name page controls, not test data: "
+            f"{', '.join(dropped)}"
+        )
 
     @staticmethod
     def _counts_match(test_data: dict[str, str]) -> bool:

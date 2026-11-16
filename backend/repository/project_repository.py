@@ -75,6 +75,10 @@ class ProjectRepository(ABC):
         pass
 
     @abstractmethod
+    def delete_requirement(self, requirement_id: UUID, deleted_by: UUID | None = None) -> bool:
+        pass
+
+    @abstractmethod
     def get_scenarios(self, requirement_id: UUID, include_deleted: bool = False) -> list[Scenario]:
         pass
 
@@ -569,6 +573,25 @@ class JSONProjectRepository(ProjectRepository):
         
         reqs_raw[req_id_str] = req_dump
         self._write_raw(raw)
+
+    def delete_requirement(self, requirement_id: UUID, deleted_by: UUID | None = None) -> bool:
+        raw = self._read_raw()
+        requirement = raw.setdefault("requirements", {}).get(str(requirement_id))
+        if requirement is None or requirement.get("is_deleted", False):
+            return False
+        now = datetime.now(timezone.utc).isoformat()
+        requirement.update(is_deleted=True, deleted_at=now, deleted_by=str(deleted_by) if deleted_by else None)
+        scenarios = raw.setdefault("scenarios", {})
+        test_cases = raw.setdefault("test_cases", {})
+        for scenario_id, scenario in scenarios.items():
+            if scenario.get("requirement_id") != str(requirement_id) or scenario.get("is_deleted", False):
+                continue
+            scenario.update(is_deleted=True, deleted_at=now, deleted_by=str(deleted_by) if deleted_by else None)
+            for case in test_cases.values():
+                if case.get("scenario_id") == scenario_id and not case.get("is_deleted", False):
+                    case.update(is_deleted=True, deleted_at=now, deleted_by=str(deleted_by) if deleted_by else None)
+        self._write_raw(raw)
+        return True
 
     def get_scenarios(self, requirement_id: UUID, include_deleted: bool = False) -> list[Scenario]:
         raw = self._read_raw()

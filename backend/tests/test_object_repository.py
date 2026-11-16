@@ -174,6 +174,56 @@ def test_render_then_strip_returns_the_original_and_is_idempotent():
     assert scripts.strip_block(hand_edited) == SCRIPT
 
 
+@pytest.mark.skipif(not __import__("shutil").which("node"), reason="needs node")
+def test_orx_works_awaited_and_chained(tmp_path):
+    """`await orx(page, key).fill(v)` (chained, as models often write it) and
+    `(await orx(page, key)).fill(v)` both act on the found Locator."""
+    import subprocess
+
+    locators = {
+        "login_page.username": [{"strategy": "css", "value": "#username", "options": {}}],
+        "login_page.ghost": [{"strategy": "css", "value": "#ghost", "options": {}}],
+    }
+    body = """
+const calls = [];
+const makeLoc = (sel) => ({
+  first() { return this; },
+  async waitFor() { if (sel === '#ghost') throw new Error('hidden'); },
+  async fill(v) { calls.push(['fill', sel, v]); },
+  async inputValue() { return 'typed'; },
+});
+const page = { locator: makeLoc };
+const addLog = () => {};
+(async () => {
+  await orx(page, 'login_page.username').fill('chained');
+  const loc = await orx(page, 'login_page.username');
+  await loc.fill('awaited');
+  const value = await orx(page, 'login_page.username').inputValue();
+  let error = '';
+  try { await orx(page, 'login_page.ghost').fill('x'); } catch (e) { error = e.message; }
+  console.log(JSON.stringify({ calls, value, error }));
+})();
+"""
+    script = (
+        "const x = await orx(page, 'login_page.username');\n"
+        "await orx(page, 'login_page.ghost');\n"
+    )
+    rendered = scripts.render_script(script, locators, 3000)
+    block = rendered[rendered.index(scripts.JS_START): rendered.index(scripts.JS_END)]
+    path = tmp_path / "orx.js"
+    path.write_text(block + body, encoding="utf-8")
+
+    result = subprocess.run(["node", str(path)], capture_output=True, text=True, timeout=30)
+
+    assert result.returncode == 0, result.stderr
+    import json
+
+    output = json.loads(result.stdout.strip().splitlines()[-1])
+    assert output["calls"] == [["fill", "#username", "chained"], ["fill", "#username", "awaited"]]
+    assert output["value"] == "typed"
+    assert output["error"] == "Object repository element login_page.ghost was not found by any locator"
+
+
 def test_hostile_locator_text_cannot_trip_the_engine_danger_check():
     locators = {"login_page.login_button": [{"strategy": "text", "value": 'eval("x") Function(1) \'q\'', "options": {}}]}
     rendered = scripts.render_script(SCRIPT, locators, 3000)

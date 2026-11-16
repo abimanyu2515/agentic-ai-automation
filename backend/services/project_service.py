@@ -114,6 +114,9 @@ class ProjectService:
     ) -> None:
         self.repo.save_requirement(requirement, priority, business_domain, attachments)
 
+    def delete_requirement(self, requirement_id: UUID, deleted_by: UUID | None = None) -> bool:
+        return self.repo.delete_requirement(requirement_id, deleted_by=deleted_by)
+
     def get_scenarios_for_requirement(self, requirement_id: UUID) -> list[Scenario]:
         return self.repo.get_scenarios(requirement_id)
 
@@ -241,7 +244,12 @@ class ProjectService:
         return self.repo.update_project(proj)
 
     def delete_project(self, project_id: UUID) -> bool:
-        return self.repo.delete_project(project_id)
+        deleted = self.repo.delete_project(project_id)
+        if deleted:
+            from backend.repository.chat_repository import get_chat_repository
+
+            get_chat_repository().delete_threads_for_project(project_id)
+        return deleted
 
     def get_documents(self, project_id: UUID) -> list[Document]:
         return self.repo.get_documents(project_id)
@@ -446,7 +454,6 @@ class ProjectService:
         import re
         import io
         import zipfile
-        import fitz
         from pathlib import Path
         import xml.etree.ElementTree as ET
 
@@ -498,10 +505,10 @@ class ProjectService:
                 })
 
         elif ext == ".pdf":
-            doc = fitz.open(stream=file_bytes, filetype="pdf")
-            text = ""
-            for page in doc:
-                text += page.get_text()
+            import PyPDF2
+
+            doc = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            text = "\n".join(page.extract_text() or "" for page in doc.pages)
             parsed_blocks = self._parse_requirements_from_text(text, filename)
 
         elif ext in [".docx", ".doc"]:

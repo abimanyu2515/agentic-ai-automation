@@ -128,6 +128,27 @@ def test_scenario_agent_maps_llm_output_to_scenarios(stub_llm_service):
     assert "Scenario Agent generated 3 scenarios" in result.logs[-1]
 
 
+def test_scenario_agent_keeps_only_the_requested_count(stub_llm_service):
+    # Regression: a chat card for 1 scenario created 3, because the agent saved
+    # every scenario the model returned. The canned batch holds 3.
+    requirement = Requirement(title="Login flow", description="User can log in with valid credentials")
+
+    result = ScenarioAgent(llm_service=stub_llm_service, scenario_count=1).run(WorkflowState(requirement=requirement))
+
+    assert [s.scenario_name for s in result.generated_scenarios] == ["Valid Login"]
+    assert "kept the first 1 of 3 scenarios returned" in " ".join(result.logs)
+    assert "Scenario Agent generated 1 scenarios" in result.logs[-1]
+
+
+def test_scenario_agent_keeps_all_when_the_model_returns_fewer(stub_llm_service):
+    requirement = Requirement(title="Login flow", description="User can log in with valid credentials")
+
+    result = ScenarioAgent(llm_service=stub_llm_service, scenario_count=5).run(WorkflowState(requirement=requirement))
+
+    assert len(result.generated_scenarios) == 3
+    assert not any("kept the first" in line for line in result.logs)
+
+
 def test_scenario_agent_uses_bounded_timeout_without_nested_provider_retries(
     stub_llm_service,
 ):

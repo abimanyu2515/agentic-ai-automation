@@ -10,7 +10,7 @@ The codebase already has pieces nearby but no shared store. Reconnaissance (`App
 
 Forces that shaped this decision:
 - Persistence must go through the repository layer, with the JSON store as the default and PostgreSQL optional (`AGENTS.md`). The engineer asked for locators in their own PostgreSQL table.
-- There are two execution paths: the Python runner, which streams stdout, and the Next.js engine, which strips imports, runs plain JS through `new Function`, and reports through webhooks. The engine only captures browser console output, and its `addLog` webhooks are fire and forget.
+- There are two execution paths: the Python runner, which streams stdout, and the Next.js engine, which strips imports, transpiles the TypeScript to plain JS, runs it through `new Function`, and reports through webhooks. The engine only captures browser console output, and its `addLog` webhooks are fire and forget.
 - Reconnaissance only runs for projects marked as safe test environments.
 - Selenium scripts are generated but can't be executed.
 

@@ -34,7 +34,26 @@ _PLAIN_KEY_ARGUMENT = re.compile(r"""^\s*(['"])[a-z0-9_]+\.[a-z0-9_]+\1\s*$""")
 # A whole JavaScript import statement, including ones split over several lines.
 _JS_IMPORT = re.compile(r"""^[ \t]*import\b[^;'"]*?(['"])[^'"]+\1[ \t]*;?[ \t]*$""", re.MULTILINE)
 
-_JS_HELPER = """async function orx(page, key) {
+# orx returns the lookup Promise with these Locator methods attached, so the
+# chained form `await orx(page, key).fill(v)` works as well as
+# `(await orx(page, key)).fill(v)`. Models often write the chained form, and
+# on a bare Promise it fails with "orx(...).fill is not a function".
+_JS_LOCATOR_METHODS = (
+    "click", "dblclick", "fill", "clear", "type", "pressSequentially", "press",
+    "check", "uncheck", "setChecked", "selectOption", "hover", "focus", "blur",
+    "tap", "setInputFiles", "scrollIntoViewIfNeeded", "waitFor", "inputValue",
+    "textContent", "innerText", "innerHTML", "getAttribute", "isVisible",
+    "isHidden", "isChecked", "isEnabled", "isDisabled", "isEditable", "count",
+    "boundingBox", "screenshot",
+)
+
+_JS_HELPER = """const __ORX_METHODS = """ + json.dumps(list(_JS_LOCATOR_METHODS)) + """;
+function orx(page, key) {
+  const found = __orxFind(page, key);
+  for (const m of __ORX_METHODS) found[m] = (...args) => found.then((loc) => loc[m](...args));
+  return found;
+}
+async function __orxFind(page, key) {
   // @ts-ignore addLog exists only inside the execution engine wrapper
   const log = (m) => (typeof addLog === 'function' ? addLog(m) : console.log(m));
   const chain = __OBJREPO[key];
@@ -237,7 +256,8 @@ def _helper_end(lines: list[str], start: int) -> int:
     """Index just past the helper definition when the end marker is missing."""
     for position in range(start, len(lines)):
         line = lines[position]
-        if line.startswith("async function orx("):
+        # __orxFind is the helper's last function; older blocks end with orx.
+        if line.startswith(("async function __orxFind(", "async function orx(")):
             for end in range(position + 1, len(lines)):
                 if lines[end] == "}":
                     return end + 1

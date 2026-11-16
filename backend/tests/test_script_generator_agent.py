@@ -27,14 +27,31 @@ class _FakeLocator:
             raise TimeoutError(f"Timeout waiting for {self.selector}")
         self.page.actions.append(("click", self.selector, None))
 
+    async def wait_for(self, state, timeout):
+        if self.selector not in self.page.valid_selectors:
+            raise TimeoutError(f"Timeout waiting for {self.selector}")
+        self.page.actions.append(("assert_visible", self.selector, None))
+
+    async def select_option(self, value, timeout):
+        if self.selector not in self.page.valid_selectors:
+            raise TimeoutError(f"Timeout waiting for {self.selector}")
+        self.page.actions.append(("select_option", self.selector, value))
+
+    async def evaluate(self, script):
+        # [label, value] pairs, as the option reader's script returns them.
+        return self.page.options.get(self.selector, [])
+
 
 class _FakePage:
     url = "https://app.example.test/"
 
     def __init__(self):
-        self.valid_selectors = {'[data-test="username"]', "#login"}
+        self.valid_selectors = {'[data-test="username"]', "#login", "#cc_type"}
         self.actions = []
         self.visited = None
+        self.options = {
+            "#cc_type": [["Select Credit Card Type", ""], ["VISA", "VISA"], ["Master Card", "MAST"]],
+        }
 
     async def goto(self, url, **kwargs):
         self.visited = url
@@ -275,6 +292,7 @@ def test_data_driven_template_records_sample_values_and_asks_for_markers():
             _decision("fill", '[data-test="username"]', "locked_user"),
             _decision("done"),
             _decision("done"),
+            _decision("done"),  # the verify step is asked for an assertion once
         ],
         "import { test, expect } from '@playwright/test';\ntest('__TEST_DATA_ID__', async () => {});",
     )
@@ -308,6 +326,41 @@ def test_data_driven_template_records_sample_values_and_asks_for_markers():
     assert '[data-test=\\"username\\"]' in llm.synthesis_prompt
 
 
+def test_data_driven_template_reports_the_options_of_each_dropdown_it_picked_from():
+    llm = _ScriptedLLM(
+        [
+            _decision("select_option", "#cc_type", "VISA"),
+            _decision("done"),
+            _decision("done"),
+            _decision("done"),
+        ],
+        "import { test, expect } from '@playwright/test';\ntest('__TEST_DATA_ID__', async () => {});",
+    )
+    page = _FakePage()
+    select_options = {}
+
+    with mock.patch.object(agent, "async_playwright", lambda: _FakePlaywright(_FakeBrowser(page))), \
+         mock.patch.object(agent, "extract_page_state", _fake_page_state):
+        asyncio.run(
+            agent.generate_data_driven_template(
+                "https://app.example.test/",
+                ["Select the credit card type"],
+                "__TEST_DATA_ID__ [__TEST_TYPE__] Pay",
+                "The booking is confirmed",
+                sample_data={"credit_card_type": "VISA"},
+                markers={"credit_card_type": "__TEST_DATA_01__"},
+                llm=llm,
+                select_options=select_options,
+            )
+        )
+
+    assert page.actions == [("select_option", "#cc_type", "VISA")]
+    # Labels first, then values that differ from them; blanks dropped.
+    assert select_options == {
+        "#cc_type": ["Select Credit Card Type", "VISA", "Master Card", "MAST"],
+    }
+
+
 def test_data_driven_template_fills_vault_placeholders_and_passes_field_notes():
     llm = _ScriptedLLM(
         [
@@ -315,6 +368,7 @@ def test_data_driven_template_fills_vault_placeholders_and_passes_field_notes():
             _decision("done"),
             _decision("done"),
             _decision("done"),
+            _decision("done"),  # the verify step is asked for an assertion once
         ],
         "import { test, expect } from '@playwright/test';\ntest('__TEST_DATA_ID__', async () => {});",
     )
@@ -348,3 +402,47 @@ def test_data_driven_template_fills_vault_placeholders_and_passes_field_notes():
     for prompt in llm.prompts + [llm.synthesis_prompt]:
         assert "real-user" not in prompt
         assert "s3cret!" not in prompt
+
+
+def test_verification_step_must_record_an_assertion_before_done():
+    llm = _ScriptedLLM(
+        [_decision("done"), _decision("assert_visible", "#login"), _decision("done")],
+        "import { test } from '@playwright/test';",
+    )
+
+    _, page, _ = _run(llm, ["Verify the user lands on the dashboard"])
+
+    # The first done is sent back, so a check of the current page is recorded.
+    assert "no assertion was recorded" in llm.prompts[1]
+    assert page.actions == [("assert_visible", "#login", None)]
+    assert '"action": "assert_visible"' in llm.synthesis_prompt
+
+
+def test_verification_step_accepts_second_done_without_looping():
+    llm = _ScriptedLLM(
+        [_decision("done"), _decision("done")],
+        "import { test } from '@playwright/test';",
+    )
+
+    _run(llm, [{"action": "Log in", "expected_result": "Dashboard is shown"}])
+
+    assert len(llm.prompts) == 2
+
+
+def test_action_steps_finish_on_first_done():
+    llm = _ScriptedLLM(
+        [_decision("done"), _decision("done")], "import { test } from '@playwright/test';"
+    )
+
+    _run(llm, ["Click login", {"action": "Open page", "expected_result": "N/A"}])
+
+    assert len(llm.prompts) == 2
+    assert all("no assertion was recorded" not in prompt for prompt in llm.prompts)
+
+
+def test_synthesis_forbids_asserting_controls_from_earlier_pages():
+    llm = _ScriptedLLM([_decision("done")], "import { test } from '@playwright/test';")
+
+    _run(llm, ["Open page"])
+
+    assert "Never assert that a control filled or clicked on an earlier page" in llm.synthesis_prompt

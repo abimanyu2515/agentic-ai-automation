@@ -1,6 +1,6 @@
 // Object Repository view (spec 0004): pages, elements, locator editing, and scans.
 import { API } from './api.js?v=17';
-import { escapeHTML } from './components.js?v=3';
+import { escapeHTML } from './components.js?v=4';
 
 const STRATEGIES = ['role', 'label', 'placeholder', 'text', 'test_id', 'css', 'xpath'];
 const ELEMENT_TYPES = ['button', 'link', 'input', 'select', 'checkbox', 'radio', 'textarea', 'nav'];
@@ -134,12 +134,15 @@ export class ObjectRepositoryView {
     if (!this.pages.length) {
       list.innerHTML = `<div class="objrepo-empty"><p>No pages yet.</p><p>Run a scan, or add a page and its elements by hand.</p></div>`;
       this.selectedPageId = null;
+      window.dispatchEvent(new CustomEvent('chat:context-changed'));
       this.renderElements();
       return;
     }
     if (!this.pages.some((page) => page.id === this.selectedPageId)) {
       this.selectedPageId = this.pages[0].id;
     }
+    // The selected page is the chat assistant's open item (spec 0005).
+    window.dispatchEvent(new CustomEvent('chat:context-changed'));
     list.innerHTML = `<ul class="objrepo-page-list" role="list">${this.pages.map((page) => this.pageItem(page)).join('')}</ul>`;
     list.querySelectorAll('[data-page-id]').forEach((button) => {
       button.addEventListener('click', () => {

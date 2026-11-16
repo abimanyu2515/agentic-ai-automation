@@ -472,3 +472,44 @@ class ObjectLocatorDB(Base):
     __table_args__ = (
         UniqueConstraint("element_id", "position", name="uq_object_locators_element_position"),
     )
+
+
+class ChatThreadDB(Base):
+    """Chat assistant thread (spec 0005). One user, one project."""
+    __tablename__ = "chat_threads"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(80), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    last_activity_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        Index("ix_chat_threads_project_user_activity", "project_id", "user_id", text("last_activity_at DESC")),
+        Index("ix_chat_threads_last_activity_at", "last_activity_at"),
+    )
+
+
+class ChatMessageDB(Base):
+    """One row of a chat thread: user, assistant, or a hidden tool row."""
+    __tablename__ = "chat_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    thread_id = Column(UUID(as_uuid=True), ForeignKey("chat_threads.id", ondelete="CASCADE"), nullable=False)
+    seq = Column(Integer, nullable=False)
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False, default="")
+    view_context = Column(JSON(none_as_null=True), nullable=True)
+    tool_name = Column(String(100), nullable=True)
+    tool_call_id = Column(String(200), nullable=True)
+    tool_calls = Column(JSON(none_as_null=True), nullable=True)
+    tool_args = Column(JSON(none_as_null=True), nullable=True)
+    tool_result = Column(Text, nullable=True)
+    interrupted = Column(Boolean, nullable=False, default=False)
+    action = Column(JSON(none_as_null=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("thread_id", "seq", name="uq_chat_messages_thread_seq"),
+    )

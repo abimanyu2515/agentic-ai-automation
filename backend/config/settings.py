@@ -34,7 +34,7 @@ class LLMConfig(BaseModel):
     api_base: str | None = None  # required for ollama (e.g. http://localhost:11434); leave unset for cloud providers
 
 
-LLM_ROLES = ("generation", "analysis")
+LLM_ROLES = ("generation", "analysis", "chat")
 
 
 class LLMRoleConfig(BaseModel):
@@ -140,6 +140,24 @@ class ObjectRepositoryConfig(BaseModel):
     harvest_page_budget_ms: int = 5000
 
 
+class ChatConfig(BaseModel):
+    """Chat assistant (spec 0005). Defaults live under `chat:` in
+    default_config.yaml; CHAT_* env vars override them."""
+    enabled: bool = True
+    history_messages: int = Field(default=20, ge=1)
+    history_chars: int = Field(default=24000, ge=1000)
+    max_tool_steps: int = Field(default=6, ge=1)
+    tool_result_chars: int = Field(default=4000, ge=500)
+    guide_chars: int = Field(default=8000, ge=500)
+    max_streams: int = Field(default=10, ge=1)
+    rate_limit_per_minute: int = Field(default=20, ge=1)
+    retention_days: int = Field(default=90, ge=1)
+    # Chat role pool defaults; CHAT_LLM_MAX_CONCURRENT and friends override them.
+    llm_max_concurrent: int = Field(default=4, ge=1)
+    llm_cooldown_seconds: float = Field(default=60, ge=0)
+    llm_max_wait_seconds: float = Field(default=30, gt=0)
+
+
 class JiraConfig(BaseModel):
     base_url: str = "https://your-domain.atlassian.net"
     email: str = ""
@@ -168,13 +186,14 @@ class Settings(BaseSettings):
     langsmith: LangSmithConfig = LangSmithConfig()
     jira: JiraConfig = JiraConfig()
     object_repository: ObjectRepositoryConfig = ObjectRepositoryConfig()
+    chat: ChatConfig = ChatConfig()
     # Read only from .env (never override.yaml); filled from llm.* when unset.
     llm_roles: dict[str, LLMRoleConfig] = {}
 
     @model_validator(mode="after")
     def _fill_llm_roles(self) -> "Settings":
         if not self.llm_roles:
-            self.llm_roles = _build_llm_roles(self.llm)
+            self.llm_roles = _build_llm_roles(self.llm, self.chat)
         return self
 
     @classmethod
@@ -225,6 +244,16 @@ class Settings(BaseSettings):
         _override(raw, "repository", "pool_size", "DB_POOL_SIZE", cast=int)
         _override(raw, "repository", "max_overflow", "DB_MAX_OVERFLOW", cast=int)
         _override(raw, "repository", "pool_timeout", "DB_POOL_TIMEOUT", cast=int)
+
+        # Chat assistant settings from .env (spec 0005)
+        raw.setdefault("chat", {})
+        _override(raw, "chat", "enabled", "CHAT_ENABLED", cast=_bool)
+        for field, cast in (
+            ("history_messages", int), ("history_chars", int), ("max_tool_steps", int),
+            ("tool_result_chars", int), ("guide_chars", int), ("max_streams", int),
+            ("rate_limit_per_minute", int), ("retention_days", int),
+        ):
+            _override(raw, "chat", field, f"CHAT_{field.upper()}", cast=cast)
 
         # JIRA settings overrides from .env
         raw.setdefault("jira", {})
@@ -283,9 +312,9 @@ def _parse_models(value: str | None) -> list[str]:
     return models
 
 
-def _build_llm_roles(llm: LLMConfig) -> dict[str, LLMRoleConfig]:
+def _build_llm_roles(llm: LLMConfig, chat: ChatConfig | None = None) -> dict[str, LLMRoleConfig]:
     roles: dict[str, LLMRoleConfig] = {}
-    for role in LLM_ROLES:
+    for role in ("generation", "analysis"):
         prefix = f"{role.upper()}_LLM_"
         provider = _env_set(prefix + "PROVIDER") or llm.provider
         if role == "generation":
@@ -311,7 +340,32 @@ def _build_llm_roles(llm: LLMConfig) -> dict[str, LLMRoleConfig]:
             if value is not None:
                 fields[name.lower()] = value
         roles[role] = LLMRoleConfig(**fields)
+    roles["chat"] = _build_chat_role(roles["analysis"], chat or ChatConfig())
     return roles
+
+
+def _build_chat_role(analysis: LLMRoleConfig, chat: ChatConfig) -> LLMRoleConfig:
+    """Spec 0005, AC-24: every unset CHAT_LLM_* value falls back to the
+    resolved analysis role (which already fell back to LLM_*). Pool limits
+    have their own chat defaults so a busy chat fails fast."""
+    prefix = "CHAT_LLM_"
+    provider = _env_set(prefix + "PROVIDER") or analysis.provider
+    model = _env_set(prefix + "MODEL")
+    same_provider = provider == analysis.provider
+    fields = {
+        "provider": provider,
+        "models": [model] if model else [analysis.models[0]],
+        "api_key": _env_set(prefix + "API_KEY") or analysis.api_key,
+        "api_base": _env_set(prefix + "API_BASE") or (analysis.api_base if same_provider else None),
+        "max_concurrent": chat.llm_max_concurrent,
+        "cooldown_seconds": chat.llm_cooldown_seconds,
+        "max_wait_seconds": chat.llm_max_wait_seconds,
+    }
+    for name in ("MAX_CONCURRENT", "COOLDOWN_SECONDS", "MAX_WAIT_SECONDS"):
+        value = _env_set(prefix + name)
+        if value is not None:
+            fields[name.lower()] = value
+    return LLMRoleConfig(**fields)
 
 
 @lru_cache

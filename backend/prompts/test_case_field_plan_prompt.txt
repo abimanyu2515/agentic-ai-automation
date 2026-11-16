@@ -22,6 +22,7 @@ Instructions:
 - A choice is a field too: an option to pick (such as "sort_option"), the items to add (one field, such as "products", holding "; " separated items), and quantities.
 - When a later step verifies something that follows from the data (such as the cart item count), add an expected_ count to that step (such as "expected_cart_count"). Do not add expected_ fields for prices, taxes, or totals: the script reads those from the page.
 - Put fields that a precondition needs to be created from scratch (such as sign-up details for a new account) in precondition_fields.
+- Do not add fields that name parts of the page, such as a radio button's name or id, an element id, or a selector. Selecting "the first result" needs no field; the script finds it on the page.
 - Do not add fields for login credentials of an existing account, including for a "User is logged in" precondition. They come from the project's vault.
 - Name fields in snake_case after what they hold (such as "postal_code", "card_number"). Reuse the field names in approved_test_data when the steps use them. Use each field name once, in the step that first needs it.
 - Return only a JSON object that matches:

@@ -65,12 +65,8 @@ async def get_current_user(
         )
     return user
 
-def permitted_actions(db: Session, user: UserDB, module: str, project_id: UUID | None, actions: list[str]) -> list[str]:
-    """The actions of `module` the user may perform, using the same role
-    resolution as has_permission (project role first, then global role)."""
-    if getattr(user, "role", None) == "Superadmin":
-        return list(actions)
-    role_name = None
+def _resolve_role_name(db: Session, user: UserDB, project_id: UUID | None) -> str | None:
+    """Project role first, then the user's global role."""
     if project_id:
         mapping = db.query(ProjectUserDB).filter(
             ProjectUserDB.project_id == project_id,
@@ -79,8 +75,16 @@ def permitted_actions(db: Session, user: UserDB, module: str, project_id: UUID |
         if mapping:
             role = db.query(RoleDB).filter(RoleDB.id == mapping.role_id).first()
             if role:
-                role_name = role.name
-    role_name = role_name or user.role
+                return role.name
+    return user.role
+
+
+def permitted_actions(db: Session, user: UserDB, module: str, project_id: UUID | None, actions: list[str]) -> list[str]:
+    """The actions of `module` the user may perform, using the same role
+    resolution as has_permission (project role first, then global role)."""
+    if getattr(user, "role", None) == "Superadmin":
+        return list(actions)
+    role_name = _resolve_role_name(db, user, project_id)
     if not role_name:
         return []
     rows = db.query(PermissionDB.action).join(RolePermissionDB).join(RoleDB).filter(
@@ -90,6 +94,40 @@ def permitted_actions(db: Session, user: UserDB, module: str, project_id: UUID |
     ).all()
     allowed = {row.action for row in rows}
     return [action for action in actions if action in allowed]
+
+
+def check_permission(db: Session, user: UserDB, project_id: UUID | None, module: str, action: str) -> bool:
+    """Plain permission check (spec 0005): Superadmin always, else the project
+    role, else the global role. has_permission and the chat both use it."""
+    return bool(permitted_actions(db, user, module, project_id, [action]))
+
+
+def require_project_access(
+    user: UserDB,
+    project_id: UUID,
+    db: Session,
+    detail: str = "You do not have access to this project.",
+    projects=None,
+):
+    """Superadmin or Admin, the project owner, or a ProjectUserDB assignment.
+    Returns the project; 404 when it does not exist, 403 without access.
+    `projects` is anything with get_project(project_id); default is the active repository."""
+    if projects is None:
+        from backend.repository.project_repository import get_project_repository
+
+        projects = get_project_repository()
+    project = projects.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if getattr(user, "role", None) in {"Superadmin", "Admin"} or project.owner_id == user.id:
+        return project
+    assignment = db.query(ProjectUserDB.id).filter(
+        ProjectUserDB.project_id == project_id,
+        ProjectUserDB.user_id == user.id,
+    ).first()
+    if not assignment:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+    return project
 
 
 def has_permission(module: str, action: str):
@@ -102,50 +140,25 @@ def has_permission(module: str, action: str):
         user: UserDB = Depends(get_current_user),
         db: Session = Depends(get_db)
     ) -> bool:
-        # Superadmin has unrestricted system-wide permissions
-        if getattr(user, "role", None) == "Superadmin":
-            return True
-
-        # Extract project context from route path parameter
+        project_id = None
         project_id_str = request.path_params.get("project_id")
-
-        role_name = None
         if project_id_str:
             try:
                 project_id = UUID(project_id_str)
-                mapping = db.query(ProjectUserDB).filter(
-                    ProjectUserDB.project_id == project_id,
-                    ProjectUserDB.user_id == user.id
-                ).first()
-                if mapping:
-                    role = db.query(RoleDB).filter(RoleDB.id == mapping.role_id).first()
-                    if role:
-                        role_name = role.name
             except ValueError:
-                pass
+                project_id = None
 
-        # Fallback to the global default role if no project-specific mapping
-        if not role_name:
-            role_name = user.role
+        if check_permission(db, user, project_id, module, action):
+            return True
 
+        role_name = _resolve_role_name(db, user, project_id)
         if not role_name:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access Denied: User role is not defined"
             )
-
-        # Check permission grid entry in database
-        allowed = db.query(RolePermissionDB).join(RoleDB).join(PermissionDB).filter(
-            RoleDB.name == role_name,
-            PermissionDB.module == module,
-            PermissionDB.action == action
-        ).first()
-
-        if not allowed:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access Denied: Role '{role_name}' does not have '{action}' permission for '{module}'"
-            )
-
-        return True
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access Denied: Role '{role_name}' does not have '{action}' permission for '{module}'"
+        )
     return dependency

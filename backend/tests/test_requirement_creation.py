@@ -1,6 +1,7 @@
 """Adding requirements manually or by file import must never replace existing ones."""
 
 import io
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -104,3 +105,12 @@ def test_xlsx_rows_without_ids_each_become_a_requirement(service, project):
     assert len(requirements) == 3
     assert all(r.requirement_id and r.requirement_id.lower() != "nan" for r in requirements)
     assert len({r.requirement_id for r in requirements}) == 3
+
+
+def test_pdf_requirements_can_be_parsed_without_pymupdf(service):
+    pdf_path = Path(__file__).resolve().parents[2] / "Sample-TestCases_HotelApplication.pdf"
+
+    blocks = service.parse_requirements_from_file(pdf_path.name, pdf_path.read_bytes())
+
+    assert blocks
+    assert any(block["description"].strip() for block in blocks)

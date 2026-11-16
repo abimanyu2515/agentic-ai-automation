@@ -16,6 +16,8 @@ _These recommendations keep the build orderly. You can skip any step that does n
 | 3 | Project creation with target URL | Project setup | in-progress |
 | 4 | Role based LLM routing | LLM reliability | in-progress |
 | 5 | Object repository | Locator reliability | in-progress |
+| 6 | Chat assistant | Assistant | in-progress |
+| 7 | Permission checks on data changing routes | Assistant | planned |
 
 ## Existing product
 
@@ -74,6 +76,34 @@ Store each project's pages, UI elements, and ordered locators so generated scrip
   - [x] Harvest during execution: shared extractor, harvest ingest with redaction, Python runner file transport, workspace engine payload, covering AC-16, AC-17, AC-18, AC-19, AC-20, and AC-21
 - [ ] Verify it: `/check verify object repository`
 - [ ] Test it: `/test object repository`
+
+## Assistant
+
+### 6. Chat assistant · in-progress
+A floating chat button on every screen. The assistant answers questions about the selected project's data, explains how the app works, and proposes generate, run, create, edit, and delete actions that run only after the user confirms each one on a card.
+**Done when:** replies stream from any view with project and screen context, threads are saved per user per project on both stores and purged after 90 idle days, every catalog action runs only after confirm with its permission checked (deletes need `DELETE` typed), action cards track live status and refresh the view behind them, and failures, Stop, retry, and rate limits behave as specified.
+- [x] Design it (spec): `/architect chat assistant`
+- Spec: [0005](../specs/0005-chat-assistant/index.md)
+- Code: `backend/services/chat_service.py`, `backend/services/chat_tools.py`, `backend/services/dashboard_metrics.py`, `backend/services/chat_actions.py`, `backend/services/llm.py`, `backend/services/execution_service.py`, `backend/repository/`, `backend/database/`, `backend/prompts/agents/chat_assistant/`, `backend/main.py`, `frontend/js/chat.js`, `frontend/js/api.js`, `frontend/js/app.js`, `frontend/css/styles.css`, `frontend/index.html`
+- [x] Build it: `/develop chat assistant`
+  - [x] One streamed answer end to end: chat role, streaming LLM call, both stores and migration, access helpers, thread routes, floating panel with Markdown and the open item context line, covering AC-1, AC-2, AC-4 to AC-7, AC-9, AC-21, AC-23 to AC-25, AC-27
+  - [x] Answers over project data with read tools, step and size caps, covering AC-8 and AC-9
+  - [x] One action end to end (`generate_scenarios`): propose, confirm, status, expiry, audit, view refresh, restart recovery, covering AC-10 to AC-12 and AC-14 to AC-16, AC-22 (release point)
+  - [x] The rest of the action catalog plus the typed `DELETE` confirm, with execution start moved into services, covering AC-11, AC-13, and AC-15
+  - [x] Failure, Stop, retry, stream cap, rate limit, help mode, retention, the enable flag, tests, and docs, covering AC-1, AC-3, AC-17 to AC-20, AC-24, and AC-26
+- [ ] Verify it: `/check verify chat assistant`
+- [x] Test it: `/test chat assistant`
+
+### 7. Permission checks on data changing routes · planned · from spec 0005
+Add `has_permission` checks to the routes that change data without one today (generate scenarios, generate test cases, execute, batch execute, scenario and test case edit and delete), so the UI enforces the same rules the chat assistant does.
+**Done when:** each of those routes checks its seeded module and action, and a user without the permission gets 403 in the UI as in chat.
+- [ ] Design it (spec): `/architect permission checks on data changing routes`
+
+## Deferred
+
+- Chat assistant keyboard and screen reader support (from spec 0005)
+- Shared chat locks and rate limits for running more than one worker (from spec 0005)
+- Running summary of older chat turns for long threads (from spec 0005)
 
 ## Legend
 
