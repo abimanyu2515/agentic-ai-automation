@@ -17,12 +17,13 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
 
 from playwright.async_api import Page, async_playwright
 from pydantic import BaseModel, Field
 
 from backend.services.llm import DEFAULT_LLM_TIMEOUT, LLMService, LLMServiceError
+from backend.services.object_repository_script import use_object_keys
 
 from .dom_distiller import extract_page_state
 
@@ -237,6 +238,39 @@ async def _option_labels(page: Page, selector: Optional[str]) -> List[str]:
     return list(dict.fromkeys(text.strip() for text in texts if text and text.strip()))
 
 
+# Given the live page and a recorded selector, the object repository key of
+# the element that selector finds, or None (see ObjectKeyResolver). On a miss
+# the resolver may first save the page's elements to the repository and match again.
+ObjectResolver = Callable[[Page, Optional[str]], Awaitable[Optional[str]]]
+
+
+class _SelectorKeys:
+    """Recorded selectors matched to object repository keys.
+
+    A selector matched to two different keys (the same selector on two
+    pages) is ambiguous and keeps its raw form in the script.
+    """
+
+    def __init__(self) -> None:
+        self.keys: Dict[str, str] = {}
+        self.ambiguous: set = set()
+
+    def add(self, selector: str, key: str) -> None:
+        if selector in self.ambiguous:
+            return
+        if self.keys.get(selector, key) != key:
+            self.keys.pop(selector)
+            self.ambiguous.add(selector)
+            return
+        self.keys[selector] = key
+
+    def apply(self, script: str) -> str:
+        if not self.keys:
+            return script
+        logger.info("ScriptGeneratorAgent mapped selectors to object repository keys: count=%s", len(self.keys))
+        return use_object_keys(script, self.keys)
+
+
 def _clean_ts_code(text: Optional[str]) -> str:
     clean_ts_code = re.sub(
         r"^```(?:typescript|ts)?\n?|```$", "", (text or "").strip(), flags=re.IGNORECASE | re.MULTILINE
@@ -253,6 +287,7 @@ async def generate_accurate_test_script(
     llm: Optional[LLMService] = None,
     username: Optional[str] = None,
     password: Optional[str] = None,
+    object_resolver: Optional[ObjectResolver] = None,
 ) -> str:
     """
     Executes test steps against target_url in a live Python Playwright browser,
@@ -260,6 +295,9 @@ async def generate_accurate_test_script(
 
     username and password come from the project vault. The LLM sees only
     placeholders for them; they are substituted when a fill runs.
+
+    With object_resolver, an acted-on element the object repository stores
+    is written as `(await orx(page, '<key>'))` instead of its raw selector.
     """
     if not target_url:
         raise ValueError("target_url is required for live script generation")
@@ -271,8 +309,10 @@ async def generate_accurate_test_script(
     logger.info(
         "ScriptGeneratorAgent started: target_url=%s steps=%s", target_url, len(steps)
     )
+    selector_keys = _SelectorKeys()
     recorded_history = await _record_verified_trace(
-        target_url, steps, test_title, llm, username, password
+        target_url, steps, test_title, llm, username, password,
+        object_resolver=object_resolver, selector_keys=selector_keys,
     )
 
     # Final Phase: Synthesize the complete TypeScript @playwright/test (.spec.ts) file
@@ -303,7 +343,7 @@ Strict Requirements:
         timeout=DEFAULT_LLM_TIMEOUT,
         temperature=1.0,
     )
-    clean_ts_code = _clean_ts_code(final_text)
+    clean_ts_code = selector_keys.apply(_clean_ts_code(final_text))
 
     logger.info(
         "ScriptGeneratorAgent completed: verified_actions=%s", len(recorded_history)
@@ -325,6 +365,7 @@ async def generate_data_driven_template(
     password: Optional[str] = None,
     field_notes: str = "",
     select_options: Optional[Dict[str, List[str]]] = None,
+    object_resolver: Optional[ObjectResolver] = None,
 ) -> str:
     """
     Records one dataset's run on the live target app, then writes a reusable
@@ -367,9 +408,11 @@ async def generate_data_driven_template(
         target_url,
         len(run_steps),
     )
+    selector_keys = _SelectorKeys()
     recorded_history = await _record_verified_trace(
         target_url, run_steps, test_title, llm, username, password, run_context,
         select_options=select_options,
+        object_resolver=object_resolver, selector_keys=selector_keys,
     )
 
     field_lines = "\n".join(
@@ -435,7 +478,21 @@ Strict Requirements:
         "ScriptGeneratorAgent template recording completed: verified_actions=%s",
         len(recorded_history),
     )
-    return clean_ts_code
+    # Selectors the template rewrote with markers no longer match and stay raw.
+    return selector_keys.apply(clean_ts_code)
+
+
+async def _object_key(
+    object_resolver: Optional[ObjectResolver], page: Page, selector: Optional[str]
+) -> Optional[str]:
+    """The object repository key for selector, or None. A failing resolver never stops recording."""
+    if object_resolver is None or not selector:
+        return None
+    try:
+        return await object_resolver(page, selector)
+    except Exception as err:
+        logger.info("ScriptGeneratorAgent object key lookup failed: selector=%s error=%s", selector, err)
+        return None
 
 
 async def _record_verified_trace(
@@ -447,10 +504,15 @@ async def _record_verified_trace(
     password: Optional[str],
     run_context: str = "",
     select_options: Optional[Dict[str, List[str]]] = None,
+    object_resolver: Optional[ObjectResolver] = None,
+    selector_keys: Optional[_SelectorKeys] = None,
 ) -> List[Dict[str, Any]]:
     """Runs each step on the live page and returns the actions that worked.
 
     Fills select_options, when given, with each picked dropdown's option labels.
+    With object_resolver and selector_keys, records the object repository key
+    of each acted-on element the repository stores. Keys stay out of the trace,
+    so the synthesis prompt never sees them.
     """
     headless = os.environ.get("HEADLESS_AGENT", "true").lower() != "false"
     recorded_history: List[Dict[str, Any]] = []
@@ -572,6 +634,7 @@ Rules:
                             if decision.action in ("click", "select_option")
                             else {}
                         )
+                        object_key = await _object_key(object_resolver, page, decision.selector)
                         await execute_live_playwright_action(
                             page, decision.action, decision.selector, action_value
                         )
@@ -589,6 +652,8 @@ Rules:
                         if facts:
                             entry["element"] = facts
                         recorded_history.append(entry)
+                        if object_key and selector_keys is not None:
+                            selector_keys.add(decision.selector, object_key)
                         if decision.action in _ASSERT_ACTIONS:
                             step_asserted = True
                         if decision.action == "select_option" and select_options is not None:

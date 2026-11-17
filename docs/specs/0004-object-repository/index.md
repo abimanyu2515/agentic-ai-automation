@@ -350,6 +350,9 @@ Tracer Bullet: the first slice carries one manually created element through the 
 ## Follow-up
 
 - [ ] Decide whether to delete `backend/services/locator_resolver.py` and `docs/features/locator-fallback.md`, or fold their strategy list into the reconnaissance locator builder.
+- [x] Show a per page detection score (run lookups that found the element, over all lookups). It is computed on read from the existing locator `success_count` and element `failure_count`, with no new storage. See `page_detection_score` and `docs/features/object-repository.md`.
+- [x] Make live-verified scripts use repository keys, so their runs feed health and the detection score. Acted-on elements are matched to stored elements by DOM node while recording, and matching `page.locator(...)` calls are rewritten to `orx` keys after the script is written. See `ObjectKeyResolver` and `use_object_keys`.
+- [x] Let the generator fill the repository while it records (update 2026-11-17). On a key miss, `ObjectKeyResolver` snapshots the page with the shared extractor once per path (capped by `harvest_max_pages`, deadline `harvest_page_budget_ms`, off with `harvest_enabled`), ingests it with the harvest rules (AC-19, AC-20 redaction plus the case's test data), and matches again. Before this, a page no scan or run had reached kept raw selectors, so its first run fed no score until a regeneration.
 - [ ] Consider a "Test locator" action (`POST .../elements/{id}/check`) that checks locators against the live page.
 - [ ] Add Selenium health feedback once Selenium execution exists.
 - [ ] Decide how the imported POM framework and the object repository should relate (for example, page classes that wrap stored elements).

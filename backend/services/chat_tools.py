@@ -133,7 +133,7 @@ TOOL_DEFINITIONS = [
     ),
     _schema("get_execution", "One execution: status, error message, failed step, analysis summary, and which artifacts exist.", {"execution_id": _UUID}, ["execution_id"]),
     _schema("get_dashboard_metrics", "The project's dashboard numbers: totals, pass ratio, coverage, approval and defect counts, recent executions."),
-    _schema("list_object_repository_pages", "List the project's object repository pages and their element counts.", {"limit": _LIMIT}),
+    _schema("list_object_repository_pages", "List the project's object repository pages, their element counts, and each page's locator detection score (percent of run lookups that found the element; null before any run).", {"limit": _LIMIT}),
 ]
 
 READ_TOOL_NAMES = frozenset(tool["function"]["name"] for tool in TOOL_DEFINITIONS)
@@ -465,6 +465,15 @@ class ChatToolbox:
             store = get_object_repository_store(self.repo)
         if store is None:
             return {"items": [], "total": 0}
+        from backend.services.object_repository_service import page_detection_score
+
         pages = store.load(project.id).active_pages()
-        rows = [{"id": str(p.id), "name": p.name, "url_pattern": p.url_pattern, "elements": len(p.active_elements())} for p in pages]
+        rows = [
+            {
+                "id": str(p.id), "name": p.name, "url_pattern": p.url_pattern,
+                "elements": len(p.active_elements()),
+                "detection_score": page_detection_score(p)["percent"],
+            }
+            for p in pages
+        ]
         return {"items": rows[: _limit(arguments)], "total": len(rows)}

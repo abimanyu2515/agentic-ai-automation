@@ -465,6 +465,70 @@ class WorkflowService:
                 type(exc).__name__,
             )
 
+    def _object_key_resolver(self, project_id: UUID, secrets: list | None = None):
+        """Matches live elements to object repository keys while a script is recorded.
+
+        With harvesting on, the resolver also snapshots each new page where it
+        misses and ingests it like a run harvest (adds and updates only), so
+        the first generation writes keys even on an empty repository. secrets
+        are redacted on top of the vault credentials (test data values).
+
+        Returns None when the repository can't be read, or when it is empty and
+        harvesting is off, so the generator keeps raw selectors. The repository
+        is loaded here, outside the generator's event loop.
+        """
+        from backend.services.object_repository_matcher import ObjectKeyResolver
+        from backend.services.object_repository_service import _settings
+
+        try:
+            repository = self._object_repository().load(project_id)
+            settings = _settings()
+        except SQLAlchemyError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Object repository load for script generation failed: project_id=%s error=%s",
+                project_id,
+                type(exc).__name__,
+            )
+            return None
+        if not settings.harvest_enabled:
+            if not any(page.active_elements() for page in repository.active_pages()):
+                return None
+            return ObjectKeyResolver(repository)
+        return ObjectKeyResolver(
+            repository,
+            harvest=self._generation_harvest(project_id, secrets or []),
+            harvest_budget_seconds=settings.harvest_page_budget_ms / 1000,
+            max_pages=settings.harvest_max_pages,
+        )
+
+    def _generation_harvest(self, project_id: UUID, secrets: list):
+        """Ingest one page the script generator visited; returns the reloaded repository."""
+        from backend.services.object_repository_harvest import clean_elements
+
+        redact: list = list(secrets)
+        try:
+            from backend.services.vault_service import VaultService
+
+            redact.extend(VaultService().get_credentials(str(project_id)))
+        except Exception:
+            logger.warning("Generation harvest redaction could not load vault credentials: project_id=%s", project_id)
+
+        def harvest(path: str, elements: list):
+            service = self._object_repository()
+            counts = service.ingest_recon(project_id, path, clean_elements(elements, redact), mark_missing=False)
+            logger.info(
+                "Object repository harvest during generation: project_id=%s path=%s added=%s updated=%s",
+                project_id,
+                path,
+                counts["added"],
+                counts["updated"],
+            )
+            return service.load(project_id)
+
+        return harvest
+
     def _live_template_recorder(self, project):
         """Records data-driven templates by running one dataset on the target app.
 
@@ -487,7 +551,11 @@ class WorkflowService:
         username, password = VaultService().get_credentials(str(project.id))
 
         def record(**kwargs) -> str:
-            return asyncio.run(recorder(username=username, password=password, **kwargs))
+            # One resolver per recording, so it redacts that dataset's values.
+            sample_data = kwargs.get("sample_data") or {}
+            resolver = self._object_key_resolver(project.id, secrets=list(sample_data.values()))
+            extra = {"object_resolver": resolver} if resolver is not None else {}
+            return asyncio.run(recorder(username=username, password=password, **extra, **kwargs))
 
         return record
 
@@ -837,6 +905,11 @@ class WorkflowService:
 
         # Login steps need the project's credentials; the generator keeps them out of prompts.
         username, password = VaultService().get_credentials(str(project_id))
+        # Elements the object repository stores are written as orx keys, so runs feed their health.
+        from backend.services.object_repository_harvest import values_from_test_data
+
+        resolver = self._object_key_resolver(project_id, secrets=values_from_test_data(test_case))
+        extra = {"object_resolver": resolver} if resolver is not None else {}
         script = asyncio.run(
             script_generator(
                 target_url,
@@ -844,6 +917,7 @@ class WorkflowService:
                 test_case.title,
                 username=username,
                 password=password,
+                **extra,
             )
         )
         test_case.automation_framework = automation_framework
@@ -853,6 +927,7 @@ class WorkflowService:
         test_case.script_validation_attempts = 0
         test_case.script_validation_completed_at = None
         test_case.script_validation_diagnostic = None
+        self._flag_unknown_keys(project_id, test_case)
         self.repo.save_test_cases([test_case])
         return test_case
 

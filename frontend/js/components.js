@@ -499,10 +499,9 @@ export const Components = {
           ` : ''}
         </tr>
 
-        <tr id="tc-expanded-row-${tc.id}" style="display: ${window.appInstance?.expandedTestCaseIds?.has(tc.id) ? 'table-row' : 'none'}; background-color: rgba(255, 255, 255, 0.01);">
-          <td></td>
-          <td colspan="${handlers.onGenerateTestData ? 8 : 7}" style="padding: 16px 24px; border-top: 1px dashed var(--border-color); border-bottom: 1px solid var(--border-color);">
-            <div style="display: flex; flex-direction: column; gap: 16px;">
+        <tr id="tc-expanded-row-${tc.id}" class="tc-expanded-row" style="display: ${window.appInstance?.expandedTestCaseIds?.has(tc.id) ? 'table-row' : 'none'};">
+          <td colspan="${handlers.onGenerateTestData ? 10 : 9}" class="tc-expanded-cell">
+            <div class="tc-detail-panel">
               
               <!-- Preconditions -->
               ${tc.preconditions && tc.preconditions.length > 0 ? `
@@ -535,8 +534,8 @@ export const Components = {
                   <h4 style="font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; letter-spacing: 0.5px;">
                     Generated Test Data (${tc.test_data_sets.length})
                   </h4>
-                  <div class="table-container" style="max-height: 320px; overflow: auto;">
-                    <table class="custom-table">
+                  <div class="tc-testdata-scroll" tabindex="0" role="region" aria-label="Generated test data for ${escapeHTML(tc.test_case_ref_id || tc.title)}">
+                    <table class="custom-table tc-testdata-table">
                       <thead>
                         <tr>
                           <th>Dataset</th>
@@ -639,7 +638,7 @@ export const Components = {
     }).join('');
 
     return `
-      <div class="table-container">
+      <div class="table-container tc-table-container">
         <table class="custom-table">
           <thead>
             <tr>

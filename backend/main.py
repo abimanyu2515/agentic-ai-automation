@@ -2633,8 +2633,8 @@ def _objrepo_audit(db: Session, user: UserDB, project_id: UUID):
     return lambda action, changes: log_audit(db, user.id, project_id, action, "OBJECT_REPOSITORY", changes)
 
 
-def _page_response(page, counts: dict | None = None) -> PageResponse:
-    return PageResponse(**page.model_dump(exclude={"elements"}), counts=counts)
+def _page_response(page, counts: dict | None = None, score: dict | None = None) -> PageResponse:
+    return PageResponse(**page.model_dump(exclude={"elements"}), counts=counts, score=score)
 
 
 def _element_response(page, element) -> ElementResponse:
@@ -2667,7 +2667,7 @@ def list_object_pages(
         pages, total = object_repository_service.list_pages(project_id, limit, offset)
     except ObjectRepositoryError as exc:
         raise _objrepo_error(exc)
-    return PageListResponse(pages=[_page_response(item["page"], item["counts"]) for item in pages], total=total)
+    return PageListResponse(pages=[_page_response(item["page"], item["counts"], item["score"]) for item in pages], total=total)
 
 
 @app.post(f"{_OBJREPO}/pages", response_model=PageResponse, status_code=status.HTTP_201_CREATED)

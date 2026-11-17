@@ -15,6 +15,7 @@ await btn.click();
 
 * **Reconnaissance** fills it automatically for projects marked as a safe test environment: during script generation, grounded validation, or **Scan now**. Pages are matched by URL pattern. An unmatched path creates a page whose pattern replaces numeric and UUID segments with `*` (`/booking/12345/details` becomes `/booking/*/details`).
 * **Test runs** harvest the pages they visit, on every project and on both runners (the workspace engine and the Python runner). A run already logs in and follows the real flow, so it reaches pages behind login that a scan can't. Each distinct path the page settles on (1000 ms with no navigation) is snapshotted once per execution, for at most `harvest_max_pages` paths. A harvest only adds and updates elements: it never marks one `missing` and never changes `last_scanned_at`. Failed runs are harvested too, and harvesting never changes a run's result.
+* **Script generation** harvests too. When the live-verified generator acts on an element the repository doesn't have, it snapshots that page with the same extractor, ingests it with the run harvest rules (adds and updates only, same redaction plus the test case's test data), and matches again. Each path is snapshotted at most once per generation, for at most `harvest_max_pages` paths, and only when `harvest_enabled` is on.
 * **Testers** add and fix pages and elements in the **Object Repository** view, or through the API. A tester edit marks the element `manually_edited`, and neither reconnaissance nor a harvest changes it again.
 
 Reconnaissance and both runners use one extractor, `backend/playwrightt/lib/object-harvest.js`, so a scan and a run see the same element the same way and it ends up as one element.
@@ -33,6 +34,40 @@ On a rescan, reconnaissance matches elements by fingerprint (role, type, accessi
 | `missing` | reconnaissance scanned the page and did not see a recon owned element |
 
 Each lookup at run time logs `[OBJREPO] {"key", "index", "tried", "ok"}`. One execution updates each element once, by its worst outcome, and the same execution is never applied twice. `broken` elements are left out of the generator's prompt.
+
+## Detection score
+
+Each page in the page list shows a detection score: the share of run lookups where one of the page's locators found its element. The selected page also shows the counts above the elements table.
+
+```
+successes = sum of success_count over the locators of the page's active elements
+lookups   = successes + sum of failure_count over the page's active elements
+score     = successes / lookups, as a percent with one decimal
+```
+
+- A lookup where a backup locator found the element counts as detected. A lookup where every locator failed counts against the score.
+- Until a run uses one of the page's elements, the page shows "Not run yet" (`percent` is `null`).
+- The chip is green at 90% or more, amber at 70% or more, and red below 70%. The text always states the value.
+- Deleted elements are left out.
+- The score is computed on read from the existing counters, so nothing new is stored. A tester edit resets the element's failure count, but unchanged locators keep their success counts. After an edit, failures are counted from the edit onward.
+- Only scripts that reference elements by key feed the score. See [Live-verified scripts](#live-verified-scripts).
+
+## Live-verified scripts
+
+For a Playwright project with a target URL, "Generate script" records the steps on the live site and writes the script from the selectors that worked. While it records, it checks each acted-on element against the repository, and writes the element's key instead of its raw selector when it finds a match:
+
+```ts
+// recorded:  await page.locator('[data-test="username"]').fill(...)
+// saved:     await (await orx(page, 'home.username')).fill(...)
+```
+
+- **Matching is by DOM node, not by selector text.** Before each action, `ObjectKeyResolver` resolves the recorded selector, then walks the stored elements of every page whose pattern matches the current URL. For each element it takes the first visible locator match, the one `orx` would act on at run time. A match means that locator finds the same node. If it finds a different node, the element is not a match.
+- **Only exact `page.locator('<recorded selector>')` calls are rewritten**, in any quote style. Selectors the model rewrote (with test data markers, loops or filters) stay raw.
+- **Negative and conditional checks keep the raw locator.** That covers lines with `.not.`, `toBeHidden`, `toHaveCount(`, `isVisible(`, `isHidden(`, `.count(` or a hidden or detached wait. `orx` waits for a visible element, so it would break those checks.
+- **Elements the repository doesn't store are harvested first.** On a miss, the generator saves the page's elements (once per path) and matches again, so one generate and one run fill the detection score even on a new project. An element the extractor doesn't capture stays raw, and so does a selector that matched different keys on different pages.
+- **The model never sees keys.** The rewrite happens after it writes the script, so its prompts are unchanged.
+- **Existing scripts don't change.** Regenerate a script to pick up keys. Matching needs the live page, so stored scripts can't be converted in place.
+- **Unknown keys are flagged.** After generation, a key the repository no longer has sets the validation diagnostic `Unknown object repository keys: ...`, as on the other generation paths.
 
 ## Configuration
 
@@ -62,7 +97,7 @@ Module `ObjectRepository`: Admin gets every action, Project Manager gets view, c
 * Selenium scripts get stored locators through `orx(driver, key)`, but no health feedback yet.
 * Scan status lives in memory per process. A restart loses an in flight scan's status (the data it already saved stays).
 * An element whose locators all fail costs up to `5 × locator_timeout_ms` before the step errors.
-* Harvesting runs on every project, not only safe test environments, and `harvest_enabled` is global. A run's first visit to a page costs up to `harvest_page_budget_ms`.
+* Harvesting runs on every project, not only safe test environments, and `harvest_enabled` is global. A run's first visit to a page costs up to `harvest_page_budget_ms`, and so does the generator's first miss on a page.
 * A page the test leaves or ends on within 1000 ms of arriving never settles, so it isn't harvested.
 * A run sees pages mid flow, so it can add controls that exist only in that state (an open dialog's button). Runs never mark elements missing and scans can't reach pages behind login, so delete those by hand.
 * Hash routed apps (`#/cart`) count as one path, so only their first settled view is harvested.
@@ -76,6 +111,7 @@ Module `ObjectRepository`: Admin gets every action, Project Manager gets view, c
 | Stores (JSON, PostgreSQL) | `backend/repository/object_repository_store.py`, `backend/repository/postgres_object_repository_store.py` |
 | Business rules | `backend/services/object_repository_service.py` |
 | Render and strip | `backend/services/object_repository_script.py` |
+| Live-verified key matching | `backend/services/object_repository_matcher.py` (`ObjectKeyResolver`), `use_object_keys` in `object_repository_script.py`, `backend/agents/script_generator_agent.py` |
 | Scan job | `backend/services/object_repository_scan.py` |
 | Shared extractor | `backend/playwrightt/lib/object-harvest.js` |
 | Reconnaissance extraction | `backend/agents/application_reconnaissance_agent.py` (`_extract_object_elements`) |

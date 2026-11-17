@@ -244,7 +244,7 @@ def test_generate_playwright_script_uses_read_only_evidence_and_repairs_once():
 def test_generate_playwright_script_uses_live_verified_generator_for_target_url():
     calls = []
 
-    async def fake_generator(target_url, steps, test_title, username=None, password=None):
+    async def fake_generator(target_url, steps, test_title, username=None, password=None, **kwargs):
         calls.append((target_url, steps, test_title, username, password))
         return "import { test, expect } from '@playwright/test';\ntest('live', async () => {});"
 
@@ -266,6 +266,136 @@ def test_generate_playwright_script_uses_live_verified_generator_for_target_url(
     assert ws.repo.get_test_case(tc.id).playwright_script == updated_tc.playwright_script
     # The live path does not generate datasets.
     assert updated_tc.test_data_sets == []
+
+
+def test_live_verified_generator_gets_an_object_key_resolver_and_unknown_keys_are_flagged():
+    from backend.services.object_repository_matcher import ObjectKeyResolver
+    from backend.services.object_repository_service import ObjectRepositoryService
+
+    resolvers = []
+
+    async def fake_generator(target_url, steps, test_title, username=None, password=None, **kwargs):
+        resolvers.append(kwargs.get("object_resolver"))
+        return "\n".join([
+            "import { test, expect } from '@playwright/test';",
+            "test('live', async ({ page }) => {",
+            "  await (await orx(page, 'home.username')).fill('x');",
+            "  await (await orx(page, 'home.ghost')).click();",
+            "});",
+        ])
+
+    class FakeVaultService:
+        def get_credentials(self, project_id):
+            return "vault-user", "vault-pass"
+
+    ws = WorkflowService(script_generator=fake_generator)
+    project, tc = _data_driven_case(ws)
+    objects = ObjectRepositoryService(project_repo=ws.repo)
+    home = objects.create_page(project.id, "home", "/")
+    objects.create_element(project.id, home.id, "username", "input", [{"strategy": "css", "value": "#user"}])
+
+    with mock.patch("backend.services.vault_service.VaultService", FakeVaultService):
+        updated_tc = ws.generate_playwright_script(project.id, tc.id)
+
+    assert len(resolvers) == 1 and isinstance(resolvers[0], ObjectKeyResolver)
+    assert updated_tc.script_validation_status == "unverified"
+    assert updated_tc.script_validation_diagnostic == "Unknown object repository keys: home.ghost"
+
+
+def _object_repository_settings(**overrides):
+    from backend.config.settings import ObjectRepositoryConfig
+
+    return ObjectRepositoryConfig(**overrides)
+
+
+def test_live_verified_generator_gets_no_resolver_when_the_repository_is_empty_and_harvest_is_off():
+    received = []
+
+    async def fake_generator(target_url, steps, test_title, username=None, password=None, **kwargs):
+        received.append(kwargs)
+        return "import { test, expect } from '@playwright/test';\ntest('live', async () => {});"
+
+    class FakeVaultService:
+        def get_credentials(self, project_id):
+            return None, None
+
+    ws = WorkflowService(script_generator=fake_generator)
+    project, tc = _data_driven_case(ws)
+
+    with mock.patch("backend.services.vault_service.VaultService", FakeVaultService), \
+         mock.patch(
+             "backend.services.object_repository_service._settings",
+             return_value=_object_repository_settings(harvest_enabled=False),
+         ):
+        updated_tc = ws.generate_playwright_script(project.id, tc.id)
+
+    assert received == [{}]
+    assert updated_tc.script_validation_diagnostic is None
+
+
+def test_empty_repository_gets_a_harvesting_resolver_that_redacts_and_ingests():
+    from backend.services.object_repository_matcher import ObjectKeyResolver
+    from backend.services.object_repository_service import ObjectRepositoryService
+
+    resolvers = []
+
+    async def fake_generator(target_url, steps, test_title, username=None, password=None, **kwargs):
+        resolvers.append(kwargs.get("object_resolver"))
+        return "import { test, expect } from '@playwright/test';\ntest('live', async () => {});"
+
+    ws = WorkflowService(script_generator=fake_generator)
+    project, tc = _data_driven_case(ws)
+    tc.test_data = {"coupon_code": "SECRET-COUPON"}
+    ws.repo.save_test_cases([tc])
+
+    with mock.patch("backend.services.vault_service.VaultService", _FakeVaultService), \
+         mock.patch(
+             "backend.services.object_repository_service._settings",
+             return_value=_object_repository_settings(harvest_page_budget_ms=4000, harvest_max_pages=7),
+         ):
+        ws.generate_playwright_script(project.id, tc.id)
+
+        resolver = resolvers[0]
+        assert isinstance(resolver, ObjectKeyResolver)
+        assert resolver.harvest is not None
+        assert resolver.harvest_budget_seconds == 4.0 and resolver.max_pages == 7
+
+        repository = resolver.harvest("/checkout", [
+            {"element_type": "input", "label": "Coupon", "placeholder": "", "attributes": {"id": "coupon"},
+             "locators": [{"strategy": "css", "value": "#coupon", "options": {}, "match_count": 1}]},
+            {"element_type": "input", "label": "vault-user", "placeholder": "", "attributes": {},
+             "locators": [{"strategy": "label", "value": "vault-user", "options": {}, "match_count": 1}]},
+            {"element_type": "button", "label": "SECRET-COUPON", "placeholder": "", "attributes": {},
+             "locators": [{"strategy": "role", "value": "button", "options": {"name": "SECRET-COUPON"}, "match_count": 1}]},
+        ])
+
+    stored = ObjectRepositoryService(project_repo=ws.repo).load(project.id)
+    pages = stored.active_pages()
+    assert [page.url_pattern for page in pages] == ["/checkout"]
+    values = [loc.value for element in pages[0].active_elements() for loc in element.locators]
+    assert values == ["#coupon"]
+    assert [page.url_pattern for page in repository.active_pages()] == ["/checkout"]
+
+
+def test_template_recorder_builds_a_resolver_per_recording_with_its_dataset_as_secrets():
+    ws = WorkflowService(template_recorder=lambda **kwargs: None)
+    project, _ = _data_driven_case(ws, safe=True)
+    seen = []
+
+    async def recorder(**kwargs):
+        return "script"
+
+    ws.template_recorder = recorder
+    with mock.patch("backend.services.vault_service.VaultService", _FakeVaultService), \
+         mock.patch.object(
+             WorkflowService, "_object_key_resolver",
+             side_effect=lambda project_id, secrets=None: seen.append(secrets),
+         ):
+        record = ws._live_template_recorder(project)
+        record(sample_data={"coupon_code": "OLD-000"})
+        record(sample_data={"coupon_code": "OLD-003"})
+
+    assert seen == [["OLD-000"], ["OLD-003"]]
 
 
 def test_generate_playwright_script_uses_saved_datasets_over_live_generator():

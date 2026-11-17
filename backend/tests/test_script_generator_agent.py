@@ -557,3 +557,82 @@ def test_missing_trace_clicks_ignores_quote_style_and_data_valued_selectors():
 
     assert agent._missing_trace_clicks(script, history, {"tier": "Silver"}) == []
     assert agent._missing_trace_clicks("", history, {"tier": "Silver"}) == ['a[href="quote.php"]']
+
+
+# ---------------------------------------------------------- object repository keys
+
+_LOGIN_SCRIPT = "\n".join([
+    "import { test, expect } from '@playwright/test';",
+    "test('Login', async ({ page }) => {",
+    "  await page.locator('[data-test=\"username\"]').fill(process.env.TARGET_USERNAME!);",
+    "  await page.locator('#login').click();",
+    "});",
+])
+
+
+def _resolver(keys):
+    async def resolve(page, selector):
+        return keys.get(selector)
+
+    return resolve
+
+
+def test_stored_elements_are_written_as_object_repository_keys():
+    llm = _ScriptedLLM(
+        [
+            _decision("fill", '[data-test="username"]', "standard_user"),
+            _decision("click", "#login"),
+            _decision("done"),
+        ],
+        _LOGIN_SCRIPT,
+    )
+
+    script, _, _ = _run(
+        llm, ["Log in"], object_resolver=_resolver({'[data-test="username"]': "home.username"})
+    )
+
+    assert "(await orx(page, 'home.username')).fill(process.env.TARGET_USERNAME!)" in script
+    # An element the repository doesn't store keeps its verified selector.
+    assert "page.locator('#login').click()" in script
+    # The model never sees keys or orx; only the finished script changes.
+    assert "orx" not in llm.synthesis_prompt and "home.username" not in llm.synthesis_prompt
+
+
+def test_a_failing_resolver_keeps_raw_selectors_and_recording_goes_on():
+    async def broken(page, selector):
+        raise RuntimeError("lookup failed")
+
+    llm = _ScriptedLLM(
+        [_decision("fill", '[data-test="username"]', "standard_user"), _decision("click", "#login"), _decision("done")],
+        _LOGIN_SCRIPT,
+    )
+
+    script, page, _ = _run(llm, ["Log in"], object_resolver=broken)
+
+    assert script == _LOGIN_SCRIPT
+    assert [action for action, _, _ in page.actions] == ["fill", "click"]
+
+
+def test_a_failed_action_records_no_key():
+    llm = _ScriptedLLM(
+        [_decision("click", "#missing"), _decision("click", "#login"), _decision("done")],
+        "await page.locator('#missing').click();\nawait page.locator('#login').click();",
+    )
+
+    script, _, _ = _run(
+        llm, ["Log in"], object_resolver=_resolver({"#missing": "home.missing", "#login": "home.login"})
+    )
+
+    assert script == "await page.locator('#missing').click();\nawait (await orx(page, 'home.login')).click();"
+
+
+def test_a_selector_matched_to_two_keys_stays_raw():
+    keys = agent._SelectorKeys()
+    keys.add("#menu", "home.menu")
+    keys.add("#menu", "inventory_html.menu")
+    keys.add("#menu", "home.menu")
+    keys.add("#login", "home.login")
+
+    script = keys.apply("await page.locator('#menu').click();\nawait page.locator('#login').click();")
+
+    assert script == "await page.locator('#menu').click();\nawait (await orx(page, 'home.login')).click();"

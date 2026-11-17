@@ -294,3 +294,45 @@ def strip_block(script: str | None) -> str | None:
         end = _helper_end(lines, start)
     stripped = "\n".join(lines[:start] + lines[end:])
     return strip_block(stripped) if stripped != script else stripped
+
+
+# A page.locator call with one quoted selector, for example
+# page.locator('[data-test="username"]'). Not a locator chained off another
+# locator or another object (row.locator, this.page.locator).
+_PAGE_LOCATOR = re.compile(
+    r"""(?<![\w$.])page\.locator\(\s*(?P<quote>['"`])(?P<selector>(?:\\.|(?!(?P=quote)).)*)(?P=quote)\s*\)"""
+)
+_ESCAPE = re.compile(r"\\(.)")
+# orx waits for a visible element, so a line that checks for absence or
+# branches on visibility must keep its raw locator.
+_ORX_UNSAFE_LINE = re.compile(
+    r"""\.not\.|toBeHidden|toHaveCount\(|isVisible\(|isHidden\(|\.count\(|state:\s*['"](?:hidden|detached)['"]"""
+)
+
+
+def _selector_form(selector: str) -> str:
+    """A selector compared without regard to its quote style."""
+    return selector.replace('"', "'")
+
+
+def use_object_keys(script: str, selector_keys: dict[str, str]) -> str:
+    """Replace page.locator(<selector>) with the object repository key the selector was matched to.
+
+    selector_keys maps a recorded selector to a key such as 'home.username'.
+    Only exact selectors are replaced (quote style ignored), and lines with
+    negative or conditional visibility checks are left as they are.
+    """
+    if not script or not selector_keys:
+        return script
+    keys = {_selector_form(selector): key for selector, key in selector_keys.items()}
+
+    def replace(match: re.Match) -> str:
+        selector = _ESCAPE.sub(r"\1", match.group("selector"))
+        key = keys.get(_selector_form(selector))
+        return f"(await orx(page, '{key}'))" if key else match.group(0)
+
+    lines = script.split("\n")
+    for index, line in enumerate(lines):
+        if "page.locator(" in line and not _ORX_UNSAFE_LINE.search(line):
+            lines[index] = _PAGE_LOCATOR.sub(replace, line)
+    return "\n".join(lines)
