@@ -218,6 +218,23 @@ def _locator_summary(element: ObjectElement | None) -> list[str]:
     return [f"{locator.strategy}={locator.value}" for locator in element.locators]
 
 
+def page_detection_score(page: ObjectPage) -> dict:
+    """How often a page's locators found their element in test runs.
+
+    Each successful lookup adds one to the winning locator's success_count,
+    and each lookup where every locator failed adds one to the element's
+    failure_count (see apply_run_markers). A backup win counts as detected.
+    percent is None until a run has used one of the page's elements.
+    """
+    successes = failures = 0
+    for element in page.active_elements():
+        successes += sum(locator.success_count for locator in element.locators)
+        failures += element.failure_count
+    lookups = successes + failures
+    percent = round(100 * successes / lookups, 1) if lookups else None
+    return {"percent": percent, "successes": successes, "lookups": lookups}
+
+
 def _key_reference(key: str) -> re.Pattern:
     return re.compile(r"""(['"`])""" + re.escape(key) + r"\1")
 
@@ -353,7 +370,7 @@ class ObjectRepositoryService:
             counts = {health: 0 for health in HEALTH_STATES}
             for element in page.active_elements():
                 counts[element.health] = counts.get(element.health, 0) + 1
-            result.append({"page": page, "counts": counts})
+            result.append({"page": page, "counts": counts, "score": page_detection_score(page)})
         return result, len(pages)
 
     def create_page(self, project_id: UUID, name: str, url_pattern: str, audit: Audit | None = None) -> ObjectPage:

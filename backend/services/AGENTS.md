@@ -20,6 +20,12 @@ Services contain backend business behavior that supports API routes and workflow
 | `backend/services/token_usage_service.py` | Token usage recording (background writer), pricing, aggregation, budget and UI settings |
 | `backend/services/llm_context.py` | Attribution context (agent, operation, project, run) for token usage records |
 | `backend/services/navigation_planner.py` | Target agnostic navigation over generic states from `backend/config/app_states.json` |
+| `backend/services/chat_service.py` | Chat assistant turn loop (spec 0005): saves messages, streams SSE events, runs read tools, handles action confirm |
+| `backend/services/chat_tools.py` | Project scoped read tools the chat model may call |
+| `backend/services/chat_actions.py` | Chat action catalog, proposal validation, and `ChatActionExecutor` for confirmed actions |
+| `backend/services/script_generation_jobs.py` | In memory background jobs for live verified script generation; the page polls them |
+| `backend/services/execution_service.py` | Batch execution runs and their live event logs |
+| `backend/services/dashboard_metrics.py` | Dashboard metric computation, shared by the dashboard and chat tools |
 
 ## Conventions
 
@@ -35,5 +41,9 @@ Services contain backend business behavior that supports API routes and workflow
 
 * `playwright_runner.py` is the only direct Playwright subprocess integration.
 * Never persist passwords or use a global application URL in place of the selected project's target URL.
+* The chat assistant is a service level loop, not a `WorkflowState` agent. Pass every dependency through its constructor so tests inject an LLM stub and an in memory store.
+* The chat model can only propose an action through a `propose_<type>` tool. Nothing runs until the user confirms, and confirm runs the saved `params`, never values the browser sends.
+* Every chat tool checks that each ID belongs to the current project and never returns credentials, vault data, passwords, or API keys.
+* Script generation jobs live in memory. A backend restart loses running jobs, and polling then reports the job as not found.
 
 _Drafted by /audit from the repo, worth a quick human pass. Edit freely: once a line stops matching this draft, later runs treat it as curated and will flag rather than overwrite it._

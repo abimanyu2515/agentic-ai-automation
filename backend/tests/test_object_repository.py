@@ -174,6 +174,57 @@ def test_render_then_strip_returns_the_original_and_is_idempotent():
     assert scripts.strip_block(hand_edited) == SCRIPT
 
 
+_RECORDED = "\n".join([
+    "import { test, expect } from '@playwright/test';",
+    "test('Login', async ({ page }) => {",
+    "  await page.locator('[data-test=\"username\"]').fill(process.env.TARGET_USERNAME!);",
+    "  await page.locator(\"[data-test='password']\").fill(process.env.TARGET_PASSWORD!);",
+    "  await page.locator(\"[data-test=\\\"login-button\\\"]\").click();",
+    "  await expect(page.locator('[data-test=\"username\"]')).toBeVisible();",
+    "  await expect(page.locator('[data-test=\"username\"]')).not.toBeVisible();",
+    "  await expect(page.locator('[data-test=\"username\"]')).toBeHidden();",
+    "  if (await page.locator('[data-test=\"username\"]').isVisible()) {}",
+    "  expect(await page.locator('[data-test=\"username\"]').count()).toBe(1);",
+    "  await row.locator('[data-test=\"username\"]').click();",
+    "  await page.locator('#other').click();",
+    "});",
+])
+_SELECTOR_KEYS = {
+    '[data-test="username"]': "home.username",
+    '[data-test="password"]': "home.password",
+    '[data-test="login-button"]': "home.login",
+}
+
+
+def test_use_object_keys_rewrites_matched_selectors_in_any_quote_style():
+    lines = scripts.use_object_keys(_RECORDED, _SELECTOR_KEYS).split("\n")
+    assert lines[2] == "  await (await orx(page, 'home.username')).fill(process.env.TARGET_USERNAME!);"
+    assert lines[3] == "  await (await orx(page, 'home.password')).fill(process.env.TARGET_PASSWORD!);"
+    assert lines[4] == "  await (await orx(page, 'home.login')).click();"
+    assert lines[5] == "  await expect((await orx(page, 'home.username'))).toBeVisible();"
+
+
+def test_use_object_keys_leaves_absence_checks_chained_and_unmatched_locators():
+    original = _RECORDED.split("\n")
+    lines = scripts.use_object_keys(_RECORDED, _SELECTOR_KEYS).split("\n")
+    # orx waits for a visible element, so negative and conditional checks keep their raw locator.
+    assert lines[6:12] == original[6:12]
+    assert lines[12] == original[12]
+
+
+def test_use_object_keys_is_idempotent_and_writes_known_plain_keys(service, project):
+    page = service.create_page(project.id, "home", "/")
+    for name, selector in (("username", "#u"), ("password", "#p"), ("login", "#l")):
+        service.create_element(project.id, page.id, name, "input", [{"strategy": "css", "value": selector}])
+    rewritten = scripts.use_object_keys(_RECORDED, _SELECTOR_KEYS)
+
+    assert scripts.use_object_keys(rewritten, _SELECTOR_KEYS) == rewritten
+    assert scripts.use_object_keys(_RECORDED, {}) == _RECORDED
+    assert service.unknown_keys(project.id, rewritten) == []
+    locators = {key: [{"strategy": "css", "value": "#x", "options": {}}] for key in _SELECTOR_KEYS.values()}
+    assert scripts.JS_START in scripts.render_script(rewritten, locators, 3000)
+
+
 @pytest.mark.skipif(not __import__("shutil").which("node"), reason="needs node")
 def test_orx_works_awaited_and_chained(tmp_path):
     """`await orx(page, key).fill(v)` (chained, as models often write it) and
@@ -338,6 +389,37 @@ def test_repeated_key_counts_once_with_the_worst_outcome_and_two_failed_runs_bre
     service.apply_run_markers(project.id, uuid4(), [_marker(0, 1, True)])
     element = _element(service, project, element.id)
     assert element.health == "healthy" and element.consecutive_failed_runs == 0
+
+
+def _page_score(service, project):
+    pages, _ = service.list_pages(project.id)
+    return pages[0]["score"]
+
+
+def test_page_score_is_none_before_any_run(service, project):
+    _login_button(service, project)
+    assert _page_score(service, project) == {"percent": None, "successes": 0, "lookups": 0}
+
+
+def test_page_score_counts_backup_wins_as_detected_and_full_failures_against(service, project):
+    _login_button(service, project)
+    service.apply_run_markers(project.id, uuid4(), [_marker(0, 1, True)])
+    service.apply_run_markers(project.id, uuid4(), [_marker(1, 2, True)])
+    service.apply_run_markers(project.id, uuid4(), [_marker(2, 2, False)])
+    assert _page_score(service, project) == {"percent": 66.7, "successes": 2, "lookups": 3}
+
+
+def test_page_score_ignores_deleted_elements(service, project):
+    page, _ = _login_button(service, project)
+    _, help_link = service.create_element(
+        project.id, page.id, "help_link", "link", [{"strategy": "text", "value": "Help"}],
+    )
+    service.apply_run_markers(project.id, uuid4(), [_marker(0, 1, True)])
+    service.apply_run_markers(project.id, uuid4(), [_marker(1, 1, False, key="login_page.help_link")])
+    assert _page_score(service, project) == {"percent": 50.0, "successes": 1, "lookups": 2}
+
+    service.delete_element(project.id, help_link.id)
+    assert _page_score(service, project) == {"percent": 100.0, "successes": 1, "lookups": 1}
 
 
 def test_malformed_and_unknown_markers_are_skipped(service, project):
@@ -577,6 +659,7 @@ def test_api_create_and_list(repo, project):
 
     pages = client.get(f"{base}/pages").json()
     assert pages["total"] == 1 and pages["pages"][0]["counts"]["healthy"] == 1
+    assert pages["pages"][0]["score"] == {"percent": None, "successes": 0, "lookups": 0}
     listed = client.get(f"{base}/pages/{page_id}/elements", params={"health": "healthy"}).json()
     assert listed["total"] == 1
 

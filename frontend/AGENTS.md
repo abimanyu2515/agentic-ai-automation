@@ -13,6 +13,9 @@ The frontend is a vanilla HTML, CSS, and JavaScript single page application serv
 | `frontend/js/api.js` | Authenticated API requests and endpoint wrappers |
 | `frontend/js/components.js` | Shared HTML rendering helpers and reusable tables |
 | `frontend/js/token-utilization.js` | Token Utilization view: usage and cost charts, breakdowns, call log, budget and pricing |
+| `frontend/js/chat.js` | Chat assistant floating button and panel (spec 0005) |
+| `frontend/js/chat-context.js` | Pure open item bookkeeping per list view, sent to chat as view context |
+| `frontend/js/object-repository.js` | Object repository view |
 | `frontend/css/styles.css` | Global layout, themes, forms, tables, and dashboard styling |
 
 ## Conventions
@@ -23,6 +26,8 @@ The frontend is a vanilla HTML, CSS, and JavaScript single page application serv
 * Store the active project ID in `localStorage` only as a selection hint. Reload the project from the backend before using it.
 * Preserve the existing single page view and modal patterns rather than introducing a second frontend framework.
 * Treat the backend project target URL as the source of truth. Do not add demo application URLs as frontend defaults.
+* The chat panel lives outside the view panels, so switching views never resets it. Its open state and active thread are `localStorage` hints only; always load the thread from the server.
+* Modules import each other with a `?v=N` cache busting query. Bump it when you change the imported file.
 
 ## Gotchas
 

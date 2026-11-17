@@ -180,3 +180,156 @@ for (const row of ['a', 'b', 'c']) {{
     text = str(snapshots)
     assert "standard_user" not in text and "secret_sauce" not in text
     assert "Profile [redacted]" in text
+
+
+# ------------------------------------------- live-verified scripts: key matching
+
+LOGIN_PAGE = """
+<html><body>
+  <form>
+    <input data-test="username" placeholder="Username">
+    <input data-test="password" type="password" placeholder="Password">
+    <input data-test="other" placeholder="Other">
+    <button data-test="login-button" style="display:none">Log in</button>
+    <input data-test="login-visible" type="submit" value="Login">
+  </form>
+</body></html>
+"""
+
+
+def _repository(url_pattern, elements):
+    """One page holding elements given as (name, [(strategy, value, options), ...])."""
+    from uuid import uuid4
+
+    from backend.models.object_repository import (
+        ObjectElement,
+        ObjectLocator,
+        ObjectPage,
+        ProjectObjectRepository,
+    )
+
+    project_id = uuid4()
+    page = ObjectPage(project_id=project_id, name="home", url_pattern=url_pattern)
+    for name, locators in elements:
+        page.elements.append(ObjectElement(
+            page_id=page.id, name=name, element_type="input",
+            locators=[
+                ObjectLocator(position=index, strategy=strategy, value=value, options=options)
+                for index, (strategy, value, options) in enumerate(locators)
+            ],
+        ))
+    return ProjectObjectRepository(project_id=project_id, pages=[page])
+
+
+def _resolve(repository, selectors, url="https://app.example.test/", **resolver_kwargs):
+    """Each selector's key from ObjectKeyResolver on LOGIN_PAGE served at url."""
+    import asyncio
+
+    async_api = pytest.importorskip("playwright.async_api")
+    from backend.services.object_repository_matcher import ObjectKeyResolver
+
+    async def run():
+        async with async_api.async_playwright() as playwright:
+            try:
+                browser = await playwright.chromium.launch(headless=True)
+            except Exception as exc:  # pragma: no cover - depends on the machine
+                pytest.skip(f"Chromium is not available: {exc}")
+            page = await browser.new_page()
+            await page.route("**/*", lambda route: route.fulfill(content_type="text/html", body=LOGIN_PAGE))
+            await page.goto(url)
+            resolver = ObjectKeyResolver(repository, **resolver_kwargs)
+            keys = [await resolver(page, selector) for selector in selectors]
+            await browser.close()
+            return keys
+
+    # The module's sync `page` fixture keeps an event loop running on this
+    # thread, so the async browser runs on its own thread.
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, run()).result()
+
+
+def test_resolver_matches_a_recorded_selector_to_the_element_on_the_same_node():
+    repository = _repository("/", [
+        ("username", [("role", "textbox", {"name": "Username"})]),
+        ("password", [("placeholder", "Password", {})]),
+    ])
+
+    assert _resolve(repository, ['[data-test="username"]', '[data-test="password"]', '[data-test="other"]']) == [
+        "home.username", "home.password", None,
+    ]
+
+
+def test_resolver_follows_orx_order_hidden_main_falls_back_and_wrong_node_stops():
+    repository = _repository("/", [
+        # The hidden main locator is skipped, as orx skips it; the backup finds the node.
+        ("login", [("css", '[data-test="login-button"]', {}), ("role", "button", {"name": "Login"})]),
+        # orx would act on the username field first, so this is not the "other" field.
+        ("loose", [("css", "input", {}), ("css", '[data-test="other"]', {})]),
+    ])
+
+    assert _resolve(repository, ['[data-test="login-visible"]', '[data-test="other"]']) == ["home.login", None]
+
+
+def test_resolver_ignores_pages_whose_pattern_does_not_match_the_url():
+    repository = _repository("/inventory.html", [("username", [("role", "textbox", {"name": "Username"})])])
+
+    assert _resolve(repository, ['[data-test="username"]']) == [None]
+    assert _resolve(repository, ['[data-test="username"]'], url="https://app.example.test/inventory.html") == [
+        "home.username"
+    ]
+
+
+def _empty_repository():
+    from uuid import uuid4
+
+    from backend.models.object_repository import ProjectObjectRepository
+
+    return ProjectObjectRepository(project_id=uuid4(), pages=[])
+
+
+def test_resolver_harvests_a_page_it_misses_once_and_then_writes_its_key(tmp_path):
+    import backend.repository.project_repository as repo_module
+    from backend.repository.project_repository import JSONProjectRepository
+    from backend.services.object_repository_harvest import clean_elements
+    from backend.services.object_repository_service import ObjectRepositoryService
+
+    previous = repo_module._active_project_repo
+    repo_module._active_project_repo = JSONProjectRepository(tmp_path / "store.json")
+    try:
+        repo = repo_module._active_project_repo
+        project = repo.create_project("Shop", "", framework="playwright", target_url="https://app.example.test")
+        service = ObjectRepositoryService(project_repo=repo)
+        harvested = []
+
+        def harvest(path, elements):
+            harvested.append(path)
+            service.ingest_recon(project.id, path, clean_elements(elements, []), mark_missing=False)
+            return service.load(project.id)
+
+        keys = _resolve(
+            _empty_repository(),
+            ['[data-test="username"]', '[data-test="nothing-here"]', '[data-test="password"]'],
+            url="https://app.example.test/login",
+            harvest=harvest,
+        )
+        stored = service.load(project.id).active_pages()
+    finally:
+        repo_module._active_project_repo = previous
+
+    # One snapshot of /login, even though a later selector also missed.
+    assert harvested == ["/login"]
+    assert [page.url_pattern for page in stored] == ["/login"]
+    assert keys[0] and keys[0].startswith("login.")
+    assert keys[1] is None
+    assert keys[2] and keys[2].startswith("login.") and keys[2] != keys[0]
+
+
+def test_resolver_harvest_failure_and_disabled_harvest_keep_raw_selectors():
+    def failing(path, elements):
+        raise RuntimeError("store down")
+
+    assert _resolve(_empty_repository(), ['[data-test="username"]'], harvest=failing) == [None]
+    assert _resolve(_empty_repository(), ['[data-test="username"]'], harvest=failing, max_pages=0) == [None]
+    assert _resolve(_empty_repository(), ['[data-test="username"]']) == [None]
