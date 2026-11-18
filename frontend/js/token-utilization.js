@@ -1,6 +1,6 @@
 // Token Utilization view: real LLM token usage and cost per agent, model, role and project.
 import { API } from './api.js?v=20';
-import { escapeHTML } from './components.js?v=4';
+import { escapeHTML } from './components.js?v=5';
 
 const STORAGE_KEY = 'token_utilization_prefs';
 const RANGES = [

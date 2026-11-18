@@ -50,6 +50,8 @@ uvicorn backend.main:app --reload --port 8000
 * The runner receives project credentials through environment variables. If a generated script needs a URL, it must use the project value or an explicitly supplied runtime value.
 * PostgreSQL uses a scoped SQLAlchemy session. A failed query or write must be followed by rollback and session removal before another repository operation.
 * Avoid editing generated artifacts, local databases, vault data, or cached files unless the task specifically targets them.
+* Chat routes depend on `require_chat_enabled`. Chat settings live under `chat:` in `default_config.yaml`, and `CHAT_*` env vars override them. Unset `CHAT_LLM_*` values fall back to the `analysis` LLM role.
+* LLM roles are `generation`, `analysis`, and `chat` (`backend/config/settings.py`).
 
 ## Context files
 

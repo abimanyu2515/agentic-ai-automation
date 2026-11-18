@@ -41,6 +41,14 @@ class HealthCounts(BaseModel):
     missing: int = 0
 
 
+class DetectionScore(BaseModel):
+    """Share of run lookups where a page's locators found their element."""
+
+    percent: float | None = None
+    successes: int = 0
+    lookups: int = 0
+
+
 class PageResponse(BaseModel):
     id: UUID
     project_id: UUID
@@ -50,6 +58,7 @@ class PageResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     counts: HealthCounts | None = None
+    score: DetectionScore | None = None
 
 
 class PageListResponse(BaseModel):

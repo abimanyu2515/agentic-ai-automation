@@ -1,9 +1,9 @@
 import { API } from './api.js?v=20';
 import { ChatPanel } from './chat.js?v=3';
 import { OpenRows, ROW_VIEWS } from './chat-context.js?v=1';
-import { ObjectRepositoryView } from './object-repository.js?v=2';
+import { ObjectRepositoryView } from './object-repository.js?v=6';
 import { TokenUtilizationView } from './token-utilization.js?v=1';
-import { Components, escapeHTML } from './components.js?v=4';
+import { Components, escapeHTML } from './components.js?v=5';
 
 class App {
   constructor() {
