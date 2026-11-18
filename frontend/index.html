@@ -100,6 +100,13 @@
         Object Repository
       </div>
 
+      <div class="nav-item nav-item-indented" data-view="documents" data-level="1" style="display: none;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+        </svg>
+        Knowledge Base
+      </div>
+
       <div class="nav-item nav-item-indented" data-view="jira-traceability" data-level="1" style="display: none;">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
@@ -622,6 +629,23 @@
         <div id="object-repository-content"></div>
       </div>
 
+      <!-- VIEW: Knowledge Base (spec 0006) -->
+      <div class="view-panel" id="documents-view">
+        <div class="page-header">
+          <h1>Knowledge Base</h1>
+        </div>
+        <p class="page-description">Product documents for this project. They are indexed into the project's own knowledge base, which the chat assistant can search. Other projects never see them.</p>
+        <div id="kb-dropzone" class="kb-dropzone" role="group" aria-label="Upload a document">
+          <span>Drag and drop a file here (PDF, DOCX, TXT, MD, CSV, XLSX), or</span>
+          <input type="file" id="kb-file-input" class="kb-file-input" accept=".pdf,.docx,.txt,.md,.csv,.xlsx">
+          <label class="btn btn-secondary kb-choose" for="kb-file-input">Choose a file</label>
+        </div>
+        <div id="kb-upload-status" class="kb-upload-status" role="status" aria-live="polite"></div>
+        <div id="documents-list-container">
+          <!-- Table loaded dynamically -->
+        </div>
+      </div>
+
       <!-- VIEW: Reports -->
       <div class="view-panel" id="reports-view">
         <div class="page-header">
@@ -830,11 +854,8 @@
                   </div>
                   <div class="form-group">
                     <label for="settings-rag-api-key">RAGFlow API Key</label>
-                    <input type="password" id="settings-rag-api-key" class="form-control" placeholder="••••••••" />
-                  </div>
-                  <div class="form-group">
-                    <label for="settings-rag-dataset-id">RAGFlow Dataset ID</label>
-                    <input type="text" id="settings-rag-dataset-id" class="form-control" placeholder="your-dataset-uuid" />
+                    <input type="password" id="settings-rag-api-key" class="form-control" placeholder="Not set" autocomplete="new-password" aria-describedby="settings-rag-api-key-hint" />
+                    <small id="settings-rag-api-key-hint" class="form-hint">Leave empty to keep the current key. A new key applies until the server restarts; set RAGFLOW_API_KEY in .env to keep it. Each project gets its own dataset automatically.</small>
                   </div>
                 </div>
                 
@@ -1099,8 +1120,8 @@
         </div>
         <div class="form-group">
           <label for="new-proj-desc">Description <span style="color: var(--color-danger);">*</span></label>
-          <textarea id="new-proj-desc" class="form-control" placeholder="Brief workspace description..." required></textarea>
-          <div id="new-proj-desc-error" style="color: var(--color-danger); font-size: 0.85rem; margin-top: 4px; display: none;"></div>
+          <textarea id="new-proj-desc" class="form-control" placeholder="Brief workspace description..." required aria-describedby="new-proj-desc-error"></textarea>
+          <div id="new-proj-desc-error" style="color: var(--color-danger); font-size: 0.85rem; margin-top: 4px; display: none;" role="alert"></div>
         </div>
         <div class="form-group">
           <label for="new-proj-target-url">Target URL <span style="color: var(--color-danger);">*</span></label>

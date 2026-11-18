@@ -71,7 +71,8 @@ const TOOL_LABELS = {
   list_executions: 'executions',
   get_execution: 'an execution',
   get_dashboard_metrics: 'dashboard metrics',
-  list_object_repository_pages: 'object repository pages'
+  list_object_repository_pages: 'object repository pages',
+  search_knowledge: 'the project knowledge base'
 };
 
 function shortName(name) {

@@ -53,6 +53,7 @@ from backend.models.scenario import Scenario
 from backend.models.state import WorkflowState
 from backend.services.llm import LLMService
 from backend.utils.prompts import load_prompt
+from backend.agents.knowledge_context import with_project_knowledge
 
 
 # ==========================================================
@@ -154,6 +155,7 @@ class ScenarioAgent(BaseAgent):
             description=state.requirement.description,
             count=str(self.scenario_count),
         )
+        prompt = with_project_knowledge(prompt, state.retrieved_context)
 
         batch = self.llm_service.structured_generate(
             user=prompt,

@@ -66,11 +66,39 @@ Ingests raw requirement text and enriches it via LLM. Extracts:
 **File**: `backend/agents/feature_inventory_agent.py`
 **Prompt**: `backend/prompts/agents/feature_inventory/`
 
-Optionally maps requirements to existing feature inventory if RAG is enabled. Helps avoid duplicate scenario generation.
+Optionally maps requirements to existing feature inventory if RAG is enabled. Helps avoid duplicate scenario generation. It searches the project's own knowledge base through `KnowledgeService.search` (top 3, using `state.project_id`), and skips without failing when the state has no project, the project has no dataset, or the search fails (spec 0006, AC-23).
 
 **State writes**: `state.requirement.feature_mapping`
 
 **Operation**: `INGEST` (optional second stage)
+
+---
+
+### 3a. KnowledgeRetrievalAgent
+
+**File**: `backend/agents/knowledge_retrieval_agent.py`
+**Prompts**: `backend/prompts/agents/knowledge_retrieval/` (`grade.md`, `rewrite.md`)
+
+The graded, self correcting retrieval stage (spec 0006). Four graph nodes, one per stage, run only when `RAG_WORKFLOW_RETRIEVAL_ENABLED` is true:
+
+| Node | Feeds | Source types searched | Query |
+|---|---|---|---|
+| `retrieval_requirements` | RequirementAnalystAgent | `document`, `jira_story` | requirement title, description, acceptance criteria |
+| `retrieval_scenarios` | ScenarioAgent | `document`, `jira_story` | same |
+| `retrieval_test_cases` | TestCaseAgent | `document`, `jira_story`, `test_case`, `locator` | same |
+| `retrieval_analysis` | ExecutionAnalysisAgent (DefectManagementAgent reuses it) | `execution_failure`, `defect`, `test_case`, `locator` | up to 5 failed runs (test case title and error), plus the requirement title when present |
+
+Each attempt searches with `RAG_TOP_K`, grades every new chunk in one batched call on the `retrieval` LLM role (`{"relevant": [ids]}`), and keeps the relevant ones. With fewer than `RAG_MIN_RELEVANT_CHUNKS` and attempts left (`RAG_MAX_RETRIEVAL_ATTEMPTS`), it asks the LLM to rewrite the query and searches again. Chunks are deduplicated by chunk ID, then sorted by score and capped at `RAG_TOP_K`. Unparseable grades keep the top `RAG_MIN_RELEVANT_CHUNKS` by score, marked `graded: false`.
+
+It never fails the workflow: RAG disabled, no `project_id`, no dataset, an empty query, a search error, or a busy retrieval role all end with `retrieval_status: skipped` and empty context.
+
+**State writes** (owned only by this agent): `retrieval_status` (`ok`, `empty`, `skipped`), `retrieval_query`, `retrieval_attempts`, `retrieval_sources`, `retrieved_context`
+
+**Tracing** (AC-24): with LangSmith tracing on, every search, grade, and rewrite records a span (`knowledge_retrieval.search`, `.grade`, `.rewrite`) with metadata `stage`, `attempt`, `query`, `source_types`, `returned_source_refs`, and `relevant_count`. On a search span `relevant_count` is the running total before that search; on a grade span it is how many chunks were kept; on a rewrite span it is the total that triggered the rewrite. With tracing off or langsmith not installed, nothing is sent and nothing fails.
+
+**Measuring it** (AC-25): `RetrievalEvalService` (`backend/services/retrieval_eval_service.py`) returns recall@k and MRR for labelled cases; `python -m backend.scripts.eval_retrieval` runs it live.
+
+**Consumers**: ScenarioAgent, TestCaseAgent, RequirementAnalystAgent, ExecutionAnalysisAgent, and DefectManagementAgent append a delimited "Project knowledge" block (`backend/agents/knowledge_context.py`) to their prompt when `retrieved_context` is not empty. With no context their prompts are unchanged.
 
 ---
 
@@ -172,7 +200,9 @@ Evaluates generated test cases for quality. Performs:
 | **Relevance scoring** | LLM-based relevance to parent scenario | Marks as `NEEDS_REVIEW` if below threshold (default 0.3) |
 | **Quality ranking** | Confidence score from TestCaseAgent + relevance | Sorts approved cases by confidence |
 
-**State writes**: Sets `tc.evaluation_status` and `tc.evaluation_reason` for each test case
+| **Groundedness** (spec 0006, AC-26) | One batched LLM judge call on the `analysis` role, given the test cases and `state.retrieved_context` (prompt `backend/prompts/agents/evaluation/groundedness.md`) | Sets `tc.groundedness_score` (0 to 1) and `tc.unsupported_claims`. Runs only when `retrieved_context` is not empty; a failed call, a busy pool, or unusable output leaves them `None` and `[]` with a warning. Never changes `evaluation_status` |
+
+**State writes**: Sets `tc.evaluation_status`, `tc.evaluation_reason`, `tc.groundedness_score`, and `tc.unsupported_claims` for each test case
 
 **Operation**: `GENERATE_TESTCASES` (sub-step, always runs after TestCaseAgent)
 

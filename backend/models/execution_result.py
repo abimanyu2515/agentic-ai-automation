@@ -49,3 +49,8 @@ class ExecutionResult(BaseModel):
     # Jira Bug Link (populated by DefectManagementAgent)
     jira_bug_id: str | None = None
     jira_bug_url: str | None = None
+
+    # Spec 0001, AC-4 and AC-8: the project configuration captured when the run was
+    # accepted (project_id, target_url, framework, credential_reference). The run uses
+    # it even if the project is edited later. Never holds a secret. None for old runs.
+    project_config_snapshot: dict[str, str] | None = None

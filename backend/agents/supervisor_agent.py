@@ -47,6 +47,14 @@ from backend.models.test_case import EvaluationStatus
 
 logger = logging.getLogger(__name__)
 
+# Spec 0006: the retrieval node that runs before each knowledge consumer.
+RETRIEVAL_BEFORE = {
+    "requirement_analyst_agent": "retrieval_requirements",
+    "scenario_agent": "retrieval_scenarios",
+    "test_case_agent": "retrieval_test_cases",
+    "execution_analysis_agent": "retrieval_analysis",
+}
+
 OPERATION_ROUTING_MAP = {
     WorkflowOperation.INGEST: "requirement_analyst_agent",
     WorkflowOperation.BACKLOG: "backlog_creation_agent",
@@ -122,13 +130,13 @@ class SupervisorAgent(BaseAgent):
         # Linear end-to-end fallback for testing/empty configs
         if not op:
             state.add_log(f"{self.name}: No operation configured. Starting full pipeline at scenario_agent.")
-            return "scenario_agent"
+            return self._via_retrieval("scenario_agent")
 
         # Validate prerequisite gates
         if op == WorkflowOperation.INGEST:
             if not state.requirement:
                 raise ValueError("Requirement must be set for ingestion.")
-            return "requirement_analyst_agent"
+            return self._via_retrieval("requirement_analyst_agent")
 
         elif op == WorkflowOperation.BACKLOG:
             if not state.requirement:
@@ -140,7 +148,7 @@ class SupervisorAgent(BaseAgent):
         elif op == WorkflowOperation.GENERATE_SCENARIOS:
             if not state.requirement:
                 raise ValueError("Requirement must be set for scenario generation.")
-            return "scenario_agent"
+            return self._via_retrieval("scenario_agent")
 
         elif op == WorkflowOperation.GENERATE_TESTCASES:
             if not state.requirement:
@@ -151,7 +159,7 @@ class SupervisorAgent(BaseAgent):
             if not approved_scenarios:
                 state.add_log(f"{self.name}: Rejecting test case generation. Prerequisite failed: No approved scenarios.")
                 raise ValueError("Test case generation rejected: No approved scenarios exist.")
-            return "test_case_agent"
+            return self._via_retrieval("test_case_agent")
 
         elif op == WorkflowOperation.GENERATE_PLAYWRIGHT:
             if not state.requirement:
@@ -200,6 +208,26 @@ class SupervisorAgent(BaseAgent):
         state.add_log(f"{self.name}: Prerequisite checks passed. Routing to '{target}'.")
         return target
 
+    @staticmethod
+    def _via_retrieval(target: str) -> str:
+        """Spec 0006, AC-17: the retrieval node before `target` when the
+        workflow retrieval flag is on, else `target` itself. Settings are read
+        on every call because the module level graph is built at import time."""
+        from backend.config.settings import get_settings
+
+        node = RETRIEVAL_BEFORE.get(target)
+        if node and get_settings().rag.workflow_retrieval_enabled:
+            return node
+        return target
+
+    def route_after_qa_story_analyzer(self, state: WorkflowState, config: RunnableConfig | None = None) -> str:
+        """Was a fixed edge to scenario_agent; now passes through retrieval when it is on."""
+        return self._via_retrieval("scenario_agent")
+
+    def route_after_execution(self, state: WorkflowState, config: RunnableConfig | None = None) -> str:
+        """Was a fixed edge to execution_analysis_agent; now passes through retrieval when it is on."""
+        return self._via_retrieval("execution_analysis_agent")
+
     def route_after_requirement_analyst(self, state: WorkflowState, config: RunnableConfig | None = None) -> str:
         """Routes after requirement analyst to either feature inventory or end based on supervisor logic."""
         from backend.config.settings import get_settings
@@ -210,10 +238,10 @@ class SupervisorAgent(BaseAgent):
 
         # Check if operation configuration or state requests RAG enrichment
         if rag_enabled and provider:
+            # Spec 0006: datasets are per project, so only the key is checked here.
             api_key = getattr(settings.rag, "ragflow_api_key", None)
-            dataset_id = getattr(settings.rag, "ragflow_dataset_id", None)
-            if provider == "ragflow" and (not api_key or not dataset_id):
-                state.add_log("Supervisor: RAGFlow active but missing API key or Dataset ID. Skipping feature inventory.")
+            if provider == "ragflow" and not api_key:
+                state.add_log("Supervisor: RAGFlow active but missing API key. Skipping feature inventory.")
                 return "end"
 
             state.add_log("Supervisor: Routing to feature_inventory_agent for optional enrichment.")
@@ -228,7 +256,7 @@ class SupervisorAgent(BaseAgent):
         op = configurable.get("operation")
         if op == WorkflowOperation.GENERATE_SCENARIOS or op == WorkflowOperation.BACKLOG:
             return "end"
-        return "test_case_agent"
+        return self._via_retrieval("test_case_agent")
 
     def route_after_human_approval_2(self, state: WorkflowState, config: RunnableConfig | None = None) -> str:
         """Routes after test case human approval node."""

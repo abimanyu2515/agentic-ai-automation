@@ -111,13 +111,14 @@ from backend.services.workflow_service import WorkflowService
 from backend.services.grounded_playwright_service import GroundedPlaywrightScriptService
 from backend.services.script_generation_jobs import ScriptGenerationJobs
 from backend.schemas.project_dto import ProjectCreate, ProjectResponse
-from backend.repository.project_repository import ProjectURLConflictError
+from backend.repository.project_repository import ProjectURLConflictError, get_project_repository
 from backend.services.project_configuration import (
     ProjectConfigurationError,
     SUPPORTED_FRAMEWORKS,
     normalize_framework,
     normalize_target_url,
     readiness_for_project,
+    redact_url_for_log,
 )
 from backend.schemas.requirement_dto import RequirementCreate, RequirementResponse
 from backend.schemas.scenario_dto import ScenarioUpdate, ScenarioResponse
@@ -144,6 +145,13 @@ from backend.services.object_repository_service import (
     ScriptRenderer,
 )
 from backend.services.object_repository_scan import ObjectRepositoryScanService
+from backend.services.knowledge_service import (
+    KnowledgeService,
+    KnowledgeUploadError,
+    knowledge_settings_overrides,
+)
+from backend.services.knowledge_indexer import queue_defect_keys, queue_knowledge_source, queue_test_case_removals
+from backend.services.retrieval import set_retriever
 from backend.services.chat_service import ChatError, ChatService, allowed_action_types, guard_disconnect
 from backend.services.chat_actions import ChatActionExecutor, action_audit_fields
 from backend.schemas.chat_dto import (
@@ -171,6 +179,14 @@ from backend.models.token_usage import TokenUsageFilters
 from backend.schemas.token_usage_dto import ModelPriceRow, TokenUsageCallsPage, TokenUsageSettings
 from backend.utils.crypto import encrypt_value
 from backend.database.db_models import UserDB, RoleDB, PermissionDB, RolePermissionDB, ProjectUserDB, RefreshTokenDB, AuditLogDB
+
+# Apply LOG_LEVEL to the app's own loggers. Uvicorn only configures `uvicorn.*`,
+# so without this the root logger stays at WARNING and every app INFO line is dropped.
+# basicConfig does nothing when the root logger already has a handler.
+logging.basicConfig(
+    level=getattr(logging, str(get_settings().log_level).upper(), logging.INFO),
+    format="%(levelname)s %(name)s: %(message)s",
+)
 
 logger = logging.getLogger("backend.project_creation")
 
@@ -307,6 +323,10 @@ def on_startup():
         except Exception:
             logging.getLogger(__name__).exception("Chat startup recovery failed")
 
+    # Knowledge base (spec 0006): the one time old document migration, the
+    # indexer worker, and the sweep of documents a restart left behind.
+    knowledge_service.on_startup()
+
     # Launch JIRA Sync Retry Worker loop in event loop
     from backend.services.jira_sync_service import jira_retry_worker
     import asyncio
@@ -323,6 +343,7 @@ script_generation_jobs = ScriptGenerationJobs(
 )
 grounded_playwright_service = GroundedPlaywrightScriptService()
 object_repository_service = ObjectRepositoryService()
+knowledge_service = KnowledgeService()
 object_repository_scan_service = ObjectRepositoryScanService(object_repository_service)
 
 
@@ -348,6 +369,8 @@ def _test_case_response(tc, renderer: ScriptRenderer | None = None) -> TestCaseR
         script_validation_attempts=tc.script_validation_attempts,
         script_validation_completed_at=tc.script_validation_completed_at,
         script_validation_diagnostic=tc.script_validation_diagnostic,
+        groundedness_score=getattr(tc, "groundedness_score", None),
+        unsupported_claims=list(getattr(tc, "unsupported_claims", None) or []),
         generated_at=tc.generated_at,
         jira_issue_key=getattr(tc, "jira_issue_key", None),
         jira_issue_url=getattr(tc, "jira_issue_url", None),
@@ -383,13 +406,15 @@ def resolve_scenario_response(s) -> ScenarioResponse:
         jira_sync_retry_count=getattr(s, "jira_sync_retry_count", 0)
     )
 
-def resolve_project_response(p) -> ProjectResponse:
+def resolve_project_response(p, all_projects=None) -> ProjectResponse:
     """
     Convert Project domain object to ProjectResponse DTO with decrypted credentials.
-    
+
     Args:
         p: Project domain object
-        
+        all_projects: projects already loaded by the caller. The list route passes
+            them so it does not load every project once per project.
+
     Returns:
         ProjectResponse DTO with username from vault (password masked)
         
@@ -402,7 +427,7 @@ def resolve_project_response(p) -> ProjectResponse:
     username, _ = vs.get_credentials(str(p.id))
     owner_projects = [
         candidate
-        for candidate in project_service.list_projects()
+        for candidate in (project_service.list_projects() if all_projects is None else all_projects)
         if getattr(candidate, "owner_id", None) == getattr(p, "owner_id", None)
     ]
     return ProjectResponse(
@@ -478,7 +503,7 @@ class ProjectUpdate(BaseModel):
 @app.get("/api/v1/projects", response_model=list[ProjectResponse])
 def list_projects():
     projects = project_service.list_projects()
-    return [resolve_project_response(p) for p in projects]
+    return [resolve_project_response(p, projects) for p in projects]
 
 
 @app.post("/api/v1/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
@@ -519,6 +544,13 @@ def create_project(
         )
     try:
         target_url = normalize_target_url(data.target_url)
+        if target_url is None:
+            # A blank URL normalizes to None ("not set"), but creation requires one (AC-2).
+            raise ProjectConfigurationError(
+                "PROJECT_INVALID_CONFIGURATION",
+                "Target URL is required.",
+                missing_fields=["target_url"],
+            )
         p = project_service.create_project(
             name=data.name,
             description=data.description,
@@ -529,7 +561,10 @@ def create_project(
             owner_id=user.id,
             created_by=user.id,
         )
-        logger.info("Project created: project_id=%s owner_id=%s target_url=%s", p.id, user.id, target_url)
+        logger.info(
+            "Project created: project_id=%s owner_id=%s target_url=%s",
+            p.id, user.id, redact_url_for_log(target_url),
+        )
     except ProjectConfigurationError as exc:
         logger.warning("Project creation validation failed: code=%s fields=%s", exc.code, list(exc.invalid_fields))
         return JSONResponse(status_code=exc.status_code, content=exc.as_detail())
@@ -543,6 +578,20 @@ def create_project(
         if exc.conflicting_project_id is not None:
             detail["conflicting_project_id"] = str(exc.conflicting_project_id)
         return JSONResponse(status_code=409, content=detail)
+    except Exception as exc:
+        # The repository has already rolled back and cleared its session (PostgreSQL)
+        # or left the JSON file untouched (atomic replace). Log only the error type:
+        # database messages can echo row values, including the URL query text (AC-9).
+        logger.error(
+            "Project creation failed: owner_id=%s error=%s", user.id, type(exc).__name__
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "code": "PROJECT_PERSISTENCE_FAILED",
+                "message": "The project could not be saved, so no project was created. Try again, or contact an administrator if it keeps failing.",
+            },
+        )
     return resolve_project_response(p)
 
 
@@ -1311,7 +1360,8 @@ def import_jira_story(project_id: UUID, issue_key: str, release_id: UUID | None 
     
     # Run analyst pipeline to enrich the requirement
     final_req = workflow_service.ingest_requirement(project_id, req)
-    
+    queue_knowledge_source(project_id, "jira_story", issue_key)
+
     return RequirementResponse(
         id=final_req.id,
         title=final_req.title,
@@ -1395,9 +1445,12 @@ def update_scenario(project_id: UUID, scenario_id: UUID, data: ScenarioUpdate, b
 
 @app.delete("/api/v1/projects/{project_id}/scenarios/{scenario_id}")
 def delete_scenario(project_id: UUID, scenario_id: UUID):
+    # Its test cases are soft deleted with it, so read them first to drop their knowledge entries.
+    test_cases = get_project_repository().get_test_cases(scenario_id)
     success = project_service.delete_scenario(scenario_id)
     if not success:
         raise HTTPException(status_code=404, detail="Scenario not found")
+    queue_test_case_removals(project_id, test_cases)
     return {"detail": "Scenario deleted successfully"}
 
 
@@ -1522,8 +1575,23 @@ def get_test_cases(project_id: UUID):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+def _require_test_case_in_project(project_id: UUID, test_case_id: UUID) -> None:
+    """404 unless the test case belongs to this project, so a project grant never reaches another project's test case."""
+    if not any(tc.id == test_case_id for tc in project_service.get_test_cases_for_project(project_id)):
+        raise HTTPException(status_code=404, detail="Test case not found")
+
+
 @app.put("/api/v1/projects/{project_id}/testcases/{test_case_id}", response_model=TestCaseResponse)
-def update_test_case(project_id: UUID, test_case_id: UUID, data: TestCaseUpdate):
+def update_test_case(
+    project_id: UUID,
+    test_case_id: UUID,
+    data: TestCaseUpdate,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("TestCases", "edit")),
+):
+    require_project_access(user, project_id, db, projects=project_service)
+    _require_test_case_in_project(project_id, test_case_id)
     updated = project_service.update_test_case(
         test_case_id=test_case_id,
         title=data.title,
@@ -1538,33 +1606,86 @@ def update_test_case(project_id: UUID, test_case_id: UUID, data: TestCaseUpdate)
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Test case not found")
+    queue_knowledge_source(project_id, "test_case", updated.id)
     return _test_case_response(updated)
 
 
 @app.delete("/api/v1/projects/{project_id}/testcases/{test_case_id}")
-def delete_test_case(project_id: UUID, test_case_id: UUID):
+def delete_test_case(
+    project_id: UUID,
+    test_case_id: UUID,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("TestCases", "delete")),
+):
+    require_project_access(user, project_id, db, projects=project_service)
+    _require_test_case_in_project(project_id, test_case_id)
+    # Read the bug key before the delete, so its defect entry can be checked after (AC-14a).
+    existing = get_project_repository().get_test_case(test_case_id)
     success = project_service.delete_test_case(test_case_id)
     if not success:
         raise HTTPException(status_code=404, detail="Test case not found")
+    queue_knowledge_source(project_id, "test_case", test_case_id, remove=True)
+    queue_defect_keys(project_id, [getattr(existing, "jira_issue_key", None)])
     return {"detail": "Test case deleted successfully"}
 
 
-@app.delete("/api/v1/projects/{project_id}/executions/{execution_id}")
-def delete_execution(project_id: UUID, execution_id: UUID):
-    success = project_service.delete_execution(execution_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Execution not found")
-    return {"detail": "Execution deleted successfully"}
-
-
+# Declared before the `{execution_id}` route, so `failed` is not parsed as an execution ID.
 @app.delete("/api/v1/projects/{project_id}/executions/failed")
-def delete_failed_executions(project_id: UUID):
+def delete_failed_executions(
+    project_id: UUID,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("Executions", "delete")),
+):
+    require_project_access(user, project_id, db, projects=project_service)
+    repo = get_project_repository()
+    failed = [
+        ex for ex in project_service.get_execution_results(project_id)
+        if getattr(ex.status, "value", ex.status) in {"failed", "error"}
+        and not repo.is_execution_deleted(project_id, ex.id)
+    ]
     count = project_service.delete_failed_executions(project_id)
+    for ex in failed:
+        queue_knowledge_source(project_id, "execution_failure", ex.id, remove=True)
+    # Bug keys of the deleted rows, captured in the same pass (AC-14a).
+    queue_defect_keys(project_id, [ex.jira_bug_id for ex in failed])
     return {"detail": f"Deleted {count} failed executions"}
 
 
+@app.delete("/api/v1/projects/{project_id}/executions/{execution_id}")
+def delete_execution(
+    project_id: UUID,
+    execution_id: UUID,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("Executions", "delete")),
+):
+    require_project_access(user, project_id, db, projects=project_service)
+    # Read the bug key before the delete; PostgreSQL deletes the row outright (AC-14a).
+    # The lookup is scoped to this project, so another project's execution is a plain 404.
+    existing = get_project_repository().get_execution_result(project_id, execution_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    success = project_service.delete_execution(execution_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    queue_knowledge_source(project_id, "execution_failure", execution_id, remove=True)
+    queue_defect_keys(project_id, [getattr(existing, "jira_bug_id", None)])
+    return {"detail": "Execution deleted successfully"}
+
+
 @app.put("/api/v1/projects/{project_id}/testcases/{test_case_id}/script", response_model=TestCaseResponse)
-def update_test_case_script(project_id: UUID, test_case_id: UUID, payload: ScriptUpdatePayload):
+def update_test_case_script(
+    project_id: UUID,
+    test_case_id: UUID,
+    payload: ScriptUpdatePayload,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("TestCases", "edit")),
+):
+    require_project_access(user, project_id, db, projects=project_service)
+    _require_test_case_in_project(project_id, test_case_id)
     updated = project_service.update_test_case_script(test_case_id, payload.script)
     if not updated:
         raise HTTPException(status_code=404, detail="Test case not found")
@@ -1602,8 +1723,8 @@ def read_settings():
             "vector_db_provider": settings.rag.vector_db_provider,
             "vector_db_path": settings.rag.vector_db_path,
             "ragflow_api_base": settings.rag.ragflow_api_base,
-            "ragflow_api_key": settings.rag.ragflow_api_key,
-            "ragflow_dataset_id": settings.rag.ragflow_dataset_id,
+            # Spec 0006: the key is write only and never returned.
+            "ragflow_api_key_set": bool(settings.rag.ragflow_api_key),
         },
         "generation": {
             "scenario_count": settings.generation.scenario_count,
@@ -1667,7 +1788,12 @@ def get_project_credentials(project_id: UUID):
 
 
 @app.put("/api/v1/settings")
-def save_settings(payload: dict = Body(...)):
+def save_settings(
+    payload: dict = Body(...),
+    user: UserDB = Depends(get_current_user),
+    authorized: bool = Depends(has_permission("Settings", "edit")),
+):
+    # Settings edit is Superadmin only, so nobody else can repoint ragflow_api_base or the key.
     override_path = Path(__file__).parent / "config" / "override.yaml"
     try:
         llm_payload = payload.get("llm", {}) if isinstance(payload, dict) else {}
@@ -1677,111 +1803,96 @@ def save_settings(payload: dict = Body(...)):
         for section in ["llm", "workflow", "browser", "rag", "generation", "evaluation", "playwright", "jira"]:
             if section in payload:
                 overrides[section] = payload[section]
+        if isinstance(overrides.get("rag"), dict):
+            overrides["rag"] = knowledge_settings_overrides(overrides["rag"])
 
         with open(override_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(overrides, f)
 
         get_settings.cache_clear()
-        
+        # RAG settings may have changed: rebuild the retriever on next use.
+        set_retriever(None)
+
         return {"status": "success", "settings": read_settings()}
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save settings: {exc}")
 @app.delete("/api/v1/projects/{project_id}")
-def delete_project(project_id: UUID):
+def delete_project(
+    project_id: UUID,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("Projects", "delete")),
+):
+    # Read before the soft delete: the knowledge cleanup needs its dataset ID (spec 0006, AC-10).
+    project = require_project_access(user, project_id, db, projects=project_service)
     success = project_service.delete_project(project_id)
     if not success:
         raise HTTPException(status_code=404, detail="Project not found")
+    if project is not None:
+        knowledge_service.project_deleted(project)
     return {"detail": "Project deleted successfully"}
 
 
+# ==========================================================
+# Knowledge base (spec 0006). Behavior lives in KnowledgeService.
+# ==========================================================
+
 @app.get("/api/v1/projects/{project_id}/documents", response_model=list[Document])
-def get_documents(project_id: UUID):
-    return project_service.get_documents(project_id)
+def get_documents(
+    project_id: UUID,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("Knowledge", "view")),
+):
+    require_project_access(user, project_id, db, projects=project_service)
+    return knowledge_service.list_documents(project_id)
 
 
-def upload_to_ragflow_task(project_id: UUID, document_id: UUID, filename: str):
-    from backend.services.rag_service import RAGFlowService
-    from backend.repository.project_repository import get_project_repository
-    import os
-    from pathlib import Path
-    
-    rag_service = RAGFlowService()
-    if not rag_service.is_active():
-        return
-        
-    repo = get_project_repository()
-    doc = repo.get_document(project_id, document_id)
-    if not doc:
-        return
-
-    doc.embedding_status = "embedding"
-    repo.save_document(doc)
-
-    file_path = Path("data") / filename
-    if not file_path.exists():
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        content = (
-            f"Software Requirement Specification Document for {filename}\n"
-            f"Requirement: The system shall support automated validation and Playwright visual verification.\n"
-        )
-        file_path.write_text(content, encoding="utf-8")
-
-    res = rag_service.upload_document(file_path, filename)
-    if res:
-        doc.embedding_status = "completed"
-        doc.metadata["ragflow_result"] = res
-    else:
-        doc.embedding_status = "failed"
-        
-    repo.save_document(doc)
-
-
-def delete_from_ragflow_task(filename: str):
-    from backend.services.rag_service import RAGFlowService
-    rag_service = RAGFlowService()
-    if rag_service.is_active():
-        rag_service.delete_document(filename)
-
-
-@app.post("/api/v1/projects/{project_id}/documents", response_model=Document, status_code=status.HTTP_201_CREATED)
-def create_document(project_id: UUID, background_tasks: BackgroundTasks, payload: dict = Body(...)):
-    filename = payload.get("filename")
-    original_filename = payload.get("original_filename")
-    mime_type = payload.get("mime_type", "text/plain")
-    size = payload.get("size", 0)
-    storage_path = payload.get("storage_path", "")
-    metadata = payload.get("metadata", {})
-    
-    if not filename or not original_filename:
-        raise HTTPException(status_code=400, detail="filename and original_filename are required")
-
-    doc = project_service.create_document(
-        project_id=project_id,
-        filename=filename,
-        original_filename=original_filename,
-        mime_type=mime_type,
-        size=size,
-        storage_path=storage_path,
-        metadata=metadata
-    )
-    
-    background_tasks.add_task(upload_to_ragflow_task, project_id, doc.id, filename)
-    return doc
+@app.post(
+    "/api/v1/projects/{project_id}/documents/upload",
+    response_model=Document,
+    status_code=status.HTTP_201_CREATED,
+)
+def upload_document(
+    project_id: UUID,
+    file: UploadFile = File(...),
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("Knowledge", "create")),
+):
+    project = require_project_access(user, project_id, db, projects=project_service)
+    try:
+        return knowledge_service.upload(project, file.file, file.filename or "", file.content_type)
+    except KnowledgeUploadError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
 
 @app.delete("/api/v1/projects/{project_id}/documents/{document_id}")
-def delete_document(project_id: UUID, document_id: UUID, background_tasks: BackgroundTasks):
-    doc = project_service.repo.get_document(project_id, document_id)
-    success = project_service.delete_document(project_id, document_id)
-    if not success:
+def delete_document(
+    project_id: UUID,
+    document_id: UUID,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("Knowledge", "delete")),
+):
+    # Access is checked before the lookup, so another project's document is a plain 404.
+    project = require_project_access(user, project_id, db, projects=project_service)
+    if not knowledge_service.delete(project, document_id):
         raise HTTPException(status_code=404, detail="Document not found")
-        
-    if doc:
-        background_tasks.add_task(delete_from_ragflow_task, doc.filename)
-        
     return {"detail": "Document deleted successfully"}
+
+
+@app.get("/api/v1/projects/{project_id}/knowledge/status")
+def get_knowledge_status(
+    project_id: UUID,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    authorized: bool = Depends(has_permission("Knowledge", "view")),
+):
+    project = require_project_access(user, project_id, db, projects=project_service)
+    return knowledge_service.status(project)
 
 
 @app.post("/api/v1/projects/{project_id}/import-framework")
@@ -1964,6 +2075,9 @@ def execute_test_case(project_id: UUID, test_case_id: UUID, background_tasks: Ba
         execution_id = ExecutionService().start_test_case_run(
             project_id, test_case_id, background_tasks, workflow_service=workflow_service,
         )
+    except ProjectConfigurationError as exc:
+        # Spec 0001, AC-3: an unready project is refused before anything is queued.
+        return JSONResponse(status_code=exc.status_code, content=exc.as_detail())
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"status": "started", "execution_id": str(execution_id)}
@@ -2004,6 +2118,8 @@ def execute_batch(project_id: UUID, test_case_ids: list[UUID], background_tasks:
         batch_id = ExecutionService().start_batch_run(
             project_id, test_case_ids, background_tasks, enforce_project_scope=False,
         )
+    except ProjectConfigurationError as exc:
+        return JSONResponse(status_code=exc.status_code, content=exc.as_detail())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "started", "batch_id": str(batch_id)}
@@ -2684,6 +2800,7 @@ def create_object_page(
         )
     except ObjectRepositoryError as exc:
         raise _objrepo_error(exc)
+    queue_knowledge_source(project_id, "locator", page.id)
     return _page_response(page)
 
 
@@ -2702,6 +2819,7 @@ def update_object_page(
         )
     except ObjectRepositoryError as exc:
         raise _objrepo_error(exc)
+    queue_knowledge_source(project_id, "locator", page.id)
     return PageUpdateResponse(page=_page_response(page), scripts_rewritten=rewritten)
 
 
@@ -2719,6 +2837,7 @@ def delete_object_page(
         )
     except ObjectRepositoryError as exc:
         raise _objrepo_error(exc)
+    queue_knowledge_source(project_id, "locator", page_id, remove=True)
     return PageDeleteResponse(elements_deleted=deleted, referencing_test_cases=references)
 
 
@@ -2759,6 +2878,7 @@ def create_object_element(
         )
     except ObjectRepositoryError as exc:
         raise _objrepo_error(exc)
+    queue_knowledge_source(project_id, "locator", page.id)
     return _element_response(page, element)
 
 
@@ -2778,6 +2898,7 @@ def update_object_element(
         )
     except ObjectRepositoryError as exc:
         raise _objrepo_error(exc)
+    queue_knowledge_source(project_id, "locator", page.id)
     return ElementUpdateResponse(element=_element_response(page, element), scripts_rewritten=rewritten)
 
 
@@ -2795,7 +2916,19 @@ def delete_object_element(
         )
     except ObjectRepositoryError as exc:
         raise _objrepo_error(exc)
+    _queue_element_page(project_id, element_id)
     return ElementDeleteResponse(referencing_test_cases=references)
+
+
+def _queue_element_page(project_id: UUID, element_id: UUID) -> None:
+    """Index the page again after one of its elements was deleted (spec 0006, AC-15)."""
+    try:
+        found = object_repository_service.load(project_id).find_element(element_id)
+    except Exception:
+        logger.exception("Could not find the page of deleted element %s", element_id)
+        return
+    if found:
+        queue_knowledge_source(project_id, "locator", found[0].id)
 
 
 @app.post(f"{_OBJREPO}/scan", response_model=ScanStartResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -3110,7 +3243,16 @@ def jira_webhook(payload: dict = Body(...), db: Session = Depends(get_db)):
     key = issue.get("key")
     if not key:
         return {"status": "ignored", "reason": "No issue key in payload"}
-        
+
+    # Knowledge (spec 0006, AC-14a): every status change reindexes the defect, before the
+    # resolved status filter, once for each project that still links the key.
+    from backend.services.knowledge_sources import defect_linked
+
+    knowledge_repo = get_project_repository()
+    for linked_project in knowledge_repo.list_projects():
+        if defect_linked(knowledge_repo, linked_project, key):
+            queue_defect_keys(linked_project.id, [key])
+
     status_name = issue.get("fields", {}).get("status", {}).get("name")
     if not status_name:
         return {"status": "ignored", "reason": "No status name in payload"}
@@ -3120,7 +3262,6 @@ def jira_webhook(payload: dict = Body(...), db: Session = Depends(get_db)):
     if status_name not in resolved_statuses:
         return {"status": "ignored", "reason": f"Status '{status_name}' is not in resolved list."}
         
-    from backend.repository.project_repository import get_project_repository
     from backend.database.db import provider
     
     repo = get_project_repository()
@@ -3157,7 +3298,7 @@ def sync_requirement_jira(project_id: UUID, requirement_id: UUID, user: UserDB =
     from backend.models.state import WorkflowState
     
     local_graph = build_graph()
-    state = WorkflowState(requirement=requirement, generated_scenarios=scenarios)
+    state = WorkflowState(project_id=project_id, requirement=requirement, generated_scenarios=scenarios)
     state.add_log("Triggering JIRA user story sync via service")
     
     config = {
@@ -3188,7 +3329,7 @@ def sync_execution_bug(project_id: UUID, execution_id: UUID, user: UserDB = Depe
     from backend.models.state import WorkflowState
     
     local_graph = build_graph()
-    state = WorkflowState(execution_results=[ex])
+    state = WorkflowState(project_id=project_id, execution_results=[ex])
     state.add_log("Triggering JIRA bug sync via service")
     
     config = {
@@ -3199,6 +3340,11 @@ def sync_execution_bug(project_id: UUID, execution_id: UUID, user: UserDB = Depe
     }
     raw_result = local_graph.invoke(state, config)
     final_state = WorkflowState(**raw_result)
+
+    # Knowledge (spec 0006, AC-14a): the keys the sync saved, read back from the repository.
+    saved_ex = repo.get_execution_result(project_id, execution_id)
+    saved_tc = repo.get_test_case(ex.test_case_id)
+    queue_defect_keys(project_id, [getattr(saved_ex, "jira_bug_id", None), getattr(saved_tc, "jira_issue_key", None)])
     
     return {"status": "success", "logs": final_state.logs}
 

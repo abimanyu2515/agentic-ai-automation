@@ -20,7 +20,7 @@ from backend.services.llm import LLMRateLimitTimeout, LLMService, reset_role_poo
 
 _ROLE_ENV_KEYS = [
     f"{role}_LLM_{name}"
-    for role in ("GENERATION", "ANALYSIS", "CHAT")
+    for role in ("GENERATION", "ANALYSIS", "CHAT", "RETRIEVAL")
     for name in (
         "PROVIDER", "MODELS", "MODEL", "API_KEY", "API_BASE", "MAX_CONCURRENT",
         "MIN_INTERVAL_SECONDS", "COOLDOWN_SECONDS", "MAX_WAIT_SECONDS",
@@ -374,7 +374,7 @@ def test_settings_endpoint_returns_roles_without_keys():
     from backend.main import app
 
     body = TestClient(app).get("/api/v1/settings").json()
-    assert set(body["llm_roles"]) == {"generation", "analysis", "chat"}
+    assert set(body["llm_roles"]) == {"generation", "analysis", "chat", "retrieval"}
     assert isinstance(body["chat_enabled"], bool)
     for role in body["llm_roles"].values():
         assert set(role) == {

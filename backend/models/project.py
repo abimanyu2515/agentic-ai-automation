@@ -24,6 +24,9 @@ class Project(BaseModel):
     target_username: str | None = None
     target_password_enc: str | None = None
     is_safe_test_environment: bool = False
+    # Spec 0006: this project's own RAGFlow dataset. Set once by the knowledge
+    # indexer through set_project_rag_dataset; never shared between projects.
+    rag_dataset_id: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     requirements: list[UUID] = Field(default_factory=list)
     is_deleted: bool = False

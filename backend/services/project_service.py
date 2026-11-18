@@ -254,33 +254,6 @@ class ProjectService:
     def get_documents(self, project_id: UUID) -> list[Document]:
         return self.repo.get_documents(project_id)
 
-    def create_document(
-        self,
-        project_id: UUID,
-        filename: str,
-        original_filename: str,
-        mime_type: str,
-        size: int,
-        storage_path: str,
-        metadata: dict | None = None
-    ) -> Document:
-        doc = Document(
-            id=uuid4(),
-            project_id=project_id,
-            filename=filename,
-            original_filename=original_filename,
-            mime_type=mime_type,
-            size=size,
-            storage_path=storage_path,
-            embedding_status="pending",
-            metadata=metadata or {}
-        )
-        self.repo.save_document(doc)
-        return doc
-
-    def delete_document(self, project_id: UUID, document_id: UUID) -> bool:
-        return self.repo.delete_document(project_id, document_id)
-
     def get_execution_results(self, project_id: UUID) -> list[ExecutionResult]:
         return self.repo.get_execution_results(project_id)
 

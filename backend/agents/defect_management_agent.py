@@ -86,6 +86,7 @@ from backend.models.execution_result import ExecutionStatus
 from backend.services.llm import LLMService
 from backend.services.jira_service import JiraService
 from backend.utils.prompts import load_prompt
+from backend.agents.knowledge_context import with_project_knowledge
 
 logger = logging.getLogger("backend.agents.defect_management_agent")
 
@@ -172,6 +173,8 @@ class DefectManagementAgent(BaseAgent):
             failure_message=result.error_message or "Unknown failure",
             trace_log=result.error_message or "Unknown failure"
         )
+        # Reuses the analysis stage context (spec 0006, AC-21).
+        prompt = with_project_knowledge(prompt, state.retrieved_context)
 
         try:
             analysis = self.llm_service.structured_generate(

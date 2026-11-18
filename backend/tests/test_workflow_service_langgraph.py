@@ -382,7 +382,7 @@ def test_unsafe_project_does_not_record_templates_live():
 
 def test_run_execution_and_stream_via_langgraph(mock_llm_service, fake_playwright_runner):
     ws = WorkflowService()
-    project = ws.repo.create_project("LangGraph Project", "Testing")
+    project = ws.repo.create_project("LangGraph Project", "Testing", target_url="https://langgraph.example.com")
     req = ws.repo.create_requirement(project.id, "Req", "Desc", "high", "finance")
 
     sc = Scenario(requirement_id=req.id, scenario_name="Valid Login", description="desc", approved=True)
@@ -407,6 +407,10 @@ def test_run_execution_and_stream_via_langgraph(mock_llm_service, fake_playwrigh
     results = ws.repo.get_execution_results(project.id)
     assert len(results) == 1, active_execution_events[str(tc.id)][-1]
     assert results[0].status.value == "passed"
+    # Spec 0001, AC-4: the run used and saved the project snapshot, and the
+    # runner got TARGET_URL from it (captured here because no caller passed one).
+    assert results[0].project_config_snapshot["target_url"] == "https://langgraph.example.com"
+    assert fake_playwright_runner.calls[-1]["target_url"] == "https://langgraph.example.com"
 
 
 def test_script_issues_ignore_unobserved_locators_but_catch_placeholders():

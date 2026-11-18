@@ -19,6 +19,7 @@ from backend.models.requirement import Requirement
 from backend.agents.execution_analysis_agent import ExecutionAnalysisAgent
 from backend.agents.defect_management_agent import DefectManagementAgent
 from backend.repository.project_repository import get_project_repository
+from backend.services.knowledge_indexer import queue_defect_keys, queue_knowledge_source
 from backend.services.llm_context import llm_operation
 from backend.services.playwright_script_validation import (
     validate_playwright_script,
@@ -93,7 +94,7 @@ class WorkflowService:
         from backend.models.operation import WorkflowOperation
 
         local_graph = build_graph()
-        state = WorkflowState(requirement=requirement)
+        state = WorkflowState(project_id=project_id, requirement=requirement)
         state.add_log("Starting requirement ingestion via LangGraph")
 
         config = {"configurable": {"operation": WorkflowOperation.INGEST}}
@@ -120,7 +121,7 @@ class WorkflowService:
         scenario_agent = ScenarioAgent(scenario_count=count)
         local_graph = build_graph(scenario_agent=scenario_agent)
         
-        state = WorkflowState(requirement=requirement)
+        state = WorkflowState(project_id=project_id, requirement=requirement)
         state.add_log("Starting scenario generation from service via LangGraph")
         
         config = {"configurable": {"operation": WorkflowOperation.GENERATE_SCENARIOS}}
@@ -153,7 +154,7 @@ class WorkflowService:
         from backend.models.operation import WorkflowOperation
 
         local_graph = build_graph()
-        state = WorkflowState(requirement=requirement, generated_scenarios=scenarios)
+        state = WorkflowState(project_id=project_id, requirement=requirement, generated_scenarios=scenarios)
         state.add_log("Starting backlog creation via LangGraph")
 
         config = {"configurable": {"operation": WorkflowOperation.BACKLOG}}
@@ -185,7 +186,7 @@ class WorkflowService:
         from backend.agents.test_case_agent import TestCaseAgent
         
         local_graph = build_graph(test_case_agent=TestCaseAgent(max_workers=5))
-        state = WorkflowState(requirement=requirement, generated_scenarios=approved_scenarios)
+        state = WorkflowState(project_id=project_id, requirement=requirement, generated_scenarios=approved_scenarios)
         state.add_log("Starting test case generation and evaluation steps from service via LangGraph")
         
         config = {"configurable": {"operation": WorkflowOperation.GENERATE_TESTCASES}}
@@ -193,10 +194,24 @@ class WorkflowService:
         final_state = WorkflowState(**raw_result)
 
         # Replace existing cases only after generation succeeds, so failures preserve them.
+        replaced = []
         for scenario in approved_scenarios:
+            replaced += self.repo.get_test_cases(scenario.id)
             self.repo.delete_test_cases_for_scenario(scenario.id)
         self.repo.save_test_cases(final_state.generated_test_cases)
+        # Knowledge (spec 0006, AC-15): replaced cases leave the index, approved new ones join it.
+        for case in replaced:
+            queue_knowledge_source(project_id, "test_case", case.id, remove=True)
+        # Their bug keys, read before the delete, are checked for a remaining link (AC-14a).
+        queue_defect_keys(project_id, [case.jira_issue_key for case in replaced])
+        self._queue_test_cases(project_id, final_state.generated_test_cases)
         return final_state.generated_test_cases
+
+    @staticmethod
+    def _queue_test_cases(project_id: UUID, test_cases) -> None:
+        """The indexer keeps only the approved ones (spec 0006, AC-14)."""
+        for case in test_cases or []:
+            queue_knowledge_source(project_id, "test_case", case.id)
 
     @llm_operation("generate_test_data")
     def generate_test_data_test_cases(
@@ -288,6 +303,7 @@ class WorkflowService:
                 reserved_test_data.extend(related_case.test_data_sets)
 
         state = WorkflowState(
+            project_id=project_id,
             requirement=requirement,
             generated_scenarios=[scenario],
             generated_test_cases=[test_case],
@@ -599,7 +615,7 @@ class WorkflowService:
         if not requirement:
             raise ValueError(f"Requirement {requirement_id} not found in project {project_id}")
 
-        test_data_state = TestDataAgent().run(WorkflowState(requirement=requirement))
+        test_data_state = TestDataAgent().run(WorkflowState(project_id=project_id, requirement=requirement))
         rows = test_data_state.generated_test_data
         if len(rows) != 20:
             raise ValueError(
@@ -700,6 +716,7 @@ class WorkflowService:
             generated_cases.append(case)
 
         case_state = WorkflowState(
+            project_id=project_id,
             requirement=requirement,
             generated_scenarios=row_scenarios,
             generated_test_cases=generated_cases,
@@ -744,6 +761,7 @@ class WorkflowService:
             ]
             if cases_missing_scripts:
                 script_state = WorkflowState(
+                    project_id=project_id,
                     requirement=requirement,
                     generated_scenarios=row_scenarios,
                     generated_test_cases=cases_missing_scripts,
@@ -769,6 +787,7 @@ class WorkflowService:
                 self._flag_unknown_keys(project_id, case)
             repo.save_test_cases(case_state.generated_test_cases)
 
+        self._queue_test_cases(project_id, case_state.generated_test_cases)
         return test_data_state.test_data_report, case_state.generated_test_cases
 
     @llm_operation("generate_script")
@@ -807,6 +826,7 @@ class WorkflowService:
 
         test_case.automation_framework = automation_framework
         state = WorkflowState(
+            project_id=project_id,
             requirement=requirement,
             generated_test_cases=[test_case],
             human_approved_test_case_ids=[test_case.id]
@@ -892,7 +912,7 @@ active_execution_events = {}
 
 
 @llm_operation("execute_test_case")
-def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID, test_case_id: UUID, execution_id: UUID = None, background_tasks = None) -> None:
+def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID, test_case_id: UUID, execution_id: UUID = None, background_tasks = None, project_config: dict | None = None) -> None:
     tc_id_str = str(test_case_id)
     events = []
     active_execution_events[tc_id_str] = events
@@ -914,6 +934,15 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
         if not test_case:
             raise ValueError(f"TestCase {test_case_id} not found")
 
+        if project_config is None:
+            # ExecutionService captures this at accept time (spec 0001). A direct
+            # caller still gets the readiness check and a snapshot.
+            from backend.services.project_configuration import capture_project_snapshot
+            project = workflow_service.repo.get_project(project_id)
+            if project is None:
+                raise ValueError(f"Project {project_id} not found")
+            project_config = capture_project_snapshot(project)
+
         scenario = workflow_service.repo.get_scenario(test_case.scenario_id)
         if not scenario:
             raise ValueError(f"Scenario {test_case.scenario_id} not found")
@@ -933,6 +962,7 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
             human_approved.append(test_case.id)
 
         state = WorkflowState(
+            project_id=project_id,
             requirement=requirement,
             generated_test_cases=[test_case],
             human_approved_test_case_ids=human_approved
@@ -984,7 +1014,9 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
         from backend.graph.workflow import build_graph
         from backend.models.operation import WorkflowOperation
         
-        exec_agent = ExecutionAgent(on_log=on_log_callback, project_id=project_id, repo=workflow_service.repo)
+        exec_agent = ExecutionAgent(
+            on_log=on_log_callback, project_id=project_id, repo=workflow_service.repo, project_config=project_config,
+        )
         local_graph = build_graph(
             execution_agent=exec_agent,
             execution_analysis_agent=LoggingExecutionAnalysisAgent(),
@@ -1002,6 +1034,13 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
         # Save updated test case status and execution result in repo
         workflow_service.repo.update_test_case(test_case)
         workflow_service.repo.save_execution_result(project_id, result)
+        # Knowledge (spec 0006, AC-15): a failed run, with its analysis, joins the index.
+        from backend.services.knowledge_sources import FAILED_EXECUTION_STATUSES
+
+        if getattr(result.status, "value", result.status) in FAILED_EXECUTION_STATUSES:
+            queue_knowledge_source(project_id, "execution_failure", result.id)
+        # A bug linked by the defect agent is indexed from Jira (AC-14a).
+        queue_defect_keys(project_id, [result.jira_bug_id])
 
         # Element and locator health from the run's [OBJREPO] markers (spec 0004, AC-10).
         from backend.services.execution_service import ExecutionService

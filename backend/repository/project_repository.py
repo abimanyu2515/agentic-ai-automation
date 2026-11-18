@@ -1,3 +1,4 @@
+import functools
 import json
 import threading
 from abc import ABC, abstractmethod
@@ -10,12 +11,22 @@ from backend.models.requirement import Requirement, RequirementSource
 from backend.models.scenario import Scenario
 from backend.models.test_case import TestCase
 from backend.models.document import Document
+from backend.models.knowledge import (
+    REMOTE_DELETE_DATASET,
+    REMOTE_DELETE_DOCUMENT,
+    REMOTE_DELETE_ERROR_CHARS,
+    KnowledgeEntry,
+    KnowledgeRemoteDelete,
+)
 from backend.models.execution_result import ExecutionResult
 from backend.models.release import Release
 from backend.models.test_cycle import TestCycle
 
 STORE_PATH = Path(__file__).parent.parent / "database" / "project_store.json"
 
+
+
+KNOWLEDGE_MIGRATION_MARKER = "knowledge_migration_0006"
 
 class ProjectURLConflictError(ValueError):
     def __init__(self, conflicting_project_id: UUID | None = None):
@@ -147,6 +158,86 @@ class ProjectRepository(ABC):
         pass
 
     @abstractmethod
+    def find_documents_by_remote_ids(self, project_id: UUID, remote_ids: list[str]) -> list[Document]:
+        """Documents of this project whose remote_doc_id is in remote_ids (spec 0006 search mapping)."""
+        pass
+
+    @abstractmethod
+    def set_project_rag_dataset(self, project_id: UUID, dataset_id: str) -> str | None:
+        """Store the project's RAGFlow dataset ID only if none is stored yet.
+        Returns the stored value (the existing one when another writer won)."""
+        pass
+
+    def run_knowledge_migration_0006(self) -> int:
+        """Spec 0006, AC-9: mark documents created before real uploads as failed,
+        once. PostgreSQL does this in its Alembic migration, so the default does
+        nothing. Returns how many documents were marked."""
+        return 0
+
+    # Knowledge entries (spec 0006, AC-14): one per (project_id, source_type, source_ref).
+
+    @abstractmethod
+    def get_knowledge_entry(self, project_id: UUID, source_type: str, source_ref: str) -> KnowledgeEntry | None:
+        pass
+
+    @abstractmethod
+    def save_knowledge_entry(self, entry: KnowledgeEntry) -> None:
+        """Insert or replace the entry for its (project_id, source_type, source_ref)."""
+        pass
+
+    @abstractmethod
+    def delete_knowledge_entry(self, project_id: UUID, source_type: str, source_ref: str) -> bool:
+        pass
+
+    @abstractmethod
+    def list_knowledge_entries(self, project_id: UUID) -> list[KnowledgeEntry]:
+        pass
+
+    @abstractmethod
+    def find_knowledge_entries_by_remote_ids(self, project_id: UUID, remote_ids: list[str]) -> list[KnowledgeEntry]:
+        """Entries of this project whose remote_doc_id is in remote_ids (spec 0006 search mapping)."""
+        pass
+
+    # Pending RAGFlow deletes (spec 0007): one row per remote target.
+
+    @abstractmethod
+    def add_remote_delete(self, row: KnowledgeRemoteDelete) -> KnowledgeRemoteDelete | None:
+        """Save a pending delete (AC-2). Returns the existing row when this target
+        already has one, and None when a dataset row for the same dataset absorbs
+        a document row. Saving a dataset row removes that dataset's document rows."""
+        pass
+
+    @abstractmethod
+    def get_remote_delete(self, row_id: UUID) -> KnowledgeRemoteDelete | None:
+        pass
+
+    @abstractmethod
+    def get_dataset_delete(self, dataset_id: str) -> KnowledgeRemoteDelete | None:
+        """The `dataset` row for this dataset, if any."""
+        pass
+
+    @abstractmethod
+    def list_remote_deletes(self, project_id: UUID | None = None) -> list[KnowledgeRemoteDelete]:
+        """Rows of one project, oldest first. None lists every project, deleted ones too."""
+        pass
+
+    @abstractmethod
+    def record_remote_delete_failure(self, row_id: UUID, error: str, at: datetime) -> None:
+        """Add 1 to attempts and set last_error (cut to 500 characters) and
+        last_attempt_at. Does nothing when the row is gone."""
+        pass
+
+    @abstractmethod
+    def remove_remote_delete(self, row_id: UUID) -> bool:
+        """Remove the row. False when it was already gone."""
+        pass
+
+    def is_execution_deleted(self, project_id: UUID, execution_id: UUID) -> bool:
+        """Whether an execution was soft deleted. PostgreSQL deletes executions
+        outright, so the default is False; the JSON store keeps a flag."""
+        return False
+
+    @abstractmethod
     def get_execution_results(self, project_id: UUID) -> list[ExecutionResult]:
         pass
 
@@ -243,6 +334,16 @@ class ProjectRepository(ABC):
     @abstractmethod
     def reset_demo_data(self) -> None:
         pass
+
+
+def _locked(method):
+    """Hold the JSON store lock for a whole read, change, write. The knowledge indexer
+    writes from its own thread, so an unlocked writer could overwrite its update."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._write_lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 class JSONProjectRepository(ProjectRepository):
@@ -384,11 +485,16 @@ class JSONProjectRepository(ProjectRepository):
             for idx, p in enumerate(projects):
                 if p["id"] == p_id_str:
                     project.target_url = normalized_url
+                    # rag_dataset_id is owned by set_project_rag_dataset (spec 0006):
+                    # a stale copy of the project must never clear or replace it.
+                    if p.get("rag_dataset_id"):
+                        project.rag_dataset_id = p["rag_dataset_id"]
                     projects[idx] = project.model_dump(mode="json")
                     self._write_raw(raw)
                     return project
             return None
 
+    @_locked
     def delete_project(self, project_id: UUID, deleted_by: UUID | None = None) -> bool:
         raw = self._read_raw()
         projects = raw.setdefault("projects", [])
@@ -472,6 +578,7 @@ class JSONProjectRepository(ProjectRepository):
                     result.append(Requirement.model_validate(req_data))
         return result
 
+    @_locked
     def create_requirement(
         self,
         project_id: UUID,
@@ -552,6 +659,7 @@ class JSONProjectRepository(ProjectRepository):
         self._write_raw(raw)
         return req
 
+    @_locked
     def save_requirement(
         self,
         requirement: Requirement,
@@ -574,6 +682,7 @@ class JSONProjectRepository(ProjectRepository):
         reqs_raw[req_id_str] = req_dump
         self._write_raw(raw)
 
+    @_locked
     def delete_requirement(self, requirement_id: UUID, deleted_by: UUID | None = None) -> bool:
         raw = self._read_raw()
         requirement = raw.setdefault("requirements", {}).get(str(requirement_id))
@@ -603,6 +712,7 @@ class JSONProjectRepository(ProjectRepository):
                     result.append(Scenario.model_validate(s_data))
         return result
 
+    @_locked
     def save_scenarios(self, scenarios: list[Scenario]) -> None:
         raw = self._read_raw()
         scenarios_raw = raw.setdefault("scenarios", {})
@@ -610,6 +720,7 @@ class JSONProjectRepository(ProjectRepository):
             scenarios_raw[str(s.id)] = s.model_dump(mode="json")
         self._write_raw(raw)
 
+    @_locked
     def update_scenario(self, scenario: Scenario) -> Scenario | None:
         raw = self._read_raw()
         scenarios_raw = raw.setdefault("scenarios", {})
@@ -620,6 +731,7 @@ class JSONProjectRepository(ProjectRepository):
             return scenario
         return None
 
+    @_locked
     def delete_scenario(self, scenario_id: UUID, deleted_by: UUID | None = None) -> bool:
         raw = self._read_raw()
         scenarios_raw = raw.setdefault("scenarios", {})
@@ -641,6 +753,7 @@ class JSONProjectRepository(ProjectRepository):
             return True
         return False
 
+    @_locked
     def clear_scenarios_for_requirement(self, requirement_id: UUID) -> None:
         raw = self._read_raw()
         scenarios_raw = raw.setdefault("scenarios", {})
@@ -668,6 +781,7 @@ class JSONProjectRepository(ProjectRepository):
                     result.append(TestCase.model_validate(tc_data))
         return result
 
+    @_locked
     def save_test_cases(self, test_cases: list[TestCase]) -> None:
         raw = self._read_raw()
         tcs_raw = raw.setdefault("test_cases", {})
@@ -675,6 +789,7 @@ class JSONProjectRepository(ProjectRepository):
             tcs_raw[str(tc.id)] = tc.model_dump(mode="json")
         self._write_raw(raw)
 
+    @_locked
     def update_test_case(self, test_case: TestCase) -> TestCase | None:
         raw = self._read_raw()
         tcs_raw = raw.setdefault("test_cases", {})
@@ -695,6 +810,7 @@ class JSONProjectRepository(ProjectRepository):
                 return TestCase.model_validate(tc_data)
         return None
 
+    @_locked
     def delete_test_case(self, test_case_id: UUID, deleted_by: UUID | None = None) -> bool:
         raw = self._read_raw()
         tcs_raw = raw.setdefault("test_cases", {})
@@ -708,6 +824,7 @@ class JSONProjectRepository(ProjectRepository):
             return True
         return False
 
+    @_locked
     def delete_test_cases_for_scenario(self, scenario_id: UUID) -> None:
         raw = self._read_raw()
         tcs_raw = raw.setdefault("test_cases", {})
@@ -737,20 +854,182 @@ class JSONProjectRepository(ProjectRepository):
         return None
 
     def save_document(self, document: Document) -> None:
-        raw = self._read_raw()
-        docs_raw = raw.setdefault("documents", {})
-        docs_raw[str(document.id)] = document.model_dump(mode="json")
-        self._write_raw(raw)
+        # Locked: the knowledge indexer writes documents from its own thread.
+        with self._write_lock:
+            raw = self._read_raw()
+            docs_raw = raw.setdefault("documents", {})
+            docs_raw[str(document.id)] = document.model_dump(mode="json")
+            self._write_raw(raw)
 
     def delete_document(self, project_id: UUID, document_id: UUID) -> bool:
-        raw = self._read_raw()
-        docs_raw = raw.setdefault("documents", {})
-        doc_id_str = str(document_id)
-        if doc_id_str in docs_raw and docs_raw[doc_id_str].get("project_id") == str(project_id):
-            del docs_raw[doc_id_str]
+        with self._write_lock:
+            raw = self._read_raw()
+            docs_raw = raw.setdefault("documents", {})
+            doc_id_str = str(document_id)
+            if doc_id_str in docs_raw and docs_raw[doc_id_str].get("project_id") == str(project_id):
+                del docs_raw[doc_id_str]
+                self._write_raw(raw)
+                return True
+            return False
+
+    def find_documents_by_remote_ids(self, project_id: UUID, remote_ids: list[str]) -> list[Document]:
+        wanted = {r for r in remote_ids if r}
+        if not wanted:
+            return []
+        return [d for d in self.get_documents(project_id) if d.remote_doc_id in wanted]
+
+    def run_knowledge_migration_0006(self) -> int:
+        """AC-9 for the JSON store. A document uploaded since spec 0006 is saved
+        under its own <document_id> folder, so its storage_path holds its ID;
+        an older one never had a file. A marker makes it run only once."""
+        from backend.models.document import OLD_DOCUMENT_ERROR
+
+        with self._write_lock:
+            raw = self._read_raw()
+            if raw.get(KNOWLEDGE_MIGRATION_MARKER) == "done":
+                return 0
+            marked = 0
+            for doc_id, doc_data in raw.get("documents", {}).items():
+                if doc_id not in (doc_data.get("storage_path") or ""):
+                    doc_data["embedding_status"] = "failed"
+                    doc_data["error"] = OLD_DOCUMENT_ERROR
+                    marked += 1
+            raw[KNOWLEDGE_MIGRATION_MARKER] = "done"
+            self._write_raw(raw)
+            return marked
+
+    def set_project_rag_dataset(self, project_id: UUID, dataset_id: str) -> str | None:
+        with self._write_lock:
+            raw = self._read_raw()
+            for p in raw.get("projects", []):
+                if p.get("id") == str(project_id):
+                    if not p.get("rag_dataset_id"):
+                        p["rag_dataset_id"] = dataset_id
+                        self._write_raw(raw)
+                    return p["rag_dataset_id"]
+            return None
+
+    @staticmethod
+    def _knowledge_key(project_id: UUID, source_type: str, source_ref: str) -> str:
+        return f"{project_id}|{source_type}|{source_ref}"
+
+    def get_knowledge_entry(self, project_id: UUID, source_type: str, source_ref: str) -> KnowledgeEntry | None:
+        data = self._read_raw().get("knowledge_entries", {}).get(self._knowledge_key(project_id, source_type, source_ref))
+        return KnowledgeEntry.model_validate(data) if data else None
+
+    def save_knowledge_entry(self, entry: KnowledgeEntry) -> None:
+        # Locked: the knowledge indexer writes entries from its own thread.
+        with self._write_lock:
+            raw = self._read_raw()
+            entries = raw.setdefault("knowledge_entries", {})
+            entries[self._knowledge_key(entry.project_id, entry.source_type, entry.source_ref)] = entry.model_dump(mode="json")
+            self._write_raw(raw)
+
+    def delete_knowledge_entry(self, project_id: UUID, source_type: str, source_ref: str) -> bool:
+        with self._write_lock:
+            raw = self._read_raw()
+            entries = raw.setdefault("knowledge_entries", {})
+            if entries.pop(self._knowledge_key(project_id, source_type, source_ref), None) is None:
+                return False
             self._write_raw(raw)
             return True
-        return False
+
+    def list_knowledge_entries(self, project_id: UUID) -> list[KnowledgeEntry]:
+        p_id_str = str(project_id)
+        return [
+            KnowledgeEntry.model_validate(data)
+            for data in self._read_raw().get("knowledge_entries", {}).values()
+            if data.get("project_id") == p_id_str
+        ]
+
+    def find_knowledge_entries_by_remote_ids(self, project_id: UUID, remote_ids: list[str]) -> list[KnowledgeEntry]:
+        wanted = {r for r in remote_ids if r}
+        if not wanted:
+            return []
+        return [e for e in self.list_knowledge_entries(project_id) if e.remote_doc_id in wanted]
+
+    # ------------------------------------------------------------ pending remote deletes (spec 0007)
+
+    @staticmethod
+    def _remote_delete_rows(raw: dict) -> dict:
+        return raw.setdefault("knowledge_remote_deletes", {})
+
+    def add_remote_delete(self, row: KnowledgeRemoteDelete) -> KnowledgeRemoteDelete | None:
+        with self._write_lock:
+            raw = self._read_raw()
+            rows = self._remote_delete_rows(raw)
+            current = [KnowledgeRemoteDelete.model_validate(data) for data in rows.values()]
+            dataset_row = next(
+                (r for r in current if r.kind == REMOTE_DELETE_DATASET and r.dataset_id == row.dataset_id), None
+            )
+            if row.kind == REMOTE_DELETE_DATASET:
+                if dataset_row is not None:
+                    return dataset_row
+                # A dataset delete covers every document in it.
+                for other in current:
+                    if other.kind == REMOTE_DELETE_DOCUMENT and other.dataset_id == row.dataset_id:
+                        rows.pop(str(other.id), None)
+            else:
+                if dataset_row is not None:
+                    return None
+                existing = next(
+                    (
+                        r for r in current
+                        if r.kind == REMOTE_DELETE_DOCUMENT
+                        and r.dataset_id == row.dataset_id
+                        and r.remote_doc_id == row.remote_doc_id
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    return existing
+            rows[str(row.id)] = row.model_dump(mode="json")
+            self._write_raw(raw)
+            return row
+
+    def get_remote_delete(self, row_id: UUID) -> KnowledgeRemoteDelete | None:
+        with self._write_lock:
+            data = self._read_raw().get("knowledge_remote_deletes", {}).get(str(row_id))
+        return KnowledgeRemoteDelete.model_validate(data) if data else None
+
+    def get_dataset_delete(self, dataset_id: str) -> KnowledgeRemoteDelete | None:
+        with self._write_lock:
+            rows = list(self._read_raw().get("knowledge_remote_deletes", {}).values())
+        for data in rows:
+            if data.get("kind") == REMOTE_DELETE_DATASET and data.get("dataset_id") == dataset_id:
+                return KnowledgeRemoteDelete.model_validate(data)
+        return None
+
+    def list_remote_deletes(self, project_id: UUID | None = None) -> list[KnowledgeRemoteDelete]:
+        with self._write_lock:
+            rows = list(self._read_raw().get("knowledge_remote_deletes", {}).values())
+        result = [KnowledgeRemoteDelete.model_validate(data) for data in rows]
+        if project_id is not None:
+            result = [r for r in result if r.project_id == project_id]
+        return sorted(result, key=lambda r: r.created_at)
+
+    def record_remote_delete_failure(self, row_id: UUID, error: str, at: datetime) -> None:
+        with self._write_lock:
+            raw = self._read_raw()
+            data = self._remote_delete_rows(raw).get(str(row_id))
+            if data is None:
+                return
+            data["attempts"] = int(data.get("attempts") or 0) + 1
+            data["last_error"] = (error or "")[:REMOTE_DELETE_ERROR_CHARS]
+            data["last_attempt_at"] = at.isoformat()
+            self._write_raw(raw)
+
+    def remove_remote_delete(self, row_id: UUID) -> bool:
+        with self._write_lock:
+            raw = self._read_raw()
+            if self._remote_delete_rows(raw).pop(str(row_id), None) is None:
+                return False
+            self._write_raw(raw)
+            return True
+
+    def is_execution_deleted(self, project_id: UUID, execution_id: UUID) -> bool:
+        data = self._read_raw().get("execution_results", {}).get(str(execution_id))
+        return bool(data and data.get("project_id") == str(project_id) and data.get("is_deleted", False))
 
     def get_execution_results(self, project_id: UUID) -> list[ExecutionResult]:
         raw = self._read_raw()
@@ -766,6 +1045,7 @@ class JSONProjectRepository(ProjectRepository):
                 result.append(ExecutionResult.model_validate(cleaned))
         return result
 
+    @_locked
     def delete_execution(self, execution_id: UUID, deleted_by: UUID | None = None) -> bool:
         raw = self._read_raw()
         executions = raw.setdefault("execution_results", {})
@@ -779,6 +1059,7 @@ class JSONProjectRepository(ProjectRepository):
         self._write_raw(raw)
         return True
 
+    @_locked
     def delete_failed_executions(self, project_id: UUID, deleted_by: UUID | None = None) -> int:
         raw = self._read_raw()
         executions = raw.setdefault("execution_results", {})
@@ -808,11 +1089,16 @@ class JSONProjectRepository(ProjectRepository):
             return ExecutionResult.model_validate(cleaned)
         return None
 
+    @_locked
     def save_execution_result(self, project_id: UUID, result: ExecutionResult) -> None:
         raw = self._read_raw()
         execs_raw = raw.setdefault("execution_results", {})
         dump = result.model_dump(mode="json")
         dump["project_id"] = str(project_id)
+        # Spec 0001: the snapshot is immutable, same rule as PostgreSQL.
+        previous = (execs_raw.get(str(result.id)) or {}).get("project_config_snapshot")
+        if previous is not None:
+            dump["project_config_snapshot"] = previous
         execs_raw[str(result.id)] = dump
         self._write_raw(raw)
 
@@ -821,6 +1107,7 @@ class JSONProjectRepository(ProjectRepository):
         notes_raw = raw.get("scenario_notes", {})
         return notes_raw.get(str(scenario_id), [])
 
+    @_locked
     def add_scenario_note(self, scenario_id: UUID, note: str) -> None:
         raw = self._read_raw()
         notes_raw = raw.setdefault("scenario_notes", {})
@@ -834,6 +1121,7 @@ class JSONProjectRepository(ProjectRepository):
         notes_raw = raw.get("test_case_notes", {})
         return notes_raw.get(str(test_case_id), [])
 
+    @_locked
     def add_test_case_note(self, test_case_id: UUID, note: str) -> None:
         raw = self._read_raw()
         notes_raw = raw.setdefault("test_case_notes", {})
@@ -876,6 +1164,7 @@ class JSONProjectRepository(ProjectRepository):
                 return r_info
         return None
 
+    @_locked
     def save_report(self, project_id: UUID, execution_id: UUID, report_payload: dict) -> dict:
         raw = self._read_raw()
         reports_raw = raw.setdefault("reports", {})
@@ -897,6 +1186,7 @@ class JSONProjectRepository(ProjectRepository):
                 results.append(Release.model_validate(r_data))
         return results
 
+    @_locked
     def create_release(self, project_id: UUID, name: str, description: str | None = None, status: str = "Active", start_date: datetime | None = None, end_date: datetime | None = None) -> Release:
         raw = self._read_raw()
         releases_raw = raw.setdefault("releases", {})
@@ -930,6 +1220,7 @@ class JSONProjectRepository(ProjectRepository):
                 results.append(TestCycle.model_validate(c_data))
         return results
 
+    @_locked
     def create_test_cycle(self, release_id: UUID, name: str, description: str | None = None, status: str = "Active") -> TestCycle:
         raw = self._read_raw()
         cycles_raw = raw.setdefault("test_cycles", {})
@@ -952,6 +1243,7 @@ class JSONProjectRepository(ProjectRepository):
             return TestCycle.model_validate(c_data)
         return None
 
+    @_locked
     def reset_demo_data(self) -> None:
         raw = self._read_raw()
         

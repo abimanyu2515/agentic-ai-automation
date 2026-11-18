@@ -52,15 +52,34 @@ POST /api/v1/projects
   "line_of_business": "general",
   "framework": "playwright",
   "jira_project_key": null,
-  "target_url": "https://your-app.example.com/",
-  "target_username": "user",
-  "target_password": "pass"
+  "target_url": "https://your-app.example.com/"
 }
 ```
 
-**Validation**: `name` and `description` must be non-empty strings.
+**Auth**: a signed in user with the `Projects:create` permission. The server sets `owner_id` and `created_by` from that user (spec 0002).
 
-**Response**: `201` — `ProjectResponse`
+**Validation**: `name` and `description` must be non empty. `framework` must be a supported framework. `target_url` is required and must be an absolute HTTP or HTTPS URL with no userinfo and no fragment (query text is allowed). It is normalized before the duplicate check and storage. `target_username`, `target_password`, `owner_id`, and any other undeclared field are rejected; add credentials later through Project Settings.
+
+**Response**: `201` with `ProjectResponse`, including the normalized `target_url`, `jira_project_key`, and `readiness: {is_ready, missing_fields, invalid_fields}`.
+
+**Errors**:
+
+* `401` not signed in, `403` missing `Projects:create`. Nothing is saved.
+* `422` with the `ProjectConfigurationError` shape (`code`, `message`, `missing_fields`, `invalid_fields`, `action`). A forbidden field shows as `invalid_fields.<field>: "field_not_permitted"`.
+* `409` when the same owner already has an active project with this normalized URL. Concurrent duplicates give one `201` and one `409`:
+
+```json
+{
+  "code": "PROJECT_URL_CONFLICT",
+  "message": "A project with this target URL already exists for the current owner.",
+  "invalid_fields": {"target_url": "duplicate_url"},
+  "conflicting_project_id": "uuid"
+}
+```
+
+* `500` with `{"code": "PROJECT_PERSISTENCE_FAILED", "message": "..."}` for an unexpected storage failure. The transaction is rolled back and no project is left behind.
+
+Creation logs record the project and owner IDs, and the URL with its query text redacted.
 
 ---
 
@@ -108,6 +127,10 @@ DELETE /api/v1/projects/{project_id}
 ```
 
 **Response**: `200` — `{"detail": "Project deleted successfully"}`, `404` if not found.
+
+**Access**: a signed in user (`401`) with access to the project (`403`) and the `Projects` `delete` permission (`403`).
+
+Deleting a project also removes its uploaded knowledge files (`<RAG_STORAGE_ROOT>/<project_id>/`) right away, and deletes its RAGFlow dataset in the background. A failed dataset delete is logged and never blocks the project delete.
 
 ---
 
@@ -351,6 +374,8 @@ GET /api/v1/projects/{project_id}/testcases
     "evaluation_status": "approved|needs_review|rejected|duplicate",
     "evaluation_reason": "string|null",
     "playwright_script": "string|null",
+    "groundedness_score": "number|null",
+    "unsupported_claims": ["string"],
     "generated_at": "datetime",
     "jira_issue_key": "string|null",
     "jira_issue_url": "string|null",
@@ -399,6 +424,8 @@ PUT /api/v1/projects/{project_id}/testcases/{test_case_id}
 }
 ```
 
+**Access**: a signed in user (`401`) with access to the project (`403`) and the `TestCases` `edit` permission (`403`). A test case from another project returns `404`.
+
 **Response**: `200` — `TestCaseResponse`, `404` if not found.
 
 ---
@@ -408,6 +435,8 @@ PUT /api/v1/projects/{project_id}/testcases/{test_case_id}
 ```
 DELETE /api/v1/projects/{project_id}/testcases/{test_case_id}
 ```
+
+**Access**: a signed in user (`401`) with access to the project (`403`) and the `TestCases` `delete` permission (`403`). A test case from another project returns `404`.
 
 **Response**: `200` — `{"detail": "Test case deleted successfully"}`
 
@@ -477,6 +506,8 @@ Jobs are kept in memory for one hour after they finish. A backend restart loses 
 ```
 PUT /api/v1/projects/{project_id}/testcases/{test_case_id}/script
 ```
+
+**Access**: a signed in user (`401`) with access to the project (`403`) and the `TestCases` `edit` permission (`403`). A test case from another project returns `404`.
 
 **Request Body** (`ScriptUpdatePayload`):
 
@@ -563,6 +594,8 @@ No authentication (global settings, no secrets). The execution engine calls it a
 
 ## Executions
 
+The two execution delete routes, `DELETE /api/v1/projects/{project_id}/executions/{execution_id}` and `DELETE /api/v1/projects/{project_id}/executions/failed`, need a signed in user (`401`) with access to the project (`403`) and the `Executions` `delete` permission (`403`). An execution from another project returns `404`.
+
 ### Execute Test Case
 
 ```
@@ -600,9 +633,31 @@ Runs ExecutionAgent → ExecutionAnalysisAgent → DefectManagementAgent → Rep
   "jira_bug_url": "string|null",
   "retest_pending_candidate": false,
   "test_cycle_id": "uuid|null",
-  "executed_by": "uuid|null"
+  "executed_by": "uuid|null",
+  "project_config_snapshot": {
+    "project_id": "uuid",
+    "target_url": "normalized project URL",
+    "framework": "playwright",
+    "credential_reference": "uuid"
+  }
 }
 ```
+
+### Project configuration snapshot (spec 0001)
+
+`POST /api/v1/projects/{project_id}/testcases/{test_case_id}/execute` and `POST /api/v1/projects/{project_id}/batches/execute` check the project's readiness before anything is queued. A project without a valid `target_url` or `framework` gets `422` with the shared configuration error, and no run starts:
+
+```json
+{
+  "code": "PROJECT_NOT_READY",
+  "message": "Project configuration is incomplete.",
+  "missing_fields": ["target_url"],
+  "invalid_fields": {},
+  "action": {"label": "Open Project Settings", "route": "#/settings?tab=project"}
+}
+```
+
+A ready project's configuration is captured at that moment as `project_config_snapshot`. The runner sets `TARGET_URL` from it (never from the server's own environment), every result of the run stores it, and it is never changed after it is saved. It holds no secret: credentials are read from the vault by `credential_reference`. Runs saved before this change have `null`.
 
 ---
 
@@ -1012,7 +1067,9 @@ Returns all configuration sections (LLM, Workflow, Browser, RAG, Generation, Eva
     "analysis": { "provider": "nvidia", "models": ["model-n"], "max_concurrent": 2,
                   "min_interval_seconds": 0, "cooldown_seconds": 60, "max_wait_seconds": 180 },
     "chat": { "provider": "nvidia", "models": ["model-n"], "max_concurrent": 4,
-              "min_interval_seconds": 0, "cooldown_seconds": 60, "max_wait_seconds": 30 }
+              "min_interval_seconds": 0, "cooldown_seconds": 60, "max_wait_seconds": 30 },
+    "retrieval": { "provider": "nvidia", "models": ["model-n"], "max_concurrent": 2,
+                   "min_interval_seconds": 0, "cooldown_seconds": 30, "max_wait_seconds": 20 }
   },
   "chat_enabled": true,
   "workflow": { "mode": "sequential", "human_review_enabled": true, ... },
@@ -1020,7 +1077,7 @@ Returns all configuration sections (LLM, Workflow, Browser, RAG, Generation, Eva
 }
 ```
 
-`llm_roles` is read only and comes from the `GENERATION_LLM_*`, `ANALYSIS_LLM_*`, and `CHAT_LLM_*` variables in `.env` (specs 0003 and 0005). Any unset `CHAT_LLM_*` value falls back to the resolved analysis role; the chat pool has its own limits (`CHAT_LLM_MAX_CONCURRENT` 4, `CHAT_LLM_COOLDOWN_SECONDS` 60, `CHAT_LLM_MAX_WAIT_SECONDS` 30). `chat_enabled` mirrors `CHAT_ENABLED`; the frontend shows the chat button only when it is true. API keys and base URLs are never returned. `GET /api/v1/projects/{project_id}/traces` also returns `llm_roles` with each role's provider and models; its `model` and `provider` fields show the analysis role. Its `total_calls`, token, cost and per agent `traces` figures are the project's real recorded usage (see [Token Usage](#token-usage)).
+`llm_roles` is read only and comes from the `GENERATION_LLM_*`, `ANALYSIS_LLM_*`, `CHAT_LLM_*`, and `RETRIEVAL_LLM_*` variables in `.env` (specs 0003, 0005, and 0006). Any unset `CHAT_LLM_*` value falls back to the resolved analysis role; the chat pool has its own limits (`CHAT_LLM_MAX_CONCURRENT` 4, `CHAT_LLM_COOLDOWN_SECONDS` 60, `CHAT_LLM_MAX_WAIT_SECONDS` 30). The `retrieval` role (spec 0006) works the same way from `RETRIEVAL_LLM_*`, with its own limits (2, 30, 20); it grades and rewrites inside the workflow retrieval stage, and its usage is recorded under agent `knowledge_retrieval_agent`. `chat_enabled` mirrors `CHAT_ENABLED`; the frontend shows the chat button only when it is true. API keys and base URLs are never returned. `GET /api/v1/projects/{project_id}/traces` also returns `llm_roles` with each role's provider and models; its `model` and `provider` fields show the analysis role. Its `total_calls`, token, cost and per agent `traces` figures are the project's real recorded usage (see [Token Usage](#token-usage)).
 
 ### Save Settings
 
@@ -1030,13 +1087,19 @@ PUT /api/v1/settings
 
 Persists overrides to `override.yaml` and clears settings cache.
 
+**Access**: a signed in user (`401`) with the `Settings` `edit` permission (`403`). Only Superadmin holds it, so nobody else can change `rag.ragflow_api_base` or the key.
+
 **Request Body**: Same shape as settings response, only sections to override. An `llm_roles` section is ignored.
+
+The RAGFlow API key is write only (spec 0006). `GET` returns `rag.ragflow_api_key_set` (true or false), never the key. On save, `rag.ragflow_api_key` is optional: leave it out or empty to keep the current key. A new key applies to the running server and is never written to `override.yaml`; set `RAGFLOW_API_KEY` in `.env` to keep it after a restart. There is no global dataset setting: each project gets its own dataset.
 
 **Response**: `200` — `{"status": "success", "settings": {...}}`
 
 ---
 
-## Documents
+## Documents (project knowledge base)
+
+Each project has its own knowledge base (spec 0006). Every route needs a signed in user (401), access to the project (403, or 404 when the project does not exist), and the `Knowledge` permission (403 without it).
 
 ### List Documents
 
@@ -1044,7 +1107,98 @@ Persists overrides to `override.yaml` and clears settings cache.
 GET /api/v1/projects/{project_id}/documents
 ```
 
-**Response**: `200` — Array of `Document`
+Needs `Knowledge:view`.
+
+**Response**: `200`, an array of `Document`. Each document has `embedding_status` (`pending`, `processing`, `completed`, or `failed`), `remote_doc_id` (the RAGFlow document ID, or null), and `error` (why it failed or is waiting, or null).
+
+### Upload Document
+
+```
+POST /api/v1/projects/{project_id}/documents/upload
+```
+
+Needs `Knowledge:create`. Send one file as `multipart/form-data` in the field `file`.
+
+- Allowed types come from the file extension (`RAG_UPLOAD_TYPES`, default `pdf,docx,txt,md,csv,xlsx`). The content type the browser sends is only a hint.
+- The file is saved to `<RAG_STORAGE_ROOT>/<project_id>/documents/<document_id>/<sanitized name>`. `filename` holds the sanitized name and `original_filename` holds yours.
+- Indexing runs in the background. The document starts `pending`, becomes `processing`, then `completed` once RAGFlow finishes parsing, or `failed` with the reason in `error`. With `RAG_ENABLED=false` it stays `pending` with `error` "knowledge base is disabled".
+
+**Response**: `201`, the new `Document`.
+
+**Errors**: `413` larger than `RAG_UPLOAD_MAX_MB` (default 20), `415` type not allowed, `422` empty file.
+
+The old JSON route `POST /api/v1/projects/{project_id}/documents` is removed (405).
+
+### Delete Document
+
+```
+DELETE /api/v1/projects/{project_id}/documents/{document_id}
+```
+
+Needs `Knowledge:delete`. Access and permission are checked before the lookup, so a document in another project returns the same 404 as one that does not exist.
+
+- The record and its saved file are deleted right away.
+- Its RAGFlow document is then deleted in the background, from this project's dataset only. If that fails it is logged, and the local delete still stands.
+- Deleting a document while it is still uploading leaves no RAGFlow copy behind.
+
+**Response**: `200`, `{"detail": "Document deleted successfully"}`
+
+### Knowledge Status
+
+```
+GET /api/v1/projects/{project_id}/knowledge/status
+```
+
+Needs `Knowledge:view`.
+
+**Response**: `200`
+
+```json
+{
+  "enabled": true,
+  "dataset_id": "c1f0...",
+  "documents": { "completed": 3, "pending": 1 },
+  "entries": { "test_case": { "indexed": 12 }, "jira_story": { "indexed": 2, "failed": 1 } },
+  "last_indexed_at": "2026-11-17T10:42:00Z",
+  "pending_deletes": { "count": 1, "oldest_created_at": "2026-11-18T08:15:00Z", "last_error": "RAGFlow returned 503" }
+}
+```
+
+- `enabled` is whether the knowledge base is on (`RAG_ENABLED` with the `ragflow` provider).
+- `dataset_id` is the project's RAGFlow dataset, or null before anything has been indexed.
+- `documents` counts documents by `embedding_status`.
+- `entries` counts indexed project sources by `source_type`, then by status (`indexed` or `failed`).
+- `last_indexed_at` is the latest of a completed document's `uploaded_at` and a knowledge entry's `indexed_at`, or null.
+- `pending_deletes` describes this project's RAGFlow deletes that are still outstanding (spec 0007). `count` is how many there are, `oldest_created_at` is when the oldest was queued, and `last_error` is the error of the most recently attempted one. With none, it is `{"count": 0, "oldest_created_at": null, "last_error": null}`. The UI does not show it yet.
+
+### Indexing behavior
+
+- When a RAGFlow call fails (connection error, timeout, or a 5xx response), indexing retries after each delay in `RAG_INDEX_RETRY_DELAYS` (default 10, 60, and 300 seconds), then marks the document `failed` with the last error.
+- A document whose saved file is missing fails with "file not found" and is not retried.
+- On startup, every document still `pending` or `processing` is queued again, when the knowledge base is enabled.
+- Every RAGFlow delete (a deleted document, a removed or replaced knowledge entry, a deleted project's dataset, a remote copy left by a failed parse, and an extra dataset from a creation race) is saved as a pending delete before it runs. It stays until RAGFlow confirms the delete or says the item is already gone. Failed deletes are retried on the same delays, then again at startup and every `RAG_DELETE_RESWEEP_MINUTES` (default 30). They are never given up on. While the knowledge base is disabled they wait untouched.
+- When parsing fails or times out, the document's remote copy is deleted and its remote ID cleared, so uploading it again leaves one remote copy, not two.
+- Documents created before real uploads existed are marked `failed` with "file was never uploaded, please upload it again". Upload them again.
+
+### Other indexed sources
+
+Besides uploaded files, these project sources are indexed as knowledge entries, one per source, in the background after the save succeeds. Indexing never slows down or fails the save.
+
+| `source_type` | `source_ref` | Indexed after | Removed after |
+|---|---|---|---|
+| `test_case` | test case ID | test case generation, edit, approve or reject (only `approved` cases stay indexed) | test case delete, regeneration that replaces it, its requirement's delete in chat |
+| `jira_story` | Jira issue key | `POST /requirements/import-jira` | its requirement's delete in chat |
+| `execution_failure` | execution ID | a failed or errored run finishes its analysis | execution delete, `DELETE /executions/failed` |
+| `locator` | object repository page ID | page create or edit, element create, edit, or delete | page delete |
+| `defect` | Jira bug key | a run saved with a `jira_bug_id`, Jira sync after a run, `POST /executions/{id}/sync-bug`, and every `POST /webhooks/jira` event for a linked key (any status) | the last live execution or test case linking the key is deleted (execution delete, `DELETE /executions/failed`, test case delete, regeneration, requirement delete in chat) |
+
+- Unchanged content (same sha256) is not sent again. Changed content replaces the old RAGFlow document.
+- RAGFlow failures retry like documents do, then the entry is marked `failed` with the error.
+- Defects live only in Jira. A bug key belongs to a project while a live execution (`jira_bug_id`) or test case (`jira_issue_key`) of that project links it; keys are trimmed and matched exactly. The worker reads the key, summary, status, priority, and description from Jira when the job runs. A failed Jira read retries like a RAGFlow failure, then marks the entry `failed`, and never removes it. A closed bug stays indexed with its new status. Without Jira credentials (mock mode), defects are skipped and nothing is written.
+- To backfill or repair a project, run `python -m backend.scripts.reindex_project_knowledge --project <id>` (or `--all`). It indexes every current source and pending document, removes entries whose source is gone, and prints counts of indexed, skipped (unchanged), failed, and removed items.
+- To see outstanding RAGFlow deletes for every project, deleted ones included, run `python -m backend.scripts.reindex_project_knowledge --pending-deletes`. On PostgreSQL it also tries each one once. On the JSON store it only lists them unless you add `--run`, and you should stop the server first. It prints `deleted N, still pending M` and exits 1 while any remain.
+- To measure retrieval quality, run `python -m backend.scripts.eval_retrieval --project <id> --cases <file.json> [--k 5] [--json]` (spec 0006, AC-25). The cases file is a JSON list of `{query, expected_source_refs, source_types?}`; an expected ref is `<source_ref>` or `<source_type>:<source_ref>`, and `k` is 1 to 10. It searches the project's live knowledge base exactly as chat and the workflow do, and prints recall@k and MRR per case and overall. `backend/tests/fixtures/retrieval_eval/corpus.json` shows the format.
+- Test case responses carry `groundedness_score` (0 to 1, or `null`) and `unsupported_claims` (a list of short claims). `EvaluationAgent` sets them only when the workflow retrieval stage found context; they are reported, never enforced (spec 0006, AC-26).
 
 ---
 

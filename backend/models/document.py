@@ -14,4 +14,10 @@ class Document(BaseModel):
     storage_path: str
     embedding_status: str = "pending"  # "pending", "processing", "completed", "failed"
     vector_collection: str | None = None
+    remote_doc_id: str | None = None  # RAGFlow document ID in the project's dataset (spec 0006)
+    error: str | None = None  # why indexing failed or is waiting
     metadata: dict = Field(default_factory=dict)
+
+
+# Spec 0006, AC-9: documents created before real uploads existed have no file.
+OLD_DOCUMENT_ERROR = "file was never uploaded, please upload it again"

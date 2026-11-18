@@ -29,6 +29,7 @@ from backend.models.common import Priority
 from backend.models.test_case import EvaluationStatus
 from backend.schemas.scenario_dto import ScenarioUpdate
 from backend.schemas.testcase_dto import TestCaseUpdate
+from backend.services.knowledge_indexer import queue_defect_keys, queue_knowledge_source, queue_test_case_removals
 
 from backend.models.chat import utc_now
 
@@ -611,8 +612,10 @@ class ChatActionExecutor:
         created = self.workflow.generate_scenarios(project.id, requirement_id, int(params.get("count", 3)), mode="append")
         replaced = 0
         for scenario_id in params.get("replace_ids") or []:
+            test_cases = self.repo.get_test_cases(UUID(scenario_id))
             if self.repo.delete_scenario(UUID(scenario_id), deleted_by=user_id):
                 replaced += 1
+                queue_test_case_removals(project.id, test_cases)
         summary = f"Created {len(created)} scenario{'s' if len(created) != 1 else ''}"
         if replaced:
             summary += f", replaced {replaced}"
@@ -728,6 +731,7 @@ class ChatActionExecutor:
         params_json = params.model_dump(mode="json")
         params_json["scenario_ids"] = [str(scenario.id) for scenario in scenarios]
         params_json["test_case_ids"] = [str(case.id) for case in test_cases]
+        params_json["jira_issue_key"] = requirement.jira_issue_key
         return {
             "params": params_json,
             "targets": [self._target("requirement", requirement), {
@@ -739,8 +743,19 @@ class ChatActionExecutor:
 
     def _run_delete_requirement(self, project, action: dict, user_id) -> dict:
         requirement_id = UUID(action["params"]["requirement_id"])
+        params = action["params"]
+        # Bug keys of its test cases, read before the delete (spec 0006, AC-14a).
+        defect_keys = [
+            getattr(self.repo.get_test_case(UUID(str(test_case_id))), "jira_issue_key", None)
+            for test_case_id in params.get("test_case_ids") or []
+        ]
         if not self.project_service.delete_requirement(requirement_id, deleted_by=user_id):
             raise ActionInvalid(CHANGED_MESSAGE)
+        # Knowledge (spec 0006, AC-15): the story and the removed test cases leave the index.
+        queue_knowledge_source(project.id, "jira_story", params.get("jira_issue_key"), remove=True)
+        for test_case_id in params.get("test_case_ids") or []:
+            queue_knowledge_source(project.id, "test_case", test_case_id, remove=True)
+        queue_defect_keys(project.id, defect_keys)
         return {"summary": "Deleted requirement and its scenarios and test cases", "link_view": "requirements", "link_id": None}
 
     def _resolve_update_scenario(self, project, params: UpdateScenarioParams) -> dict:
@@ -778,8 +793,10 @@ class ChatActionExecutor:
 
     def _run_delete_scenario(self, project, action: dict, user_id) -> dict:
         scenario_id = UUID(action["params"]["scenario_id"])
+        test_cases = self.repo.get_test_cases(scenario_id)
         if not self.repo.delete_scenario(scenario_id, deleted_by=user_id):
             raise ActionInvalid(CHANGED_MESSAGE)
+        queue_test_case_removals(project.id, test_cases)
         return {"summary": "Deleted scenario", "link_view": "scenarios", "link_id": None}
 
     def _resolve_update_test_case(self, project, params: UpdateTestCaseParams) -> dict:
@@ -805,6 +822,7 @@ class ChatActionExecutor:
         updated = self.repo.update_test_case(case.model_copy(update=changes))
         if updated is None:
             raise ActionInvalid(CHANGED_MESSAGE)
+        queue_knowledge_source(project.id, "test_case", updated.id)
         return {"summary": f"Updated {len(params['changes'])} fields on '{updated.title}'", "link_view": "testcases", "link_id": str(updated.scenario_id)}
 
     def _resolve_review_test_case(self, project, params: ReviewTestCaseParams) -> dict:
@@ -820,6 +838,7 @@ class ChatActionExecutor:
         )
         if updated is None:
             raise ActionInvalid(CHANGED_MESSAGE)
+        queue_knowledge_source(project.id, "test_case", updated.id)
         verb = "Approved" if params["decision"] == "approved" else "Rejected"
         return {"summary": f"{verb} '{updated.title}'", "link_view": "testcases", "link_id": str(updated.scenario_id)}
 

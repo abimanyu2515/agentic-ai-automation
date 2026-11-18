@@ -146,7 +146,8 @@ class PlaywrightRunner:
         on_log: Callable[[str], None] | None = None,
         storage_state_path: str | None = None,
         project_id: str | None = None,
-        headless: bool | None = None
+        headless: bool | None = None,
+        target_url: str | None = None,
     ) -> PlaywrightRunResult:
         npx = shutil.which("npx")
         if npx is None:
@@ -370,6 +371,11 @@ __runnerTest.afterEach(async () => {
         if "PLAYWRIGHT_CHROMIUM_CHANNEL" in child_env:
             del child_env["PLAYWRIGHT_CHROMIUM_CHANNEL"]
         child_env.update(self._harvest_env())
+        # Spec 0001, AC-4: TARGET_URL comes only from the run's project snapshot,
+        # never from a global value inherited from the server's environment.
+        child_env.pop("TARGET_URL", None)
+        if target_url:
+            child_env["TARGET_URL"] = target_url
         if project_id:
             try:
                 from backend.services.vault_service import VaultService

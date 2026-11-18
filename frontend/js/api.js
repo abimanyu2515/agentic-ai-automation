@@ -110,6 +110,10 @@ async function request(url, options = {}) {
         if (errJson && errJson.detail) {
           detail = errJson.detail;
           errorMsg = typeof detail === 'string' ? detail : (detail.message || errorMsg);
+        } else if (errJson && errJson.code) {
+          // Structured contracts (e.g. PROJECT_URL_CONFLICT) are returned as the body itself.
+          detail = errJson;
+          errorMsg = errJson.message || errorMsg;
         }
       } catch (e) {}
       const error = new Error(errorMsg);
@@ -609,10 +613,14 @@ export const API = {
     return request(`/projects/${projectId}/documents`);
   },
 
-  async createDocument(projectId, docData) {
-    return request(`/projects/${projectId}/documents`, {
+  // Sends the real file; the shared request helper leaves the content type
+  // to the browser for FormData bodies (spec 0006, AC-11).
+  async uploadDocument(projectId, file) {
+    const body = new FormData();
+    body.append('file', file);
+    return request(`/projects/${projectId}/documents/upload`, {
       method: 'POST',
-      body: JSON.stringify(docData)
+      body
     });
   },
 

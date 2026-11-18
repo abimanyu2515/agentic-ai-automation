@@ -53,19 +53,35 @@ LLM Correlation:
     Uses test_case_number (1-based index) instead of title echo-back.
     Validates LLM returned exactly {1, 2, ..., N} with no gaps or extras.
 
+Groundedness (spec 0006, AC-26):
+    When state.retrieved_context is not empty, one more batched call on the
+    analysis role scores each generated test case's steps and expected result
+    for support by that context, setting test_case.groundedness_score (0 to 1)
+    and test_case.unsupported_claims. With no context, or when the call fails,
+    finds the pool busy, or returns unusable output, they stay None and [] and
+    a warning is logged. It is reported, never enforced: evaluation_status is
+    never changed by it.
+
 Historical Context:
     This agent was added after production issues with auto-approved irrelevant test cases.
     Provides critical quality gate before expensive Playwright script generation.
 """
 
+import logging
+
 from pydantic import BaseModel, Field, field_validator
 
 from backend.agents.base import BaseAgent
+from backend.agents.knowledge_context import format_project_knowledge
 from backend.config.settings import get_settings
 from backend.models.state import WorkflowState
 from backend.models.test_case import EvaluationStatus, TestCase
 from backend.services.llm import LLMService, LLMServiceError
 from backend.utils.prompts import load_prompt
+
+# The groundedness prompt carries the whole retrieved context plus every test case, the largest
+# call in the stage, so it gets twice the retrieval grader's 60 s. The 30 s default timed out.
+GROUNDEDNESS_TIMEOUT_SECONDS = 120
 
 
 class _TestCaseEvaluation(BaseModel):
@@ -92,6 +108,41 @@ class _TestCaseEvaluation(BaseModel):
 
 class _EvaluationBatch(BaseModel):
     evaluations: list[_TestCaseEvaluation] = Field(min_length=1)
+
+
+logger = logging.getLogger(__name__)
+
+MAX_UNSUPPORTED_CLAIMS = 10
+MAX_CLAIM_CHARS = 200
+
+
+class _GroundednessResult(BaseModel):
+    test_case_number: int = Field(ge=1)
+    score: float = Field(ge=0.0, le=1.0)
+    unsupported_claims: list[str] = Field(default_factory=list)
+
+    @field_validator("unsupported_claims", mode="before")
+    @classmethod
+    def _none_is_empty(cls, value):
+        return [] if value is None else value
+
+
+class _GroundednessBatch(BaseModel):
+    results: list[_GroundednessResult] = Field(min_length=1)
+
+
+def _format_groundedness_block(test_cases: list[TestCase]) -> str:
+    lines = []
+    for i, tc in enumerate(test_cases, start=1):
+        steps = "\n".join(f"   - {step}" for step in tc.steps)
+        lines.append(f"{i}. {tc.title}\n   Steps:\n{steps}\n   Expected result: {tc.expected_result}")
+    # Keep a test case from closing its own delimiter.
+    return "\n".join(lines).replace("</test_cases", "</ test_cases")
+
+
+def _clean_claims(claims: list[str]) -> list[str]:
+    cleaned = [str(claim).strip()[:MAX_CLAIM_CHARS] for claim in claims if str(claim).strip()]
+    return cleaned[:MAX_UNSUPPORTED_CLAIMS]
 
 
 def _jaccard_similarity(a: str, b: str) -> float:
@@ -164,6 +215,51 @@ class EvaluationAgent(BaseAgent):
         state.add_log(f"{self.name} started")
         state.add_log(f"{self.name}: {_coverage_message(state)}")
 
+        state = self._evaluate(state)
+        self._score_groundedness(state)
+        return state
+
+    def _score_groundedness(self, state: WorkflowState) -> None:
+        """AC-26: one batched judge call when there is retrieved context.
+        Never raises and never touches evaluation_status."""
+        test_cases = state.generated_test_cases
+        for tc in test_cases:
+            tc.groundedness_score = None
+            tc.unsupported_claims = []
+        if not state.retrieved_context:
+            return
+
+        try:
+            prompt = load_prompt(
+                "agents/evaluation/groundedness.md",
+                title=state.requirement.title,
+                context=format_project_knowledge(state.retrieved_context),
+                test_cases=_format_groundedness_block(test_cases),
+                count=str(len(test_cases)),
+            )
+            batch = self.llm_service.structured_generate(
+                user=prompt, response_model=_GroundednessBatch, timeout=GROUNDEDNESS_TIMEOUT_SECONDS
+            )
+            by_number = {result.test_case_number: result for result in batch.results}
+            if set(by_number) != set(range(1, len(test_cases) + 1)):
+                raise ValueError(
+                    f"judge returned results for {sorted(by_number)}, expected 1 to {len(test_cases)}"
+                )
+        except (LLMServiceError, ValueError) as exc:  # includes a busy pool and unparseable output
+            logger.warning("%s: groundedness scoring skipped: %s", self.name, exc)
+            state.add_log(f"{self.name}: groundedness not scored ({type(exc).__name__})")
+            return
+
+        for number, tc in enumerate(test_cases, start=1):
+            result = by_number[number]
+            tc.groundedness_score = round(result.score, 4)
+            tc.unsupported_claims = _clean_claims(result.unsupported_claims)
+        average = sum(tc.groundedness_score for tc in test_cases) / len(test_cases)
+        state.add_log(
+            f"{self.name}: groundedness scored for {len(test_cases)} test case(s), average {average:.2f}"
+        )
+
+    def _evaluate(self, state: WorkflowState) -> WorkflowState:
         duplicate_count = _mark_duplicates(state.generated_test_cases, self.duplicate_threshold)
         if duplicate_count:
             state.add_log(f"{self.name}: rejected {duplicate_count} duplicate test case(s)")

@@ -34,7 +34,7 @@ class LLMConfig(BaseModel):
     api_base: str | None = None  # required for ollama (e.g. http://localhost:11434); leave unset for cloud providers
 
 
-LLM_ROLES = ("generation", "analysis", "chat")
+LLM_ROLES = ("generation", "analysis", "chat", "retrieval")
 
 
 class LLMRoleConfig(BaseModel):
@@ -78,8 +78,26 @@ class RAGConfig(BaseModel):
     vector_db_provider: str = "chroma"
     vector_db_path: str = "./data/vector_store"
     ragflow_api_base: str = "http://localhost:9380"
-    ragflow_api_key: str | None = None
-    ragflow_dataset_id: str | None = None
+    ragflow_api_key: str | None = None  # from .env only; never returned by a route
+    # Per project knowledge base (spec 0006).
+    storage_root: str = "data/projects"
+    upload_max_mb: int = Field(default=20, ge=1)
+    upload_types: list[str] = ["pdf", "docx", "txt", "md", "csv", "xlsx"]
+    parse_poll_seconds: float = Field(default=5, gt=0)
+    parse_timeout_seconds: float = Field(default=600, gt=0)
+    # Waits before each retry of a failed RAGFlow call (AC-4).
+    index_retry_delays: list[float] = [10, 60, 300]
+    # Minutes between replays of the pending RAGFlow delete table (spec 0007, AC-7).
+    delete_resweep_minutes: float = Field(default=30, gt=0)
+    # Graded retrieval loop in the workflow (spec 0006, AC-17 to AC-22).
+    workflow_retrieval_enabled: bool = False
+    top_k: int = Field(default=8, ge=1)
+    max_retrieval_attempts: int = Field(default=2, ge=1)
+    min_relevant_chunks: int = Field(default=2, ge=1)
+    # Retrieval role pool defaults; RETRIEVAL_LLM_MAX_CONCURRENT and friends override them.
+    retrieval_llm_max_concurrent: int = Field(default=2, ge=1)
+    retrieval_llm_cooldown_seconds: float = Field(default=30, ge=0)
+    retrieval_llm_max_wait_seconds: float = Field(default=20, gt=0)
 
 
 class GenerationConfig(BaseModel):
@@ -204,7 +222,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _fill_llm_roles(self) -> "Settings":
         if not self.llm_roles:
-            self.llm_roles = _build_llm_roles(self.llm, self.chat)
+            self.llm_roles = _build_llm_roles(self.llm, self.chat, self.rag)
         return self
 
     @classmethod
@@ -246,7 +264,17 @@ class Settings(BaseSettings):
         _override(raw, "rag", "vector_db_provider", "RAG_VECTOR_DB_PROVIDER")
         _override(raw, "rag", "ragflow_api_base", "RAGFLOW_API_BASE")
         raw["rag"]["ragflow_api_key"] = _env("RAGFLOW_API_KEY")
-        _override(raw, "rag", "ragflow_dataset_id", "RAGFLOW_DATASET_ID")
+        _override(raw, "rag", "storage_root", "RAG_STORAGE_ROOT")
+        _override(raw, "rag", "upload_max_mb", "RAG_UPLOAD_MAX_MB", cast=int)
+        _override(raw, "rag", "upload_types", "RAG_UPLOAD_TYPES", cast=_csv_lower)
+        _override(raw, "rag", "parse_poll_seconds", "RAG_PARSE_POLL_SECONDS", cast=float)
+        _override(raw, "rag", "parse_timeout_seconds", "RAG_PARSE_TIMEOUT_SECONDS", cast=float)
+        _override(raw, "rag", "index_retry_delays", "RAG_INDEX_RETRY_DELAYS", cast=_csv_floats)
+        _override(raw, "rag", "delete_resweep_minutes", "RAG_DELETE_RESWEEP_MINUTES", cast=float)
+        _override(raw, "rag", "workflow_retrieval_enabled", "RAG_WORKFLOW_RETRIEVAL_ENABLED", cast=_bool)
+        _override(raw, "rag", "top_k", "RAG_TOP_K", cast=int)
+        _override(raw, "rag", "max_retrieval_attempts", "RAG_MAX_RETRIEVAL_ATTEMPTS", cast=int)
+        _override(raw, "rag", "min_relevant_chunks", "RAG_MIN_RELEVANT_CHUNKS", cast=int)
 
         # Repository settings overrides from .env
         raw.setdefault("repository", {})
@@ -301,6 +329,14 @@ def _override(raw: dict, section: str, field: str, env_key: str, cast=str) -> No
         raw.setdefault(section, {})[field] = cast(value)
 
 
+def _csv_floats(value: str) -> list[float]:
+    return [float(item) for item in value.split(",") if item.strip()]
+
+
+def _csv_lower(value: str) -> list[str]:
+    return [item.strip().lower().lstrip(".") for item in value.split(",") if item.strip()]
+
+
 def _bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
@@ -323,7 +359,9 @@ def _parse_models(value: str | None) -> list[str]:
     return models
 
 
-def _build_llm_roles(llm: LLMConfig, chat: ChatConfig | None = None) -> dict[str, LLMRoleConfig]:
+def _build_llm_roles(
+    llm: LLMConfig, chat: ChatConfig | None = None, rag: RAGConfig | None = None
+) -> dict[str, LLMRoleConfig]:
     roles: dict[str, LLMRoleConfig] = {}
     for role in ("generation", "analysis"):
         prefix = f"{role.upper()}_LLM_"
@@ -351,15 +389,26 @@ def _build_llm_roles(llm: LLMConfig, chat: ChatConfig | None = None) -> dict[str
             if value is not None:
                 fields[name.lower()] = value
         roles[role] = LLMRoleConfig(**fields)
-    roles["chat"] = _build_chat_role(roles["analysis"], chat or ChatConfig())
+    chat = chat or ChatConfig()
+    rag = rag or RAGConfig()
+    # Spec 0005, AC-24 (chat) and spec 0006, AC-22 (retrieval).
+    roles["chat"] = _build_analysis_fallback_role(
+        "CHAT_LLM_", roles["analysis"],
+        chat.llm_max_concurrent, chat.llm_cooldown_seconds, chat.llm_max_wait_seconds,
+    )
+    roles["retrieval"] = _build_analysis_fallback_role(
+        "RETRIEVAL_LLM_", roles["analysis"],
+        rag.retrieval_llm_max_concurrent, rag.retrieval_llm_cooldown_seconds, rag.retrieval_llm_max_wait_seconds,
+    )
     return roles
 
 
-def _build_chat_role(analysis: LLMRoleConfig, chat: ChatConfig) -> LLMRoleConfig:
-    """Spec 0005, AC-24: every unset CHAT_LLM_* value falls back to the
-    resolved analysis role (which already fell back to LLM_*). Pool limits
-    have their own chat defaults so a busy chat fails fast."""
-    prefix = "CHAT_LLM_"
+def _build_analysis_fallback_role(
+    prefix: str, analysis: LLMRoleConfig, max_concurrent: int, cooldown_seconds: float, max_wait_seconds: float
+) -> LLMRoleConfig:
+    """A role whose every unset <PREFIX>* value falls back to the resolved
+    analysis role (which already fell back to LLM_*). Pool limits have their
+    own defaults so a busy role fails fast instead of queueing behind analysis."""
     provider = _env_set(prefix + "PROVIDER") or analysis.provider
     model = _env_set(prefix + "MODEL")
     same_provider = provider == analysis.provider
@@ -368,9 +417,9 @@ def _build_chat_role(analysis: LLMRoleConfig, chat: ChatConfig) -> LLMRoleConfig
         "models": [model] if model else [analysis.models[0]],
         "api_key": _env_set(prefix + "API_KEY") or analysis.api_key,
         "api_base": _env_set(prefix + "API_BASE") or (analysis.api_base if same_provider else None),
-        "max_concurrent": chat.llm_max_concurrent,
-        "cooldown_seconds": chat.llm_cooldown_seconds,
-        "max_wait_seconds": chat.llm_max_wait_seconds,
+        "max_concurrent": max_concurrent,
+        "cooldown_seconds": cooldown_seconds,
+        "max_wait_seconds": max_wait_seconds,
     }
     for name in ("MAX_CONCURRENT", "COOLDOWN_SECONDS", "MAX_WAIT_SECONDS"):
         value = _env_set(prefix + name)

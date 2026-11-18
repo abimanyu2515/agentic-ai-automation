@@ -35,6 +35,8 @@ class TestCaseResponse(BaseModel):
     script_validation_attempts: int = 0
     script_validation_completed_at: datetime | None = None
     script_validation_diagnostic: str | None = None
+    groundedness_score: float | None = None
+    unsupported_claims: list[str] = Field(default_factory=list)
     generated_at: datetime
     jira_issue_key: str | None = None
     jira_issue_url: str | None = None

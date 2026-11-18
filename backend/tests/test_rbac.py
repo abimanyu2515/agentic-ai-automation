@@ -46,7 +46,7 @@ def test_login_non_existent_user(setup_db):
 def test_token_refresh(setup_db):
     login_response = client.post(
         "/api/v1/auth/login",
-        json={"email": "dev@platform.ai", "password": "devpassword"}
+        json={"email": "dev@agenticai.com", "password": "devpassword"}
     )
     refresh_token = login_response.json()["refresh_token"]
 
@@ -68,7 +68,7 @@ def test_admin_list_users_forbidden(setup_db):
     # Log in as a stakeholder who has restricted permissions
     login_response = client.post(
         "/api/v1/auth/login",
-        json={"email": "stakeholder@platform.ai", "password": "stakeholderpassword"}
+        json={"email": "stakeholder@agenticai.com", "password": "stakeholderpassword"}
     )
     token = login_response.json()["access_token"]
 
@@ -80,7 +80,7 @@ def test_admin_list_users_success(setup_db):
     # Log in as Superadmin
     login_response = client.post(
         "/api/v1/auth/login",
-        json={"email": "dev@platform.ai", "password": "devpassword"}
+        json={"email": "dev@agenticai.com", "password": "devpassword"}
     )
     token = login_response.json()["access_token"]
 
@@ -89,12 +89,12 @@ def test_admin_list_users_success(setup_db):
     assert response.status_code == 200
     users = response.json()
     assert len(users) >= 5
-    assert any(u["email"] == "dev@platform.ai" for u in users)
+    assert any(u["email"] == "dev@agenticai.com" for u in users)
 
 def test_admin_roles_and_permissions(setup_db):
     login_response = client.post(
         "/api/v1/auth/login",
-        json={"email": "dev@platform.ai", "password": "devpassword"}
+        json={"email": "dev@agenticai.com", "password": "devpassword"}
     )
     token = login_response.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
@@ -129,7 +129,7 @@ def test_admin_roles_and_permissions(setup_db):
 def test_audit_logs_retrieval(setup_db):
     login_response = client.post(
         "/api/v1/auth/login",
-        json={"email": "dev@platform.ai", "password": "devpassword"}
+        json={"email": "dev@agenticai.com", "password": "devpassword"}
     )
     token = login_response.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}

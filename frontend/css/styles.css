@@ -2275,3 +2275,64 @@ body.light-theme {
   }
   .chat-expand-btn { display: none; }
 }
+
+/* Knowledge Base screen (spec 0006) */
+.kb-dropzone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 28px 16px;
+  margin-bottom: 12px;
+  border: 2px dashed var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  text-align: center;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.kb-dropzone-active {
+  border-color: var(--accent-primary);
+  background-color: rgba(59, 130, 246, 0.04);
+}
+.kb-dropzone-busy {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.kb-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+.kb-choose {
+  cursor: pointer;
+}
+.kb-file-input:focus-visible + .kb-choose,
+.kb-choose:focus-within {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+.kb-upload-status {
+  min-height: 1.25rem;
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+.kb-doc-error {
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--color-danger);
+  max-width: 320px;
+  white-space: normal;
+}
+
+/* Helper text under a form field */
+.form-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}

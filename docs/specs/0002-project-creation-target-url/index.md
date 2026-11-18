@@ -1,7 +1,7 @@
 # 0002. Require target URL during project creation
 
 **Date**: 2026-10-13
-**Status**: In Progress
+**Status**: Accepted
 
 ## Summary
 
@@ -143,10 +143,10 @@ The Tracer Bullet approach starts with one thin end to end path, then strengthen
 
 1. [x] Add the required target URL field and accessible error surface to the existing create modal, then pass the value through the existing API wrapper, satisfies **AC-1**, **AC-4**, and **AC-10**.
 2. [x] Add the `Projects` module and `create` action to the RBAC seed, grant it to Project Manager, Admin, and Superadmin, then wire the create route to `get_current_user` and `has_permission("Projects", "create")`. Pass `user.id` as both owner and creator, validate the supported framework and target URL, normalize the URL, and translate validation failures into the existing structured `422` detail shape, satisfies **AC-2**, **AC-3**, **AC-6**, and **AC-7**.
-3. [ ] Extend the Project domain, response schema, and both repository implementations to carry owner and creator identity and the readiness object. Add owner scoped duplicate checks and structured `409` handling, with rollback and session cleanup for PostgreSQL failures and lock plus atomic replacement for JSON failures, satisfies **AC-4**, **AC-5**, **AC-7**, and **AC-8**. The application code is present, but the PostgreSQL migration is not applied or verified.
-4. [ ] Reconcile the PostgreSQL schema with the application contract by retaining nullable legacy fields, inventorying existing owner and URL conflicts, and adding a partial unique index on `(owner_id, target_url)` for non deleted rows where both values are non null. Store the normalized URL directly in `target_url`; do not add a global uniqueness constraint or a second canonical URL column, satisfies **AC-2**, **AC-5**, and **AC-8**. Blocked by the missing Alembic revision `fef1658bde83`.
+3. [x] Extend the Project domain, response schema, and both repository implementations to carry owner and creator identity and the readiness object. Add owner scoped duplicate checks and structured `409` handling, with rollback and session cleanup for PostgreSQL failures and lock plus atomic replacement for JSON failures, satisfies **AC-4**, **AC-5**, **AC-7**, and **AC-8**. Only the `uq_projects_owner_target_url` index maps to `409`; other database errors roll back and return an explicit `500 PROJECT_PERSISTENCE_FAILED`.
+4. [x] Reconcile the PostgreSQL schema with the application contract by retaining nullable legacy fields, inventorying existing owner and URL conflicts, and adding a partial unique index on `(owner_id, target_url)` for non deleted rows where both values are non null. Store the normalized URL directly in `target_url`; do not add a global uniqueness constraint or a second canonical URL column, satisfies **AC-2**, **AC-5**, and **AC-8**. Revision `9c1f8f0e2a11` is applied; the live index and nullable columns were confirmed on 2026-11-17.
 5. [x] Remove the demo URL fallback from project settings and ensure creation and settings use the project value as the only source, satisfies **AC-3**, **AC-4**, and **AC-9**.
-6. [ ] Update focused API, repository, configuration, and frontend tests for the happy path, validation, conflict, ownership, rollback, and accessibility scenarios, satisfies **AC-1** through **AC-10**. Focused API and repository coverage is present, while the remaining rollback, logging, and browser accessibility coverage is still open.
+6. [x] Update focused API, repository, configuration, and frontend tests for the happy path, validation, conflict, ownership, rollback, and accessibility scenarios, satisfies **AC-1** through **AC-10**. Rollback, logging, live PostgreSQL race, and modal markup coverage are in `backend/tests/test_project_creation_persistence.py`. No e2e tool is configured, so the keyboard walkthrough stays a `verify.md` step.
 
 ## Consequences
 

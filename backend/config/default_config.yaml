@@ -28,7 +28,24 @@ rag:
   vector_db_path: ./data/vector_store
   ragflow_api_base: http://localhost:9380
   ragflow_api_key: ~
-  ragflow_dataset_id: ~
+  # Per project knowledge base (spec 0006). RAG_* env vars override these.
+  storage_root: data/projects
+  upload_max_mb: 20
+  upload_types: [pdf, docx, txt, md, csv, xlsx]
+  parse_poll_seconds: 5
+  parse_timeout_seconds: 600
+  index_retry_delays: [10, 60, 300]
+  # Minutes between replays of pending RAGFlow deletes (spec 0007).
+  delete_resweep_minutes: 30
+  # Graded retrieval stage in the workflow (spec 0006). Off until the eval shows good recall.
+  workflow_retrieval_enabled: false
+  top_k: 8
+  max_retrieval_attempts: 2
+  min_relevant_chunks: 2
+  # Retrieval LLM role pool; RETRIEVAL_LLM_* env vars override these.
+  retrieval_llm_max_concurrent: 2
+  retrieval_llm_cooldown_seconds: 30
+  retrieval_llm_max_wait_seconds: 20
 
 generation:
   scenario_count: 3

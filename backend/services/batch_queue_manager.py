@@ -88,14 +88,28 @@ class BatchQueueManager:
 
                 try:
                     # Run execution script through the Playwright runner, handling various mock/fake signatures
+                    target_url = (context.project_config or {}).get("target_url")
                     try:
-                        raw_result = self.runner.run(
-                            script,
-                            run_id,
-                            on_log=self.on_log,
-                            storage_state_path=storage_state_path,
-                            project_id=str(context.project_id)
-                        )
+                        try:
+                            raw_result = self.runner.run(
+                                script,
+                                run_id,
+                                on_log=self.on_log,
+                                storage_state_path=storage_state_path,
+                                project_id=str(context.project_id),
+                                **({"target_url": target_url} if target_url else {}),
+                            )
+                        except TypeError as url_err:
+                            # A test double without target_url still gets project_id.
+                            if not target_url or "target_url" not in str(url_err):
+                                raise
+                            raw_result = self.runner.run(
+                                script,
+                                run_id,
+                                on_log=self.on_log,
+                                storage_state_path=storage_state_path,
+                                project_id=str(context.project_id),
+                            )
                     except TypeError as t_err:
                         if "unexpected keyword argument" in str(t_err) or "got an unexpected" in str(t_err):
                             try:

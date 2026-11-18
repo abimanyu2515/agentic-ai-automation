@@ -281,30 +281,35 @@ class App {
         const jiraKey = document.getElementById('new-proj-jira-key').value.trim() || null;
         const targetUrl = document.getElementById('new-proj-target-url').value.trim();
         
+        const descInput = document.getElementById('new-proj-desc');
+        const targetUrlInput = document.getElementById('new-proj-target-url');
         const descError = document.getElementById('new-proj-desc-error');
         const targetUrlError = document.getElementById('new-proj-target-url-error');
-        if (descError) {
-          descError.style.display = 'none';
-          descError.textContent = '';
-        }
-        if (targetUrlError) {
-          targetUrlError.style.display = 'none';
-          targetUrlError.textContent = '';
-        }
+        // Show or clear one field's error: visible text, aria-invalid, and focus (AC-10).
+        const setFieldError = (input, errorEl, message) => {
+          if (errorEl) {
+            errorEl.textContent = message || '';
+            errorEl.style.display = message ? 'block' : 'none';
+          }
+          if (input) {
+            if (message) {
+              input.setAttribute('aria-invalid', 'true');
+              input.focus();
+            } else {
+              input.removeAttribute('aria-invalid');
+            }
+          }
+        };
+        setFieldError(descInput, descError, '');
+        setFieldError(targetUrlInput, targetUrlError, '');
 
         if (!name) return;
         if (!desc) {
-          if (descError) {
-            descError.textContent = 'Project description is required.';
-            descError.style.display = 'block';
-          }
+          setFieldError(descInput, descError, 'Project description is required.');
           return;
         }
         if (!targetUrl) {
-          if (targetUrlError) {
-            targetUrlError.textContent = 'Target URL is required.';
-            targetUrlError.style.display = 'block';
-          }
+          setFieldError(targetUrlInput, targetUrlError, 'Target URL is required.');
           return;
         }
 
@@ -318,11 +323,11 @@ class App {
           const detail = err.detail || {};
           const invalidTargetUrl = detail.invalid_fields && detail.invalid_fields.target_url;
           if (targetUrlError && invalidTargetUrl) {
-            targetUrlError.textContent = invalidTargetUrl === 'duplicate_url'
+            setFieldError(targetUrlInput, targetUrlError, invalidTargetUrl === 'duplicate_url'
               ? 'A project with this target URL already exists for your account.'
-              : detail.message || 'Enter a valid absolute HTTP or HTTPS URL.';
-            targetUrlError.style.display = 'block';
+              : detail.message || 'Enter a valid absolute HTTP or HTTPS URL.');
           } else if (descError) {
+            // Not tied to one field (e.g. a server error): announce it without marking a field invalid.
             descError.textContent = detail.message || `Failed to create project: ${err.message}`;
             descError.style.display = 'block';
           } else {
@@ -412,6 +417,8 @@ class App {
     if (settingsForm) {
       settingsForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        // Spec 0006: send the RAGFlow key only when a new one was typed.
+        const ragApiKey = (document.getElementById('settings-rag-api-key').value || '').trim();
         const payload = {
           llm: {
             provider: document.getElementById('settings-llm-provider').value,
@@ -436,13 +443,11 @@ class App {
             duplicate_similarity_threshold: parseFloat(document.getElementById('settings-eval-dup').value) || 0.75,
             relevance_rejection_threshold: parseFloat(document.getElementById('settings-eval-rej').value) || 0.3
           },
-          rag: {
+          rag: Object.assign({
             enabled: document.getElementById('settings-rag-enabled').value === 'true',
             vector_db_provider: document.getElementById('settings-rag-provider').value,
-            ragflow_api_base: document.getElementById('settings-rag-api-base').value || '',
-            ragflow_api_key: document.getElementById('settings-rag-api-key').value || null,
-            ragflow_dataset_id: document.getElementById('settings-rag-dataset-id').value || null
-          },
+            ragflow_api_base: document.getElementById('settings-rag-api-base').value || ''
+          }, ragApiKey ? { ragflow_api_key: ragApiKey } : {}),
           jira: {
             base_url: document.getElementById('settings-jira-base-url').value || 'https://your-domain.atlassian.net',
             email: document.getElementById('settings-jira-email').value || '',
@@ -774,7 +779,7 @@ class App {
       container.textContent = 'Role settings are not available.';
       return;
     }
-    const labels = { generation: 'Generation (test data and scripts)', analysis: 'Analysis (all other agents)' };
+    const labels = { generation: 'Generation (test data and scripts)', analysis: 'Analysis (all other agents)', chat: 'Chat assistant', retrieval: 'Retrieval (knowledge grading and query rewrites)' };
     container.innerHTML = Object.entries(roles).map(([role, cfg]) => `
       <p style="margin: 0 0 4px; font-weight: 600; font-size: 0.85rem; color: var(--text-primary);">${escapeHTML(labels[role] || role)}</p>
       <dl style="margin: 0 0 16px; display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 0.85rem;">
@@ -817,8 +822,10 @@ class App {
     safeSetValue('settings-rag-enabled', String(this.settings.rag.enabled));
     safeSetValue('settings-rag-provider', this.settings.rag.vector_db_provider || 'chroma');
     safeSetValue('settings-rag-api-base', this.settings.rag.ragflow_api_base || 'http://localhost:9380');
-    safeSetValue('settings-rag-api-key', this.settings.rag.ragflow_api_key || '');
-    safeSetValue('settings-rag-dataset-id', this.settings.rag.ragflow_dataset_id || '');
+    // Spec 0006: the key is write only. Show whether one is set, never its value.
+    safeSetValue('settings-rag-api-key', '');
+    const ragKeyInput = document.getElementById('settings-rag-api-key');
+    if (ragKeyInput) ragKeyInput.placeholder = this.settings.rag.ragflow_api_key_set ? 'Key is set' : 'Not set';
 
     if (this.settings.jira) {
       safeSetValue('settings-jira-base-url', this.settings.jira.base_url || '');
@@ -1238,6 +1245,8 @@ class App {
     if (viewName === 'jira-traceability') this.renderJiraTraceability();
     if (viewName === 'reports') this.renderReports();
     if (viewName === 'project') this.renderProjectPage();
+    // Knowledge Base status polling runs only while that screen is open.
+    if (viewName === 'documents') this.renderDocuments(); else this.stopKnowledgePolling();
     if (viewName === 'object-repository') {
       this.objectRepositoryView = this.objectRepositoryView || new ObjectRepositoryView();
       this.objectRepositoryView.render(this.currentProject);
@@ -3236,7 +3245,7 @@ class App {
       return;
     }
 
-    if (['dashboard', 'requirements', 'scenarios', 'testcases', 'jira-traceability', 'testdatagent', 'playwright', 'executions', 'reports', 'langsmith', 'settings', 'execution-workspace', 'project-start', 'project', 'object-repository', 'token-utilization'].includes(view)) {
+    if (['dashboard', 'requirements', 'scenarios', 'testcases', 'jira-traceability', 'testdatagent', 'playwright', 'executions', 'reports', 'langsmith', 'settings', 'execution-workspace', 'project-start', 'project', 'object-repository', 'token-utilization', 'documents'].includes(view)) {
       if (view !== 'project' && view !== 'token-utilization' && this.currentProject) {
         await this.refreshProjectData().catch(e => console.error("Router refresh error:", e));
       }
@@ -3247,88 +3256,97 @@ class App {
     }
   }
 
-  // Documents Page / Knowledge Base
+  // Documents Page / Knowledge Base (spec 0006)
   renderDocuments() {
     const container = document.getElementById('documents-list-container');
+    if (!container) return;
     container.innerHTML = Components.DocumentsTable(this.documents, async (id) => {
       if (!confirm("Are you sure you want to delete this document from the Knowledge Base?")) return;
       try {
         await API.deleteDocument(this.currentProject.id, id);
         this.addLog("Document deleted from Knowledge Base");
-        await this.refreshProjectData();
+        await this.refreshKnowledgeDocuments();
       } catch (err) {
         alert(`Failed to delete document: ${err.message}`);
       }
     });
+    this.bindKnowledgeUpload();
+    this.syncKnowledgePolling();
+  }
 
+  bindKnowledgeUpload() {
     const dropzone = document.getElementById('kb-dropzone');
-    if (!dropzone) return;
+    const input = document.getElementById('kb-file-input');
+    if (!dropzone || !input) return;
 
     dropzone.ondragover = (e) => {
       e.preventDefault();
-      dropzone.style.borderColor = 'var(--accent-primary)';
-      dropzone.style.backgroundColor = 'rgba(59, 130, 246, 0.03)';
+      dropzone.classList.add('kb-dropzone-active');
     };
-
-    dropzone.ondragleave = () => {
-      dropzone.style.borderColor = 'var(--border-color)';
-      dropzone.style.backgroundColor = 'transparent';
-    };
-
-    dropzone.ondrop = async (e) => {
+    dropzone.ondragleave = () => dropzone.classList.remove('kb-dropzone-active');
+    dropzone.ondrop = (e) => {
       e.preventDefault();
-      dropzone.style.borderColor = 'var(--border-color)';
-      dropzone.style.backgroundColor = 'transparent';
-
+      dropzone.classList.remove('kb-dropzone-active');
       const files = e.dataTransfer.files;
-      if (files.length === 0) return;
-
-      const file = files[0];
-      const validExtensions = ['.pdf', '.docx', '.xlsx', '.csv', '.txt'];
-      const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-      if (!validExtensions.includes(fileExt)) {
-        alert("Invalid file format. Upload PDF, DOCX, XLSX, CSV, or TXT.");
-        return;
-      }
-
-      dropzone.innerHTML = `
-        <div style="width: 100%;">
-          <div style="font-size: 0.8rem; margin-bottom: 8px;">Uploading ${escapeHTML(file.name)}...</div>
-          <div style="background-color: var(--bg-primary); height: 8px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border-color);">
-            <div id="upload-progress-bar" style="background-color: var(--accent-primary); width: 0%; height: 100%; transition: width 0.15s ease;"></div>
-          </div>
-        </div>
-      `;
-
-      const progressBar = document.getElementById('upload-progress-bar');
-      let progress = 0;
-      const interval = setInterval(async () => {
-        progress += 10;
-        progressBar.style.width = `${progress}%`;
-        if (progress >= 100) {
-          clearInterval(interval);
-          
-          try {
-            await API.createDocument(this.currentProject.id, {
-              filename: file.name,
-              original_filename: file.name,
-              mime_type: file.type || 'text/plain',
-              size: file.size,
-              storage_path: `/data/${file.name}`
-            });
-            this.addLog(`Document '${file.name}' added to Knowledge Base`);
-            await this.refreshProjectData();
-          } catch (err) {
-            alert(`Upload failed: ${err.message}`);
-          } finally {
-            dropzone.innerHTML = `
-              Drag and drop target files here to parse (PDF, DOCX, XLSX, CSV, TXT)
-              <div style="margin-top: 8px; font-size: 0.75rem; background-color: var(--bg-tertiary); padding: 4px 8px; border-radius: 4px; display: inline-block; border: 1px solid var(--border-color);">RAG Extraction Active</div>
-            `;
-          }
-        }
-      }, 100);
+      if (files.length > 0) this.uploadKnowledgeFile(files[0]);
     };
+    input.onchange = () => {
+      if (input.files.length > 0) this.uploadKnowledgeFile(input.files[0]);
+      input.value = '';
+    };
+  }
+
+  async uploadKnowledgeFile(file) {
+    if (!this.currentProject || this.knowledgeUploading) return;
+    const status = document.getElementById('kb-upload-status');
+    const dropzone = document.getElementById('kb-dropzone');
+    const input = document.getElementById('kb-file-input');
+    this.knowledgeUploading = true;
+    if (dropzone) dropzone.classList.add('kb-dropzone-busy');
+    if (input) input.disabled = true;
+    if (status) status.textContent = `Uploading ${file.name}…`;
+    try {
+      // The server checks type and size and answers 413, 415, or 422 with a reason.
+      await API.uploadDocument(this.currentProject.id, file);
+      this.addLog(`Document '${file.name}' uploaded to the Knowledge Base`);
+      if (status) status.textContent = `${file.name} uploaded. Indexing runs in the background.`;
+      await this.refreshKnowledgeDocuments();
+    } catch (err) {
+      if (status) status.textContent = `Upload failed: ${err.message}`;
+    } finally {
+      this.knowledgeUploading = false;
+      if (dropzone) dropzone.classList.remove('kb-dropzone-busy');
+      if (input) input.disabled = false;
+    }
+  }
+
+  async refreshKnowledgeDocuments() {
+    if (!this.currentProject) return;
+    this.documents = await API.getDocuments(this.currentProject.id);
+    this.renderDocuments();
+  }
+
+  // Refresh every 5 s while any document is pending or processing, and only
+  // while the Knowledge Base screen is open (AC-11).
+  syncKnowledgePolling() {
+    const onScreen = window.location.hash === '#/documents';
+    const waiting = (this.documents || []).some(d => d.embedding_status === 'pending' || d.embedding_status === 'processing');
+    if (onScreen && waiting) {
+      if (!this.knowledgePollTimer) {
+        this.knowledgePollTimer = setInterval(() => {
+          this.refreshKnowledgeDocuments().catch(e => console.warn('Knowledge Base refresh failed:', e));
+        }, 5000);
+      }
+    } else {
+      this.stopKnowledgePolling();
+    }
+  }
+
+  stopKnowledgePolling() {
+    if (this.knowledgePollTimer) {
+      clearInterval(this.knowledgePollTimer);
+      this.knowledgePollTimer = null;
+    }
   }
 
   // Executions History Renderer
@@ -4350,7 +4368,19 @@ class App {
       const projectCombo = document.getElementById('project-combobox');
       if (projectCombo) projectCombo.style.display = 'block';
       if (exitBtn) exitBtn.style.display = this.currentProject ? 'flex' : 'none';
-      
+
+      // Register once, before the startup awaits, so an early nav click is routed
+      // and a later login does not add a second listener.
+      if (!this.hashListenerBound) {
+        this.hashListenerBound = true;
+        window.addEventListener('hashchange', () => {
+          // A route change closes the triage modal's chat context.
+          if (this.triageExecutionId) this.closeModal('triage-modal');
+          this.notifyChatContext();
+          this.handleRouting();
+        });
+      }
+
       try {
         await this.loadRolesAndPermissions();
         this.enforceUIPermissions();
@@ -4378,12 +4408,6 @@ class App {
       this.selectedRequirementId = localStorage.getItem('playwright_active_req_id') || null;
       this.activePlaywrightTestCaseId = localStorage.getItem('playwright_active_testcase_id') || null;
 
-      window.addEventListener('hashchange', () => {
-        // A route change closes the triage modal's chat context.
-        if (this.triageExecutionId) this.closeModal('triage-modal');
-        this.notifyChatContext();
-        this.handleRouting();
-      });
       await this.handleRouting();
     } else {
       document.getElementById('login-overlay').style.display = 'flex';
@@ -4574,6 +4598,7 @@ class App {
       if (view === 'executions') moduleName = 'Execution';
       if (view === 'jira-traceability') moduleName = 'TestCases';
       if (view === 'object-repository') moduleName = 'ObjectRepository';
+      if (view === 'documents') moduleName = 'Knowledge';
       if (view === 'reports') moduleName = 'Reports';
       if (view === 'settings') moduleName = 'Settings';
       if (view === 'token-utilization') moduleName = 'TokenUsage';

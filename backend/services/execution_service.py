@@ -36,6 +36,16 @@ class ExecutionService:
     def repo(self):
         return get_project_repository()
 
+    def _capture_snapshot(self, project_id: UUID) -> dict[str, str]:
+        """The project's configuration at accept time (spec 0001). Raises
+        ProjectConfigurationError("PROJECT_NOT_READY") when it is incomplete."""
+        from backend.services.project_configuration import capture_project_snapshot
+
+        project = self.repo.get_project(project_id)
+        if project is None:
+            raise ValueError(f"Project {project_id} not found")
+        return capture_project_snapshot(project)
+
     def start_test_case_run(
         self, project_id: UUID, test_case_id: UUID, background_tasks=None, workflow_service=None,
     ) -> UUID:
@@ -46,6 +56,9 @@ class ExecutionService:
         from backend.services.workflow_service import active_execution_events, run_execution_and_stream
         if self.repo.get_test_case(test_case_id) is None:
             raise ValueError(f"Test case {test_case_id} not found")
+        # Spec 0001, AC-3 and AC-4: refuse an unready project before anything is
+        # queued, and capture the configuration this run must use.
+        project_config = self._capture_snapshot(project_id)
         execution_id = uuid4()
         # Reset the test case's event log before queueing, so a reader never
         # mistakes the previous run's "Completed" event for this run's.
@@ -57,11 +70,12 @@ class ExecutionService:
         if background_tasks is not None:
             background_tasks.add_task(
                 run_execution_and_stream, workflow_service, project_id, test_case_id, execution_id, background_tasks,
+                project_config,
             )
         else:
             Thread(
                 target=run_execution_and_stream,
-                args=(workflow_service, project_id, test_case_id, execution_id, None),
+                args=(workflow_service, project_id, test_case_id, execution_id, None, project_config),
                 name=f"chat-execution-{execution_id}",
                 daemon=True,
             ).start()
@@ -92,6 +106,7 @@ class ExecutionService:
         runnable = [case for case in requested if case and case.playwright_script]
         if not runnable:
             raise ValueError("No runnable test cases selected")
+        project_config = self._capture_snapshot(project_id)
 
         batch_id = uuid4()
         batch_id_text = str(batch_id)
@@ -119,7 +134,9 @@ class ExecutionService:
                 priority=1,
                 estimated_duration=30.0,
             ))
-        context = BatchContext(batch_id=batch_id_text, project_id=project_id, queue=queue)
+        context = BatchContext(
+            batch_id=batch_id_text, project_id=project_id, queue=queue, project_config=project_config,
+        )
         events.append({"status": "Started", "log": "Initializing batch queue runner..."})
 
         def append_event(status: str, message: str, current_item=None) -> None:
@@ -196,6 +213,7 @@ class ExecutionService:
                         screenshot_path=screenshot[0].get("path") if screenshot else None,
                         video_path=artifacts.get("video"),
                         trace_path=artifacts.get("trace"),
+                        project_config_snapshot=project_config,
                         timeline=artifacts.get("timeline", []),
                     )
                     result._raw_payload = {
@@ -204,6 +222,7 @@ class ExecutionService:
                         "console": artifacts.get("console", []),
                     }
                     self.repo.save_execution_result(project_id, result)
+                    self._queue_failure_knowledge(project_id, result)
                     self.apply_object_repository_markers(
                         project_id, result.id, marker_lines.get(item.task_id, [])
                     )
@@ -233,6 +252,18 @@ class ExecutionService:
         else:
             Thread(target=run, name=f"chat-batch-{batch_id_text}", daemon=True).start()
         return batch_id
+
+    @staticmethod
+    def _queue_failure_knowledge(project_id: UUID, result: ExecutionResult) -> None:
+        """Queue a failed or errored run for the knowledge index (spec 0006, AC-14, AC-15).
+
+        Call it right after the result is saved. It only enqueues and never raises.
+        Imported lazily to avoid an import cycle with the indexer."""
+        from backend.services.knowledge_indexer import queue_knowledge_source
+        from backend.services.knowledge_sources import FAILED_EXECUTION_STATUSES
+
+        if getattr(result.status, "value", result.status) in FAILED_EXECUTION_STATUSES:
+            queue_knowledge_source(project_id, "execution_failure", result.id)
 
     def apply_object_repository_markers(self, project_id: UUID, execution_id: UUID, lines: list[str]) -> int:
         """The single place run markers become element and locator health (spec 0004, AC-10).
@@ -359,6 +390,7 @@ class ExecutionService:
 
         # 1. Persist result
         self.repo.save_execution_result(project_id, result)
+        self._queue_failure_knowledge(project_id, result)
 
         # 1b. Element and locator health from the run's [OBJREPO] markers.
         self.apply_object_repository_markers(project_id, exec_id, payload.get("logs") or [])

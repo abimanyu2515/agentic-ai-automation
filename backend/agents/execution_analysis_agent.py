@@ -80,6 +80,7 @@ from backend.models.state import WorkflowState
 from backend.models.execution_result import ExecutionStatus
 from backend.services.llm import LLMService
 from backend.utils.prompts import load_prompt
+from backend.agents.knowledge_context import with_project_knowledge
 
 
 # ==========================================================
@@ -170,6 +171,7 @@ class ExecutionAnalysisAgent(BaseAgent):
             logs=failure_msg,
             screenshot_desc=screenshot_desc
         )
+        prompt = with_project_knowledge(prompt, state.retrieved_context)
 
         try:
             analysis = self.llm_service.structured_generate(

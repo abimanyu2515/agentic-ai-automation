@@ -433,9 +433,10 @@ def _normalize_playwright_code(code: str, base_url: str) -> str:
         )
         code = "\n".join(lines)
     elif base_url:
-        # The runner does not set TARGET_URL, so the fallback is the URL the test
-        # opens. Models copy a deeper URL from the trace or evidence, which skips
-        # the project's own entry steps; the project URL always wins.
+        # Executions set TARGET_URL from the run's project snapshot (spec 0001), and
+        # the fallback is the project URL for runs outside that path. Models copy a
+        # deeper URL from the trace or evidence, which skips the project's own entry
+        # steps; the project URL always wins.
         code = _BASE_URL_FALLBACK.sub(
             lambda match: match.group(1) + json.dumps(base_url), code, count=1
         )

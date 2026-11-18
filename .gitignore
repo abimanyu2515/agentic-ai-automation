@@ -31,6 +31,7 @@ trace/
 playwright-report/
 test-results/
 backend/playwrightt/artifacts/
+backend/playwright/artifacts/
 backend/playwrightt/public/artifacts/
 data/
 
