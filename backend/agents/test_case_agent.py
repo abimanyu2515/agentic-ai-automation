@@ -62,6 +62,7 @@ from backend.models.test_case import TestCase
 from backend.services.llm_context import run_in_context
 from backend.services.llm import LLMService, LLMServiceError
 from backend.utils.prompts import load_prompt
+from backend.agents.knowledge_context import with_project_knowledge
 
 
 _MAX_SCENARIOS_PER_LLM_CALL = 5
@@ -188,6 +189,7 @@ class TestCaseAgent(BaseAgent):
                 scenarios=_format_scenarios_block(scenario_batch),
                 count=str(len(scenario_batch)),
             )
+            prompt = with_project_knowledge(prompt, state.retrieved_context)
 
             batch = self.llm_service.structured_generate(
                 user=prompt,

@@ -176,6 +176,16 @@ Key environment variables (`.env`):
 | `LANGSMITH_API_KEY` | LangSmith API key | — |
 | `RAG_ENABLED` | Enable RAG knowledge base | false |
 | `RAGFLOW_API_BASE` | RAGFlow API URL | http://localhost:9380 |
+| `RAGFLOW_API_KEY` | RAGFlow API key | — |
+| `RAG_STORAGE_ROOT` | Where uploaded knowledge base files are saved | data/projects |
+| `RAG_UPLOAD_MAX_MB` / `RAG_UPLOAD_TYPES` | Largest upload and allowed extensions | 20 / pdf,docx,txt,md,csv,xlsx |
+| `RAG_PARSE_POLL_SECONDS` / `RAG_PARSE_TIMEOUT_SECONDS` | How often to check RAGFlow parsing, and when to give up | 5 / 600 |
+| `RAG_INDEX_RETRY_DELAYS` | Seconds to wait before each retry of a failed RAGFlow call | 10,60,300 |
+| `RAG_DELETE_RESWEEP_MINUTES` | Minutes between replays of RAGFlow deletes that have not succeeded yet | 30 |
+| `RAG_WORKFLOW_RETRIEVAL_ENABLED` | Run the graded retrieval stage before the scenario, test case, requirement analyst, and execution analysis agents (read on every run) | false |
+| `RAG_TOP_K` / `RAG_MAX_RETRIEVAL_ATTEMPTS` / `RAG_MIN_RELEVANT_CHUNKS` | Chunks kept per stage, search attempts, and relevant chunks wanted before the stage stops rewriting the query | 8 / 2 / 2 |
+| `RETRIEVAL_LLM_PROVIDER` / `_MODEL` / `_API_KEY` / `_API_BASE` | Retrieval role that grades chunks and rewrites weak queries; each unset value falls back to the analysis role | analysis role |
+| `RETRIEVAL_LLM_MAX_CONCURRENT` / `_COOLDOWN_SECONDS` / `_MAX_WAIT_SECONDS` | Retrieval role limits | 2 / 30 / 20 |
 | `REPOSITORY_PROVIDER` | Database provider (json or postgresql) | json |
 | `DATABASE_URL` | PostgreSQL connection string | — |
 | `JIRA_BASE_URL` | JIRA instance URL | — |

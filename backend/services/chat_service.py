@@ -227,11 +227,13 @@ class ChatService:
     def toolbox(self):
         if self._toolbox is None:
             from backend.services.chat_tools import ChatToolbox
+            from backend.services.knowledge_service import KnowledgeService
 
             self._toolbox = ChatToolbox(
                 self._project_repository,
                 self._object_repository_store,
                 result_chars=self.settings.chat.tool_result_chars,
+                knowledge_service=KnowledgeService(repository=self._project_repository),
             )
         return self._toolbox
 

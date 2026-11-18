@@ -101,7 +101,11 @@ Domain services encapsulate business logic. Key services:
 | `JiraService` | JIRA API integration (stories, bugs, status sync) |
 | `ExecutionService` | Test execution orchestration and streaming |
 | `ReportService` | JUnit XML report compilation |
-| `RAGService` | RAGFlow document upload and retrieval |
+| `KnowledgeService` | Per project knowledge base: file upload, document list and delete, status, search mapped to local records, and cleanup when a project is deleted (spec 0006) |
+| `KnowledgeIndexer` | One background worker that creates the project's RAGFlow dataset, uploads files, polls parsing, retries failed RAGFlow calls, deletes remote documents and datasets through the pending delete table (`knowledge_remote_deletes`, spec 0007: each delete is saved first, kept until RAGFlow confirms it or says it is gone, and replayed at startup and by a resweep job every `rag.delete_resweep_minutes`), requeues unfinished documents at startup, and indexes other project sources as knowledge entries (hash skip, replacement, removal). Defects are read from Jira through an injected `JiraService` when the job runs (`knowledge_sources.read_defect`). Routes and services call `queue_knowledge_source` (or `queue_defect_keys` for bug keys) after a save; both only enqueue and never raise |
+| `knowledge_sources` | Reads a test case, Jira story, failed execution, or object repository page again when its job runs, and builds the text to index; `None` means the source is gone and its entry is removed |
+| `retrieval/` (`Retriever`) | The retrieval contract; `RAGFlowRetriever` is the only RAGFlow HTTP client, `InMemoryRetriever` and `NullRetriever` serve tests and disabled mode |
+| `KnowledgeRetrievalAgent` | The graded retrieval stage in the workflow (spec 0006): searches the project's knowledge per stage through `KnowledgeService.search`, grades chunks and rewrites weak queries on the `retrieval` LLM role, and writes `retrieved_context` for the consumer agents. Off unless `RAG_WORKFLOW_RETRIEVAL_ENABLED`; never fails a run |
 | `AuditService` | Audit log writing |
 | `RecoveryManager` | Crash recovery for interrupted executions |
 | `BatchQueueManager` | Queue management for batch test runs |
@@ -437,6 +441,7 @@ backend/graph/workflow.py (initialization)
 - **Agent Tracing**: Every agent node is wrapped with `@traceable(name="AgentName", project_name=project_name)`
 - **LLM Auto-Tracing**: LangChain/LangGraph automatically traces all LLM calls with prompts, completions, and token usage
 - **Hierarchical Traces**: All agents appear as child spans under the root workflow trace
+- **Retrieval Spans** (spec 0006): inside each retrieval node, `knowledge_retrieval.search`, `.grade`, and `.rewrite` spans carry stage, attempt, query, source types, returned source refs, and relevant count. `backend/agents/knowledge_retrieval_agent.py` uses the same guarded `traceable` import fallback as `workflow.py`
 
 **Trace Information Captured**:
 - Agent execution duration

@@ -66,10 +66,9 @@ def test_normalize_target_url_rejects_userinfo():
     assert error.value.invalid_fields == {"target_url": "invalid_url"}
 
 
-def test_normalize_target_url_rejects_query_string():
-    with pytest.raises(ProjectConfigurationError) as error:
-        normalize_target_url("https://example.com?token=value")
-    assert error.value.invalid_fields == {"target_url": "invalid_url"}
+def test_normalize_target_url_keeps_query_string():
+    # Spec 0002, AC-3: userinfo and fragments are rejected, query text remains allowed.
+    assert "token=value" in normalize_target_url("https://example.com?token=value")
 
 
 def test_normalize_target_url_rejects_fragment():
@@ -82,6 +81,20 @@ def test_normalize_target_url_rejects_missing_host():
     with pytest.raises(ProjectConfigurationError) as error:
         normalize_target_url("https://")
     assert error.value.invalid_fields == {"target_url": "invalid_url"}
+
+
+@pytest.mark.parametrize("url", ["https://example.com:99999", "https://example.com:abc"])
+def test_normalize_target_url_rejects_invalid_port_as_configuration_error(url):
+    # Spec 0002, AC-3: a bad port is a validation error, not an unhandled ValueError.
+    with pytest.raises(ProjectConfigurationError) as error:
+        normalize_target_url(url)
+    assert error.value.invalid_fields == {"target_url": "invalid_url"}
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_normalize_target_url_treats_blank_as_not_set(value):
+    # Repositories and readiness rely on None meaning "no URL yet"; creation rejects it separately.
+    assert normalize_target_url(value) is None
 
 
 def test_normalize_target_url_handles_ipv6():
@@ -145,7 +158,10 @@ def test_readiness_for_project_allows_same_url_different_owners():
     project1 = MockProject(id=uuid4(), target_url="https://example.com", framework="playwright", owner_id=owner1)
     project2 = MockProject(id=uuid4(), target_url="https://example.com", framework="playwright", owner_id=owner2)
 
-    readiness = readiness_for_project(project2, projects=[project1, project2])
+    # Spec 0002, line 68: the caller passes the owner scoped list (see
+    # main.py, owner_projects), so another owner's project is never compared.
+    owner2_projects = [p for p in (project1, project2) if p.owner_id == owner2]
+    readiness = readiness_for_project(project2, projects=owner2_projects)
     assert readiness["is_ready"] is True
 
 

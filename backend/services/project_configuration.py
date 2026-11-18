@@ -46,6 +46,29 @@ class ProjectConfiguration:
     credential_reference: str
 
 
+def redact_url_for_log(value: str | None) -> str | None:
+    """Return a URL safe for diagnostic logs: scheme, host, port, and path only.
+
+    Query text, fragments, and userinfo can carry tokens or credentials, so they
+    never reach the logs (spec 0002, AC-9).
+    """
+    if value is None:
+        return None
+    try:
+        parsed = urlsplit(value.strip())
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return "<invalid url>"
+    if not parsed.scheme or not hostname:
+        return "<invalid url>"
+    netloc = f"[{hostname}]" if ":" in hostname else hostname
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+    redacted = urlunsplit((parsed.scheme.lower(), netloc, parsed.path, "", ""))
+    return f"{redacted}?<redacted>" if parsed.query else redacted
+
+
 def normalize_target_url(value: str | None) -> str | None:
     if value is None:
         return None
@@ -81,12 +104,19 @@ def normalize_target_url(value: str | None) -> str | None:
             invalid_fields={"target_url": "invalid_url"},
         )
 
-    port = parsed.port
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ProjectConfigurationError(
+            "PROJECT_INVALID_CONFIGURATION",
+            "Target URL contains an invalid port.",
+            invalid_fields={"target_url": "invalid_url"},
+        ) from exc
     scheme = parsed.scheme.lower()
     normalized_netloc = hostname.lower()
     if ":" in hostname and not hostname.startswith("["):
         normalized_netloc = f"[{normalized_netloc}]"
-    if parsed.port is not None and not (
+    if port is not None and not (
         (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
     ):
         normalized_netloc = f"{normalized_netloc}:{port}"
@@ -159,6 +189,20 @@ def require_ready_project(project: Any, projects: list[Any] | None = None) -> Pr
         framework=normalize_framework(project.framework) or "playwright",
         credential_reference=str(project.id),
     )
+
+
+def capture_project_snapshot(project: Any) -> dict[str, str]:
+    """Spec 0001, AC-3, AC-4, AC-8: check readiness when work is accepted and
+    return the configuration the work must use until it ends. Raises
+    ProjectConfigurationError("PROJECT_NOT_READY") for an incomplete project.
+    Holds no secret: credentials are looked up by `credential_reference`."""
+    configuration = require_ready_project(project)
+    return {
+        "project_id": str(configuration.project_id),
+        "target_url": configuration.target_url,
+        "framework": configuration.framework,
+        "credential_reference": configuration.credential_reference,
+    }
 
 
 def snapshot_for_project_context(context: dict[str, Any]) -> dict[str, Any]:

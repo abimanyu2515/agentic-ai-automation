@@ -112,9 +112,13 @@ def test_navigation_planner():
     path = planner.plan_navigation("LOGIN", "DASHBOARD")
     assert path == ["enter_credentials", "click_login"]
 
-    # LIST to CONFIRMATION path via FORM
+    # LIST to CONFIRMATION takes the shortest path: LIST has a direct FORM edge
     path = planner.plan_navigation("LIST", "CONFIRMATION")
-    assert path == ["select_item", "open_form", "fill_form", "submit_form"]
+    assert path == ["open_form", "fill_form", "submit_form"]
+
+    # DETAIL to CONFIRMATION also goes through FORM
+    path = planner.plan_navigation("DETAIL", "CONFIRMATION")
+    assert path == ["open_form", "fill_form", "submit_form"]
 
     # Same state requires no action
     path = planner.plan_navigation("HOME", "HOME")

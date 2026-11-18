@@ -393,43 +393,6 @@ def test_update_and_delete_project(client):
     assert response.status_code == 404
 
 
-def test_create_and_delete_documents(client):
-    # Create project
-    response = client.post("/api/v1/projects", json={"name": "Doc Project", "description": "Doc project description", "framework": "playwright", "target_url": "https://docs.example.com"})
-    proj_id = response.json()["id"]
-
-    # Create document metadata
-    response = client.post(
-        f"/api/v1/projects/{proj_id}/documents",
-        json={
-            "filename": "requirements.pdf",
-            "original_filename": "Healthcare_v1.pdf",
-            "mime_type": "application/pdf",
-            "size": 150000,
-            "storage_path": "/data/requirements.pdf"
-        }
-    )
-    assert response.status_code == 201
-    doc = response.json()
-    assert doc["filename"] == "requirements.pdf"
-    assert doc["embedding_status"] == "pending"
-
-    # List documents
-    response = client.get(f"/api/v1/projects/{proj_id}/documents")
-    assert response.status_code == 200
-    docs = response.json()
-    assert len(docs) == 1
-    assert docs[0]["filename"] == "requirements.pdf"
-
-    # Delete document
-    response = client.delete(f"/api/v1/projects/{proj_id}/documents/{doc['id']}")
-    assert response.status_code == 200
-
-    # Listed documents are empty now
-    response = client.get(f"/api/v1/projects/{proj_id}/documents")
-    assert response.json() == []
-
-
 def test_get_activity_traces(client):
     # Create project
     response = client.post("/api/v1/projects", json={"name": "Trace Proj", "description": "Trace project description", "framework": "playwright", "target_url": "https://trace.example.com"})
@@ -644,3 +607,33 @@ def test_batch_execution_endpoints(client):
     response = client.get(f"/api/v1/projects/{proj_id}/batches/{batch_id}/stream")
     assert response.status_code == 200
     assert "Connecting" in response.text
+
+
+@pytest.mark.parametrize(
+    "log_level, expected",
+    [(None, 20), ("WARNING", 30), ("debug", 10)],
+    ids=["default-info", "warning", "lowercase-debug"],
+)
+def test_importing_the_app_applies_log_level_to_the_root_logger(log_level, expected):
+    """Regression for /debug 2026-11-17: nothing configured logging, so under
+    uvicorn the root logger stayed at WARNING and every app INFO line (for
+    example "Knowledge sweep queued N document(s)") was dropped. Pytest installs
+    its own handlers, which makes basicConfig a no op here, so this runs in a
+    fresh interpreter."""
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if k != "LOG_LEVEL"}
+    if log_level is not None:
+        env["LOG_LEVEL"] = log_level
+    result = subprocess.run(
+        [sys.executable, "-c", "import logging, backend.main; print('ROOT_LEVEL=%s' % logging.getLogger().level)"],
+        cwd=Path(__file__).resolve().parents[2],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    # Other libraries may print their own lines at DEBUG, so look for the marker.
+    assert f"ROOT_LEVEL={expected}" in result.stdout.splitlines()

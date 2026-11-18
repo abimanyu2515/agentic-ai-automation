@@ -79,6 +79,10 @@ class FakeRepo:
     def get_scenario(self, scenario_id):
         return self.scenarios.get(scenario_id)
 
+    def get_test_cases(self, scenario_id, include_deleted=False):
+        # This fake holds no test cases; a scenario delete reads them to clear knowledge.
+        return []
+
     def delete_scenario(self, scenario_id, deleted_by=None):
         scenario = self.scenarios.get(scenario_id)
         if scenario is None or scenario.is_deleted:

@@ -1,0 +1,18 @@
+{
+  "_note": "Fixture corpus and labelled cases for the retrieval eval (spec 0006, AC-25). Each entry is short enough to be one InMemoryRetriever chunk, so keyword overlap ranks them predictably.",
+  "entries": [
+    {"source_type": "jira_story", "source_ref": "SHOP-1", "title": "Member discount", "text": "members get a ten percent discount at checkout"},
+    {"source_type": "jira_story", "source_ref": "SHOP-2", "title": "Password reset", "text": "a user can reset a forgotten password by email link"},
+    {"source_type": "test_case", "source_ref": "TC-RESET", "title": "Reset password by email", "text": "request reset link email open link set new password"},
+    {"source_type": "defect", "source_ref": "BUG-7", "title": "Coupon field crashes", "text": "applying an expired coupon code crashes the checkout page"},
+    {"source_type": "locator", "source_ref": "page-login", "title": "Login page", "text": "login page username field password field sign in button"}
+  ],
+  "cases": [
+    {"query": "password reset email link", "expected_source_refs": ["jira_story:SHOP-2", "test_case:TC-RESET"]},
+    {"query": "expired coupon crashes checkout", "expected_source_refs": ["defect:BUG-7"]},
+    {"query": "member discount at checkout", "expected_source_refs": ["jira_story:SHOP-1"], "source_types": ["jira_story"]},
+    {"query": "sign in button on the login page", "expected_source_refs": ["page-login", "SHOP-1"]},
+    {"query": "expired coupon checkout members", "expected_source_refs": ["jira_story:SHOP-1"]},
+    {"query": "shipping address form", "expected_source_refs": ["jira_story:SHOP-1"]}
+  ]
+}

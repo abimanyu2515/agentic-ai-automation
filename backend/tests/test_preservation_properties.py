@@ -175,8 +175,12 @@ def test_property_artifacts_generated_in_correct_locations():
     print(f"\n=== Testing artifact generation locations ===")
     
     # Simple passing script that should generate artifacts
-    # NOTE: Don't import { test } - the screenshot wrapper already imports it
+    # Scripts carry their own import: the runner's screenshot wrapper imports
+    # `test` as `__runnerTest` (commit 986f2c3), and PlaywrightAgent adds this
+    # import to every generated script.
     script = """
+import { test, expect } from '@playwright/test';
+
 test('artifact test', async ({ page }) => {
     await page.goto('https://example.com');
     await page.screenshot({ path: 'test-screenshot.png' });
@@ -261,8 +265,12 @@ def test_property_process_cleanup_works():
     print(f"\n=== Testing process cleanup on timeout ===")
     
     # Script that will timeout (infinite wait)
-    # NOTE: Don't import { test } - the screenshot wrapper already imports it
+    # Scripts carry their own import: the runner's screenshot wrapper imports
+    # `test` as `__runnerTest` (commit 986f2c3), and PlaywrightAgent adds this
+    # import to every generated script.
     script = """
+import { test, expect } from '@playwright/test';
+
 test('timeout test', async ({ page }) => {
     await page.goto('https://example.com');
     await page.waitForTimeout(120000);  // Wait 2 minutes (will timeout)
@@ -329,8 +337,12 @@ def test_property_playwright_config_settings_respected(headless):
     print(f"\n=== Testing playwright.config.ts settings ===")
     print(f"Headless mode: {headless}")
     
-    # NOTE: Don't import { test } - the screenshot wrapper already imports it
+    # Scripts carry their own import: the runner's screenshot wrapper imports
+    # `test` as `__runnerTest` (commit 986f2c3), and PlaywrightAgent adds this
+    # import to every generated script.
     script = """
+import { test, expect } from '@playwright/test';
+
 test('config test', async ({ page }) => {
     await page.goto('https://example.com');
 });
@@ -411,8 +423,12 @@ def test_property_vault_credentials_injected():
     print(f"\n=== Testing vault credentials injection ===")
     
     # Script that accesses environment variables
-    # NOTE: Don't import { test } - the screenshot wrapper already imports it
+    # Scripts carry their own import: the runner's screenshot wrapper imports
+    # `test` as `__runnerTest` (commit 986f2c3), and PlaywrightAgent adds this
+    # import to every generated script.
     script = """
+import { test, expect } from '@playwright/test';
+
 test('credential test', async ({ page }) => {
     // Log environment variables (for testing only)
     const username = process.env.TARGET_USERNAME;
@@ -495,8 +511,12 @@ def test_property_storage_state_created():
     print(f"Storage state path: {storage_state_path}")
     
     # Script that sets some browser state
-    # NOTE: Don't import { test } - the screenshot wrapper already imports it
+    # Scripts carry their own import: the runner's screenshot wrapper imports
+    # `test` as `__runnerTest` (commit 986f2c3), and PlaywrightAgent adds this
+    # import to every generated script.
     script = """
+import { test, expect } from '@playwright/test';
+
 test('storage state test', async ({ page }) => {
     await page.goto('https://example.com');
     // Set some local storage (simulating authentication)
@@ -574,8 +594,12 @@ def test_property_browser_configuration_unchanged():
     print(f"\n=== Testing browser configuration ===")
     
     # Script that verifies browser is working
-    # NOTE: Don't import { test, expect } - the screenshot wrapper already imports them
+    # Scripts carry their own import: the runner's screenshot wrapper imports
+    # `test` as `__runnerTest` (commit 986f2c3), and PlaywrightAgent adds this
+    # import to every generated script.
     script = """
+import { test, expect } from '@playwright/test';
+
 test('browser test', async ({ page, context, browser }) => {
     // Verify browser is launched
     expect(browser).toBeTruthy();

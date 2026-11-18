@@ -36,6 +36,7 @@ class ProjectDB(Base):
     target_username = Column(String(255), nullable=True)
     target_password_enc = Column(String(500), nullable=True)
     is_safe_test_environment = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    rag_dataset_id = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     
@@ -50,8 +51,8 @@ class ProjectDB(Base):
             "owner_id",
             "target_url",
             unique=True,
-            postgresql_where="owner_id IS NOT NULL AND target_url IS NOT NULL AND is_deleted = false",
-            sqlite_where="owner_id IS NOT NULL AND target_url IS NOT NULL AND is_deleted = 0",
+            postgresql_where=text("owner_id IS NOT NULL AND target_url IS NOT NULL AND is_deleted = false"),
+            sqlite_where=text("owner_id IS NOT NULL AND target_url IS NOT NULL AND is_deleted = 0"),
         ),
     )
 
@@ -197,6 +198,8 @@ class TestCaseDB(Base):
     script_validation_attempts = Column(Integer, nullable=False, default=0, server_default=text("0"))
     script_validation_completed_at = Column(DateTime(timezone=True), nullable=True)
     script_validation_diagnostic = Column(Text, nullable=True)
+    groundedness_score = Column(Float, nullable=True)
+    unsupported_claims = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
@@ -234,6 +237,8 @@ class ExecutionDB(Base):
     retest_pending_candidate = Column(Boolean, default=False, nullable=True)
     jira_bug_id = Column(String(100), nullable=True)
     jira_bug_url = Column(String(500), nullable=True)
+    # Spec 0001: project configuration captured when the run was accepted.
+    project_config_snapshot = Column(JSON, nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
@@ -279,12 +284,68 @@ class DocumentDB(Base):
     storage_key = Column(String(500), nullable=False)
     embedding_status = Column(String(50), nullable=False, default="pending")
     vector_collection = Column(String(255), nullable=True)
+    remote_doc_id = Column(String(100), nullable=True)
+    error = Column(Text, nullable=True)
     metadata_json = Column("metadata", JSON, nullable=False, default=dict)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     project = relationship("ProjectDB", back_populates="documents")
+
+    # Matches migration f2b6c8d41a07, so autogenerate keeps it and create_all builds it.
+    __table_args__ = (Index("ix_documents_project_remote_doc", "project_id", "remote_doc_id"),)
+
+
+class KnowledgeEntryDB(Base):
+    """An indexed project source other than an uploaded file (spec 0006, AC-14)."""
+
+    __tablename__ = "knowledge_entries"
+    __table_args__ = (
+        UniqueConstraint("project_id", "source_type", "source_ref", name="uq_knowledge_entries_source"),
+        Index("ix_knowledge_entries_project_remote_doc", "project_id", "remote_doc_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    source_type = Column(String(50), nullable=False)
+    source_ref = Column(String(255), nullable=False)
+    title = Column(String(500), nullable=False)
+    remote_doc_id = Column(String(100), nullable=True)
+    content_hash = Column(String(64), nullable=False)
+    status = Column(String(20), nullable=False, default="indexed")
+    error = Column(Text, nullable=True)
+    indexed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class KnowledgeRemoteDeleteDB(Base):
+    """A RAGFlow delete still to do (spec 0007). `project_id` has no foreign key
+    on purpose: the row must outlive its project."""
+
+    __tablename__ = "knowledge_remote_deletes"
+    __table_args__ = (
+        # Nulls are distinct in a unique index, so each kind gets its own partial index.
+        Index(
+            "uq_knowledge_remote_deletes_document", "dataset_id", "remote_doc_id", unique=True,
+            postgresql_where=text("kind = 'document'"), sqlite_where=text("kind = 'document'"),
+        ),
+        Index(
+            "uq_knowledge_remote_deletes_dataset", "dataset_id", unique=True,
+            postgresql_where=text("kind = 'dataset'"), sqlite_where=text("kind = 'dataset'"),
+        ),
+        Index("ix_knowledge_remote_deletes_project_id", "project_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), nullable=False)
+    kind = Column(String(20), nullable=False)
+    dataset_id = Column(String(100), nullable=False)
+    remote_doc_id = Column(String(100), nullable=True)
+    reason = Column(String(50), nullable=False)
+    attempts = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    last_attempt_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class ScenarioNoteDB(Base):

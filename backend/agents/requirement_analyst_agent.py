@@ -66,6 +66,7 @@ from backend.models.state import WorkflowState
 from backend.services.llm import LLMService
 from backend.repository.project_repository import get_project_repository
 from backend.utils.prompts import load_prompt
+from backend.agents.knowledge_context import with_project_knowledge
 from pydantic import BaseModel, Field
 from backend.models.requirement import Requirement
 
@@ -165,6 +166,7 @@ class RequirementAnalystAgent(BaseAgent):
                     title=req.title,
                     description=req.description
                 )
+                prompt = with_project_knowledge(prompt, state.retrieved_context)
                 enrichment = self.llm_service.structured_generate(
                     user=prompt,
                     response_model=RequirementEnrichment

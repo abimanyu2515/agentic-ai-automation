@@ -22,6 +22,8 @@ class QueueItem(BaseModel):
 class BatchContext(BaseModel):
     batch_id: str
     project_id: UUID
+    # Spec 0001: configuration captured when the batch was accepted; every item uses it.
+    project_config: Optional[dict[str, str]] = None
     release_id: Optional[UUID] = None
     cycle_id: Optional[UUID] = None
     execution_strategy: str = "SequentialStrategy"

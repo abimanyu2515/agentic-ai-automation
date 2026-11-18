@@ -36,6 +36,8 @@ SETTINGS_PATH = Path(__file__).resolve().parent.parent / "database" / "token_usa
 
 # Which pipeline stage each agent belongs to, for the page's stage labels.
 AGENT_STAGES: dict[str, str] = {
+    "knowledge_retrieval_agent": "Retrieval",
+    "chat_assistant": "Chat",
     "requirement_analyst_agent": "Requirement analysis",
     "qa_story_analyzer_agent": "Requirement analysis",
     "backlog_creation_agent": "Backlog",

@@ -154,3 +154,127 @@ def test_requires_generated_test_cases():
 
     with pytest.raises(ValueError):
         agent.run(state)
+
+# ------------------------------------------------ groundedness (spec 0006, AC-26)
+
+from backend.agents.evaluation_agent import _GroundednessBatch, _GroundednessResult  # noqa: E402
+from backend.services.llm import LLMRateLimitTimeout  # noqa: E402
+
+_CONTEXT = [{
+    "chunk_id": "c1", "text": "Profile pictures must be JPG or PNG and under 5MB.", "score": 0.9,
+    "source_type": "document", "source_ref": "doc-1", "title": "Profile spec", "graded": True,
+}]
+
+
+class _RecordingStub(StubLLMService):
+    def __init__(self, responses, grounded_error=None):
+        super().__init__(responses)
+        self.prompts = {}
+        self.grounded_error = grounded_error
+
+    def structured_generate(self, *, user, response_model, **kwargs):
+        self.prompts[response_model] = user
+        if response_model is _GroundednessBatch and self.grounded_error:
+            raise self.grounded_error
+        return super().structured_generate(user=user, response_model=response_model, **kwargs)
+
+
+def _two_cases():
+    return [
+        TestCase(scenario_id=uuid4(), title="Upload JPG", steps=["Open profile", "Upload a 1MB JPG"],
+                 expected_result="Picture is shown"),
+        TestCase(scenario_id=uuid4(), title="Upload GIF", steps=["Upload a GIF"],
+                 expected_result="Error reads 'GIF not allowed'"),
+    ]
+
+
+def _evaluations(n=2):
+    return _EvaluationBatch(evaluations=[
+        _TestCaseEvaluation(test_case_number=i, relevance=0.9, completeness=0.8, reason="ok") for i in range(1, n + 1)
+    ])
+
+
+def test_with_context_groundedness_score_and_claims_are_set_without_changing_status():
+    state = _state_with_test_cases(_two_cases())
+    state.retrieved_context = list(_CONTEXT)
+    grounded = _GroundednessBatch(results=[
+        _GroundednessResult(test_case_number=1, score=1.0, unsupported_claims=[]),
+        _GroundednessResult(test_case_number=2, score=0.4, unsupported_claims=["Error reads 'GIF not allowed'", "  "]),
+    ])
+    stub = _RecordingStub({_EvaluationBatch: _evaluations(), _GroundednessBatch: grounded})
+
+    result = EvaluationAgent(llm_service=stub).run(state)
+
+    first, second = result.generated_test_cases
+    assert first.groundedness_score == 1.0 and first.unsupported_claims == []
+    assert second.groundedness_score == 0.4 and second.unsupported_claims == ["Error reads 'GIF not allowed'"]
+    assert first.evaluation_status == second.evaluation_status == EvaluationStatus.NEEDS_REVIEW
+    prompt = stub.prompts[_GroundednessBatch]
+    assert "<project_knowledge>" in prompt and "under 5MB" in prompt
+    assert "Upload a 1MB JPG" in prompt and "GIF not allowed" in prompt
+    assert any("groundedness scored for 2" in line for line in result.logs)
+
+
+def test_without_context_no_judge_call_and_fields_stay_empty():
+    state = _state_with_test_cases(_two_cases())
+    stub = _RecordingStub({_EvaluationBatch: _evaluations()})
+
+    result = EvaluationAgent(llm_service=stub).run(state)
+
+    assert _GroundednessBatch not in stub.prompts
+    for tc in result.generated_test_cases:
+        assert tc.groundedness_score is None and tc.unsupported_claims == []
+        assert tc.evaluation_status == EvaluationStatus.NEEDS_REVIEW
+
+
+@pytest.mark.parametrize(
+    "error",
+    [LLMServiceError("provider down"), LLMRateLimitTimeout("pool busy"), ValueError("bad json")],
+)
+def test_judge_failure_leaves_fields_empty_and_evaluation_intact(error, caplog):
+    state = _state_with_test_cases(_two_cases())
+    state.retrieved_context = list(_CONTEXT)
+    stub = _RecordingStub({_EvaluationBatch: _evaluations()}, grounded_error=error)
+
+    with caplog.at_level("WARNING"):
+        result = EvaluationAgent(llm_service=stub).run(state)
+
+    for tc in result.generated_test_cases:
+        assert tc.groundedness_score is None and tc.unsupported_claims == []
+        assert tc.evaluation_status == EvaluationStatus.NEEDS_REVIEW
+    assert "groundedness scoring skipped" in caplog.text
+
+
+def test_judge_missing_a_test_case_number_is_treated_as_unparseable(caplog):
+    state = _state_with_test_cases(_two_cases())
+    state.retrieved_context = list(_CONTEXT)
+    partial = _GroundednessBatch(results=[_GroundednessResult(test_case_number=1, score=0.9)])
+    stub = _RecordingStub({_EvaluationBatch: _evaluations(), _GroundednessBatch: partial})
+
+    with caplog.at_level("WARNING"):
+        result = EvaluationAgent(llm_service=stub).run(state)
+
+    assert all(tc.groundedness_score is None for tc in result.generated_test_cases)
+    assert "groundedness scoring skipped" in caplog.text
+
+
+def test_groundedness_judge_parses_through_llm_service_mock_response():
+    service = LLMService(config=_TEST_LLM_CONFIG)
+    result = service.structured_generate(
+        user="irrelevant",
+        response_model=_GroundednessBatch,
+        mock_response='{"results": [{"test_case_number": 1, "score": 0.5, "unsupported_claims": null}]}',
+    )
+    assert result.results[0].unsupported_claims == []
+
+
+def test_groundedness_fields_round_trip_through_the_json_store(tmp_path):
+    from backend.repository.project_repository import JSONProjectRepository
+
+    repo = JSONProjectRepository(file_path=tmp_path / "store.json")
+    tc = _two_cases()[0]
+    tc.groundedness_score = 0.75
+    tc.unsupported_claims = ["claim"]
+    repo.save_test_cases([tc])
+    loaded = JSONProjectRepository(file_path=tmp_path / "store.json").get_test_case(tc.id)
+    assert loaded.groundedness_score == 0.75 and loaded.unsupported_claims == ["claim"]

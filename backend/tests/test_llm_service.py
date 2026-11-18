@@ -31,9 +31,11 @@ def test_llm_service_requires_api_base_for_ollama():
         service._require_valid_config()
 
 
-def test_llm_service_generate_uses_config_timeout():
-    """generate() uses config.timeout when no timeout passed."""
-    config = LLMConfig(provider="openai", model="gpt-4o", api_key="test-key", timeout=45)
+def test_llm_service_generate_uses_the_default_timeout():
+    """generate() uses its 30 s default when no timeout is passed. LLMConfig has
+    no timeout field, so timeouts are set per call (an older version of this
+    test passed LLMConfig(timeout=45), which pydantic silently ignored)."""
+    config = LLMConfig(provider="openai", model="gpt-4o", api_key="test-key")
     service = LLMService(config=config)
 
     with patch("backend.services.llm.completion") as mock_completion:
@@ -42,7 +44,7 @@ def test_llm_service_generate_uses_config_timeout():
 
         # Check timeout was passed to completion
         call_kwargs = mock_completion.call_args.kwargs
-        assert call_kwargs["timeout"] == 45
+        assert call_kwargs["timeout"] == 30
 
 
 def test_llm_service_generate_overrides_timeout():
@@ -58,14 +60,14 @@ def test_llm_service_generate_overrides_timeout():
         assert call_kwargs["timeout"] == 120
 
 
-def test_llm_service_structured_generate_uses_config_timeout():
-    """structured_generate() uses config.timeout when no timeout passed."""
+def test_llm_service_structured_generate_uses_the_default_timeout():
+    """structured_generate() uses its 30 s default when no timeout is passed."""
     from pydantic import BaseModel
 
     class ResponseModel(BaseModel):
         value: str
 
-    config = LLMConfig(provider="openai", model="gpt-4o", api_key="test-key", timeout=45)
+    config = LLMConfig(provider="openai", model="gpt-4o", api_key="test-key")
     service = LLMService(config=config)
 
     with patch("backend.services.llm.completion") as mock_completion:
@@ -73,7 +75,7 @@ def test_llm_service_structured_generate_uses_config_timeout():
         service.structured_generate(user="user", response_model=ResponseModel)
 
         call_kwargs = mock_completion.call_args.kwargs
-        assert call_kwargs["timeout"] == 45
+        assert call_kwargs["timeout"] == 30
 
 
 def test_llm_service_structured_generate_overrides_timeout():

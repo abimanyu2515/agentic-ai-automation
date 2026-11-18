@@ -279,7 +279,6 @@ export class TokenUtilizationView {
             <h2>Usage over time</h2>
             <div class="tu-seg" role="group" aria-label="Metric">
               <button type="button" class="tu-chip" data-metric="cost">Cost</button>
-              <button type="button" class="tu-chip" data-metric="tokens">Tokens</button>
               <button type="button" class="tu-chip" data-metric="calls">Calls</button>
             </div>
             <div class="tu-seg" role="group" aria-label="Split by">

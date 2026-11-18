@@ -3,7 +3,7 @@ from uuid import UUID, uuid4
 import logging
 from functools import wraps
 from sqlalchemy.orm import scoped_session
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update, delete
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from backend.models.project import Project
@@ -11,6 +11,7 @@ from backend.models.requirement import Requirement, RequirementSource
 from backend.models.scenario import Scenario
 from backend.models.test_case import TestCase
 from backend.models.document import Document
+from backend.models.knowledge import KnowledgeEntry
 from backend.models.execution_result import ExecutionResult
 from backend.models.release import Release
 from backend.models.test_cycle import TestCycle
@@ -19,8 +20,14 @@ from backend.repository.project_repository import ProjectURLConflictError
 from backend.database.db import SessionLocal
 from backend.database.db_models import (
     ProjectDB, RequirementDB, ScenarioDB, TestCaseDB, 
-    ExecutionDB, ReportDB, DocumentDB, ScenarioNoteDB, TestCaseNoteDB,
-    ReleaseDB, TestCycleDB
+    ExecutionDB, ReportDB, DocumentDB, KnowledgeEntryDB, ScenarioNoteDB, TestCaseNoteDB,
+    ReleaseDB, TestCycleDB, KnowledgeRemoteDeleteDB
+)
+from backend.models.knowledge import (
+    REMOTE_DELETE_DATASET,
+    REMOTE_DELETE_DOCUMENT,
+    REMOTE_DELETE_ERROR_CHARS,
+    KnowledgeRemoteDelete,
 )
 
 logger = logging.getLogger("backend.repository.postgres_project_repository")
@@ -47,10 +54,40 @@ def _rollback_on_database_errors(repository_class):
     return repository_class
 
 
+TARGET_URL_UNIQUE_INDEX = "uq_projects_owner_target_url"
+
+
+def _is_target_url_conflict(exc: IntegrityError) -> bool:
+    """True only when the owner scoped target URL index rejected the write."""
+    diag = getattr(getattr(exc, "orig", None), "diag", None)
+    constraint = getattr(diag, "constraint_name", None)
+    if constraint:
+        return constraint == TARGET_URL_UNIQUE_INDEX
+    return TARGET_URL_UNIQUE_INDEX in str(getattr(exc, "orig", exc))
+
+
 def _get_val(x):
     if x is None:
         return None
     return x.value if hasattr(x, "value") else x
+
+def _document_from_db(d) -> Document:
+    return Document(
+        id=d.id,
+        project_id=d.project_id,
+        filename=d.filename,
+        original_filename=d.original_filename,
+        mime_type=d.mime_type,
+        size=d.size,
+        uploaded_at=d.uploaded_at,
+        storage_path=d.storage_key,  # Expose storage_key as path for models
+        embedding_status=d.embedding_status,
+        vector_collection=d.vector_collection,
+        remote_doc_id=getattr(d, "remote_doc_id", None),
+        error=getattr(d, "error", None),
+        metadata=d.metadata_json,
+    )
+
 
 # Set up scoped session
 db_session = scoped_session(SessionLocal)
@@ -119,6 +156,7 @@ class PostgresProjectRepository(ProjectRepository):
                 target_username=getattr(p, "target_username", None),
                 target_password_enc=getattr(p, "target_password_enc", None),
                 is_safe_test_environment=getattr(p, "is_safe_test_environment", False),
+                rag_dataset_id=getattr(p, "rag_dataset_id", None),
                 created_at=p.created_at,
                 requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted],
                 is_deleted=p.is_deleted,
@@ -147,6 +185,7 @@ class PostgresProjectRepository(ProjectRepository):
             target_username=getattr(p, "target_username", None),
             target_password_enc=getattr(p, "target_password_enc", None),
             is_safe_test_environment=getattr(p, "is_safe_test_environment", False),
+            rag_dataset_id=getattr(p, "rag_dataset_id", None),
             created_at=p.created_at,
             requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted],
             is_deleted=p.is_deleted,
@@ -189,7 +228,12 @@ class PostgresProjectRepository(ProjectRepository):
             self._flush_or_commit()
         except IntegrityError as exc:
             self.rollback()
-            raise ProjectURLConflictError() from exc
+            if not _is_target_url_conflict(exc):
+                raise
+            # A concurrent request won the race. Report the winner, read on a clean session.
+            raise ProjectURLConflictError(
+                self._find_url_conflict(owner_id, normalized_url)
+            ) from exc
         return Project(
             id=proj_id,
             owner_id=owner_id,
@@ -224,12 +268,40 @@ class PostgresProjectRepository(ProjectRepository):
         db_proj.target_username = project.target_username
         db_proj.target_password_enc = project.target_password_enc
         db_proj.is_safe_test_environment = project.is_safe_test_environment
+        owner_id = db_proj.owner_id
         try:
             self._flush_or_commit()
         except IntegrityError as exc:
             self.rollback()
-            raise ProjectURLConflictError() from exc
+            if not _is_target_url_conflict(exc):
+                raise
+            raise ProjectURLConflictError(
+                self._find_url_conflict(owner_id, project.target_url, exclude_id=project.id)
+            ) from exc
         return project
+
+    def _find_url_conflict(
+        self, owner_id: UUID | None, target_url: str | None, exclude_id: UUID | None = None
+    ) -> UUID | None:
+        """Look up the active project holding this owner scoped URL, after a rollback."""
+        if owner_id is None or target_url is None:
+            return None
+        stmt = select(ProjectDB.id).where(
+            ProjectDB.owner_id == owner_id,
+            ProjectDB.target_url == target_url,
+            ProjectDB.is_deleted.is_(False),
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(ProjectDB.id != exclude_id)
+        try:
+            return self.session.scalar(stmt)
+        except SQLAlchemyError:
+            self.rollback()
+            logger.warning("Could not read the conflicting project after a URL conflict")
+            return None
+        finally:
+            if not getattr(self, "_in_explicit_transaction", False):
+                db_session.remove()
 
     def delete_project(self, project_id: UUID, deleted_by: UUID | None = None) -> bool:
         session = self.session
@@ -690,6 +762,8 @@ class PostgresProjectRepository(ProjectRepository):
                     script_validation_attempts=tc.script_validation_attempts,
                     script_validation_completed_at=tc.script_validation_completed_at,
                     script_validation_diagnostic=tc.script_validation_diagnostic,
+                    groundedness_score=tc.groundedness_score,
+                    unsupported_claims=tc.unsupported_claims,
                 )
                 session.add(db_tc)
             else:
@@ -718,6 +792,8 @@ class PostgresProjectRepository(ProjectRepository):
                 db_tc.script_validation_attempts = tc.script_validation_attempts
                 db_tc.script_validation_completed_at = tc.script_validation_completed_at
                 db_tc.script_validation_diagnostic = tc.script_validation_diagnostic
+                db_tc.groundedness_score = tc.groundedness_score
+                db_tc.unsupported_claims = tc.unsupported_claims
                 db_tc.is_deleted = False
         self._flush_or_commit()
 
@@ -752,6 +828,8 @@ class PostgresProjectRepository(ProjectRepository):
         db_tc.script_validation_attempts = test_case.script_validation_attempts
         db_tc.script_validation_completed_at = test_case.script_validation_completed_at
         db_tc.script_validation_diagnostic = test_case.script_validation_diagnostic
+        db_tc.groundedness_score = test_case.groundedness_score
+        db_tc.unsupported_claims = test_case.unsupported_claims
         self._flush_or_commit()
         return test_case
 
@@ -813,22 +891,7 @@ class PostgresProjectRepository(ProjectRepository):
         session = self.session
         stmt = select(DocumentDB).where(DocumentDB.project_id == project_id)
         db_docs = session.scalars(stmt).all()
-        return [
-            Document(
-                id=d.id,
-                project_id=d.project_id,
-                filename=d.filename,
-                original_filename=d.original_filename,
-                mime_type=d.mime_type,
-                size=d.size,
-                uploaded_at=d.uploaded_at,
-                storage_path=d.storage_key,  # Expose storage_key as path for models
-                embedding_status=d.embedding_status,
-                vector_collection=d.vector_collection,
-                metadata=d.metadata_json
-            )
-            for d in db_docs
-        ]
+        return [_document_from_db(d) for d in db_docs]
 
     def get_document(self, project_id: UUID, document_id: UUID) -> Document | None:
         session = self.session
@@ -836,19 +899,7 @@ class PostgresProjectRepository(ProjectRepository):
         d = session.scalar(stmt)
         if not d:
             return None
-        return Document(
-            id=d.id,
-            project_id=d.project_id,
-            filename=d.filename,
-            original_filename=d.original_filename,
-            mime_type=d.mime_type,
-            size=d.size,
-            uploaded_at=d.uploaded_at,
-            storage_path=d.storage_key,
-            embedding_status=d.embedding_status,
-            vector_collection=d.vector_collection,
-            metadata=d.metadata_json
-        )
+        return _document_from_db(d)
 
     def save_document(self, document: Document) -> None:
         session = self.session
@@ -867,6 +918,8 @@ class PostgresProjectRepository(ProjectRepository):
                 storage_key=document.storage_path,
                 embedding_status=document.embedding_status,
                 vector_collection=document.vector_collection,
+                remote_doc_id=document.remote_doc_id,
+                error=document.error,
                 metadata_json=document.metadata
             )
             session.add(db_doc)
@@ -879,6 +932,8 @@ class PostgresProjectRepository(ProjectRepository):
             db_doc.storage_key = document.storage_path
             db_doc.embedding_status = document.embedding_status
             db_doc.vector_collection = document.vector_collection
+            db_doc.remote_doc_id = document.remote_doc_id
+            db_doc.error = document.error
             db_doc.metadata_json = document.metadata
         self._flush_or_commit()
 
@@ -891,6 +946,208 @@ class PostgresProjectRepository(ProjectRepository):
         session.delete(db_doc)
         self._flush_or_commit()
         return True
+
+    def find_documents_by_remote_ids(self, project_id: UUID, remote_ids: list[str]) -> list[Document]:
+        ids = [r for r in remote_ids if r]
+        if not ids:
+            return []
+        session = self.session
+        stmt = select(DocumentDB).where(DocumentDB.project_id == project_id, DocumentDB.remote_doc_id.in_(ids))
+        return [_document_from_db(d) for d in session.scalars(stmt).all()]
+
+    def set_project_rag_dataset(self, project_id: UUID, dataset_id: str) -> str | None:
+        """Write the dataset ID only while the field is empty (one conditional
+        UPDATE), then return the stored value. Never saves a whole Project."""
+        session = self.session
+        session.execute(
+            update(ProjectDB)
+            .where(ProjectDB.id == project_id, ProjectDB.rag_dataset_id.is_(None))
+            .values(rag_dataset_id=dataset_id)
+        )
+        self._flush_or_commit()
+        return self.session.scalar(select(ProjectDB.rag_dataset_id).where(ProjectDB.id == project_id))
+
+    # ------------------------------------------------------------ knowledge entries
+
+    @staticmethod
+    def _knowledge_entry_from_db(e: KnowledgeEntryDB) -> KnowledgeEntry:
+        return KnowledgeEntry(
+            id=e.id,
+            project_id=e.project_id,
+            source_type=e.source_type,
+            source_ref=e.source_ref,
+            title=e.title,
+            remote_doc_id=e.remote_doc_id,
+            content_hash=e.content_hash,
+            status=e.status,
+            error=e.error,
+            indexed_at=e.indexed_at,
+        )
+
+    def _knowledge_entry_row(self, project_id: UUID, source_type: str, source_ref: str):
+        return self.session.scalar(
+            select(KnowledgeEntryDB).where(
+                KnowledgeEntryDB.project_id == project_id,
+                KnowledgeEntryDB.source_type == source_type,
+                KnowledgeEntryDB.source_ref == source_ref,
+            )
+        )
+
+    def get_knowledge_entry(self, project_id: UUID, source_type: str, source_ref: str) -> KnowledgeEntry | None:
+        row = self._knowledge_entry_row(project_id, source_type, source_ref)
+        return self._knowledge_entry_from_db(row) if row else None
+
+    def save_knowledge_entry(self, entry: KnowledgeEntry) -> None:
+        row = self._knowledge_entry_row(entry.project_id, entry.source_type, entry.source_ref)
+        if row is None:
+            row = KnowledgeEntryDB(
+                id=entry.id,
+                project_id=entry.project_id,
+                source_type=entry.source_type,
+                source_ref=entry.source_ref,
+            )
+            self.session.add(row)
+        row.title = entry.title[:500]
+        row.remote_doc_id = entry.remote_doc_id
+        row.content_hash = entry.content_hash
+        row.status = entry.status
+        row.error = entry.error
+        row.indexed_at = entry.indexed_at
+        self._flush_or_commit()
+
+    def delete_knowledge_entry(self, project_id: UUID, source_type: str, source_ref: str) -> bool:
+        row = self._knowledge_entry_row(project_id, source_type, source_ref)
+        if row is None:
+            return False
+        self.session.delete(row)
+        self._flush_or_commit()
+        return True
+
+    def list_knowledge_entries(self, project_id: UUID) -> list[KnowledgeEntry]:
+        stmt = select(KnowledgeEntryDB).where(KnowledgeEntryDB.project_id == project_id)
+        return [self._knowledge_entry_from_db(e) for e in self.session.scalars(stmt).all()]
+
+    def find_knowledge_entries_by_remote_ids(self, project_id: UUID, remote_ids: list[str]) -> list[KnowledgeEntry]:
+        ids = [r for r in remote_ids if r]
+        if not ids:
+            return []
+        stmt = select(KnowledgeEntryDB).where(
+            KnowledgeEntryDB.project_id == project_id, KnowledgeEntryDB.remote_doc_id.in_(ids)
+        )
+        return [self._knowledge_entry_from_db(e) for e in self.session.scalars(stmt).all()]
+
+    # ------------------------------------------------------------ pending remote deletes (spec 0007)
+
+    @staticmethod
+    def _remote_delete_from_db(r: KnowledgeRemoteDeleteDB) -> KnowledgeRemoteDelete:
+        return KnowledgeRemoteDelete(
+            id=r.id,
+            project_id=r.project_id,
+            kind=r.kind,
+            dataset_id=r.dataset_id,
+            remote_doc_id=r.remote_doc_id,
+            reason=r.reason,
+            attempts=r.attempts or 0,
+            last_error=r.last_error,
+            created_at=r.created_at,
+            last_attempt_at=r.last_attempt_at,
+        )
+
+    def _dataset_delete_row(self, dataset_id: str):
+        return self.session.scalar(
+            select(KnowledgeRemoteDeleteDB).where(
+                KnowledgeRemoteDeleteDB.kind == REMOTE_DELETE_DATASET,
+                KnowledgeRemoteDeleteDB.dataset_id == dataset_id,
+            )
+        )
+
+    def _existing_remote_delete(self, row: KnowledgeRemoteDelete):
+        """The row that already covers this target: the AC-2 duplicate or absorb answer.
+        Returns (found, value): value is the existing row, or None when absorbed."""
+        dataset_row = self._dataset_delete_row(row.dataset_id)
+        if row.kind == REMOTE_DELETE_DATASET:
+            return (True, self._remote_delete_from_db(dataset_row)) if dataset_row is not None else (False, None)
+        if dataset_row is not None:
+            return True, None
+        existing = self.session.scalar(
+            select(KnowledgeRemoteDeleteDB).where(
+                KnowledgeRemoteDeleteDB.kind == REMOTE_DELETE_DOCUMENT,
+                KnowledgeRemoteDeleteDB.dataset_id == row.dataset_id,
+                KnowledgeRemoteDeleteDB.remote_doc_id == row.remote_doc_id,
+            )
+        )
+        return (True, self._remote_delete_from_db(existing)) if existing is not None else (False, None)
+
+    def add_remote_delete(self, row: KnowledgeRemoteDelete) -> KnowledgeRemoteDelete | None:
+        found, value = self._existing_remote_delete(row)
+        if found:
+            return value
+        session = self.session
+        if row.kind == REMOTE_DELETE_DATASET:
+            # A dataset delete covers every document in it (AC-2), in the same transaction.
+            session.execute(
+                delete(KnowledgeRemoteDeleteDB).where(
+                    KnowledgeRemoteDeleteDB.kind == REMOTE_DELETE_DOCUMENT,
+                    KnowledgeRemoteDeleteDB.dataset_id == row.dataset_id,
+                )
+            )
+        session.add(
+            KnowledgeRemoteDeleteDB(
+                id=row.id,
+                project_id=row.project_id,
+                kind=row.kind,
+                dataset_id=row.dataset_id,
+                remote_doc_id=row.remote_doc_id,
+                reason=row.reason,
+                attempts=row.attempts,
+                last_error=(row.last_error or None) and row.last_error[:REMOTE_DELETE_ERROR_CHARS],
+                created_at=row.created_at,
+                last_attempt_at=row.last_attempt_at,
+            )
+        )
+        try:
+            self._flush_or_commit()
+        except IntegrityError:
+            # A racing insert won the partial unique index: roll back, then return its row.
+            self.rollback()
+            found, value = self._existing_remote_delete(row)
+            if not found:
+                raise
+            return value
+        return row
+
+    def get_remote_delete(self, row_id: UUID) -> KnowledgeRemoteDelete | None:
+        row = self.session.get(KnowledgeRemoteDeleteDB, row_id)
+        return self._remote_delete_from_db(row) if row is not None else None
+
+    def get_dataset_delete(self, dataset_id: str) -> KnowledgeRemoteDelete | None:
+        row = self._dataset_delete_row(dataset_id)
+        return self._remote_delete_from_db(row) if row is not None else None
+
+    def list_remote_deletes(self, project_id: UUID | None = None) -> list[KnowledgeRemoteDelete]:
+        stmt = select(KnowledgeRemoteDeleteDB).order_by(KnowledgeRemoteDeleteDB.created_at)
+        if project_id is not None:
+            stmt = stmt.where(KnowledgeRemoteDeleteDB.project_id == project_id)
+        return [self._remote_delete_from_db(r) for r in self.session.scalars(stmt).all()]
+
+    def record_remote_delete_failure(self, row_id: UUID, error: str, at: datetime) -> None:
+        # One atomic UPDATE, so the server and the script never lose an attempt.
+        self.session.execute(
+            update(KnowledgeRemoteDeleteDB)
+            .where(KnowledgeRemoteDeleteDB.id == row_id)
+            .values(
+                attempts=KnowledgeRemoteDeleteDB.attempts + 1,
+                last_error=(error or "")[:REMOTE_DELETE_ERROR_CHARS],
+                last_attempt_at=at,
+            )
+        )
+        self._flush_or_commit()
+
+    def remove_remote_delete(self, row_id: UUID) -> bool:
+        result = self.session.execute(delete(KnowledgeRemoteDeleteDB).where(KnowledgeRemoteDeleteDB.id == row_id))
+        removed = (result.rowcount or 0) > 0
+        self._flush_or_commit()
+        return removed
 
     def get_execution_results(self, project_id: UUID) -> list[ExecutionResult]:
         session = self.session
@@ -914,7 +1171,8 @@ class PostgresProjectRepository(ProjectRepository):
                 suggest_retry=ex.suggest_retry,
                 retest_pending_candidate=ex.retest_pending_candidate,
                 jira_bug_id=ex.jira_bug_id,
-                jira_bug_url=ex.jira_bug_url
+                jira_bug_url=ex.jira_bug_url,
+                project_config_snapshot=getattr(ex, 'project_config_snapshot', None)
             )
             for ex in db_execs
         ]
@@ -944,7 +1202,8 @@ class PostgresProjectRepository(ProjectRepository):
             suggest_retry=ex.suggest_retry,
             retest_pending_candidate=ex.retest_pending_candidate,
             jira_bug_id=ex.jira_bug_id,
-            jira_bug_url=ex.jira_bug_url
+            jira_bug_url=ex.jira_bug_url,
+            project_config_snapshot=getattr(ex, 'project_config_snapshot', None)
         )
 
     def save_execution_result(self, project_id: UUID, result: ExecutionResult) -> None:
@@ -983,7 +1242,8 @@ class PostgresProjectRepository(ProjectRepository):
                 suggest_retry=result.suggest_retry,
                 retest_pending_candidate=result.retest_pending_candidate,
                 jira_bug_id=result.jira_bug_id,
-                jira_bug_url=result.jira_bug_url
+                jira_bug_url=result.jira_bug_url,
+                project_config_snapshot=result.project_config_snapshot,
             )
             session.add(db_ex)
         else:
@@ -1004,6 +1264,9 @@ class PostgresProjectRepository(ProjectRepository):
             db_ex.retest_pending_candidate = result.retest_pending_candidate
             db_ex.jira_bug_id = result.jira_bug_id
             db_ex.jira_bug_url = result.jira_bug_url
+            # The snapshot is immutable: keep the first one, only fill it when missing.
+            if db_ex.project_config_snapshot is None:
+                db_ex.project_config_snapshot = result.project_config_snapshot
         self._flush_or_commit()
 
     def get_scenario_notes(self, scenario_id: UUID) -> list[str]:

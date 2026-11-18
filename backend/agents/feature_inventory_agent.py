@@ -23,7 +23,8 @@ Workflow Position:
 
 Inputs:
     - state.requirement: Enriched requirement from RequirementAnalystAgent
-    - RAG configuration: settings.rag.enabled, ragflow_api_key, ragflow_dataset_id
+    - state.project_id: the project whose own knowledge base is searched (spec 0006, AC-23)
+    - RAG configuration: settings.rag.enabled and the project's rag_dataset_id
 
 Outputs:
     - requirement.feature_mapping: Retrieved feature context text
@@ -43,9 +44,8 @@ Use Case:
     - Detect API/component dependencies
 
 Configuration Validation:
-    - Check settings.rag.enabled = True
-    - Check vector_db_provider is configured
-    - For RAGFlow: Validate api_key and dataset_id exist
+    - Check settings.rag.enabled = True and the provider is ragflow
+    - Check the state has a project and the project has a dataset
     - Skip if any validation fails
 
 Error Handling:
@@ -62,50 +62,39 @@ Design Philosophy:
 
 from backend.agents.base import BaseAgent
 from backend.models.state import WorkflowState
-from backend.services.rag_service import RAGFlowService
 from backend.repository.project_repository import get_project_repository
+from backend.services.knowledge_service import KnowledgeNotReady, KnowledgeService
 
 
 class FeatureInventoryAgent(BaseAgent):
     """
     RAG-powered feature context enrichment agent.
-    
-    Queries knowledge base for related features to inform scenario generation.
-    Gracefully degrades if RAG is unavailable.
+
+    Searches the project's own knowledge base (spec 0006, AC-23) for related
+    features to inform scenario generation. Gracefully degrades if RAG is unavailable.
     """
-    
+
     name = "Feature Inventory Agent"
 
-    def __init__(self, rag_service: RAGFlowService | None = None):
+    def __init__(self, knowledge_service: KnowledgeService | None = None, repo=None):
         """
-        Initialize feature inventory agent.
-        
         Args:
-            rag_service: RAG service instance (injected for testing)
+            knowledge_service: Knowledge service (injected for testing); it uses
+                the shared retriever and the project's own dataset.
+            repo: Project repository (injected for testing)
         """
-        self.rag_service = rag_service or RAGFlowService()
-        self.repo = get_project_repository()
+        self.knowledge_service = knowledge_service or KnowledgeService()
+        self.repo = repo or get_project_repository()
 
     def run(self, state: WorkflowState) -> WorkflowState:
         """
-        Enrich requirement with RAG feature context.
-        
-        Args:
-            state: Workflow state containing enriched requirement
-            
-        Returns:
-            Updated state with requirement.feature_mapping populated
-            
+        Enrich requirement with feature context from the project's knowledge base.
+
         Raises:
             ValueError: If state.requirement is None
-            
-        Process:
-            1. Validate requirement exists
-            2. Check if RAG service is active and configured
-            3. Query vector database for related feature contexts
-            4. If context retrieved, persist to requirement.feature_mapping
-            5. If no context or RAG unavailable, log graceful skip
-            6. Catch all exceptions and log without failing workflow
+
+        Never fails ingestion: a missing project, a project without a dataset,
+        a disabled retriever, or a search error only logs a skip.
         """
         if not state.requirement:
             raise ValueError(f"{self.name} requires state.requirement to be set")
@@ -113,26 +102,34 @@ class FeatureInventoryAgent(BaseAgent):
         state.add_log(f"{self.name} started")
         req = state.requirement
 
-        if not self.rag_service.is_active():
-            state.add_log(f"{self.name}: RAGFlow service is not active or not configured. Skipping feature inventory mapping.")
+        project = self.repo.get_project(state.project_id) if state.project_id else None
+        if project is None:
+            state.add_log(f"{self.name}: No project on the workflow state. Skipping feature inventory mapping.")
             return state
 
         try:
-            # Query vector store for related feature contexts
             query = f"Feature capabilities and user scenarios related to: {req.description}"
-            context = self.rag_service.retrieve_context(query, top_k=3)
-
-            if context.strip():
-                state.add_log(f"{self.name}: Retrieved relevant feature context from RAG dataset.")
-                # Save feature mapping report inside the requirement
-                new_req = req.model_copy(update={"feature_mapping": context})
-                self.repo.save_requirement(new_req)
-                state.requirement = new_req
-                state.add_log(f"{self.name}: Feature overlap mapped and persisted in requirement metadata.")
-            else:
-                state.add_log(f"{self.name}: No overlapping features detected in RAG database.")
+            items = self.knowledge_service.search(project, query, top_k=3)
+        except KnowledgeNotReady:
+            state.add_log(f"{self.name}: The project knowledge base is not set up. Skipping feature inventory mapping.")
+            return state
         except Exception as e:
             # Failure of RAG / knowledge sources must never fail requirement ingestion
+            state.add_log(f"{self.name}: Gracefully skipped optional feature mapping after error: {e}")
+            return state
+
+        context = "\n\n".join(item["text"] for item in items if item.get("text"))
+        if not context.strip():
+            state.add_log(f"{self.name}: No overlapping features detected in the project knowledge base.")
+            return state
+
+        try:
+            state.add_log(f"{self.name}: Retrieved relevant feature context from the project knowledge base.")
+            new_req = req.model_copy(update={"feature_mapping": context})
+            self.repo.save_requirement(new_req)
+            state.requirement = new_req
+            state.add_log(f"{self.name}: Feature overlap mapped and persisted in requirement metadata.")
+        except Exception as e:
             state.add_log(f"{self.name}: Gracefully skipped optional feature mapping after error: {e}")
 
         return state

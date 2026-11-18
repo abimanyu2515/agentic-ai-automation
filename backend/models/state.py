@@ -54,6 +54,14 @@ class WorkflowState(BaseModel):
     test_data_report: dict | None = None
     test_data_combinations: list[dict] = Field(default_factory=list)
     generated_test_data: list[dict] = Field(default_factory=list)
+    # Retrieval stage (spec 0006). Written only by KnowledgeRetrievalAgent.
+    # retrieval_status: "ok", "empty" (searched, nothing relevant), or "skipped".
+    # Each context item: {chunk_id, text, score, source_type, source_ref, title, graded}.
+    retrieval_status: str | None = None
+    retrieval_query: str | None = None
+    retrieval_attempts: int = 0
+    retrieval_sources: list[str] = Field(default_factory=list)
+    retrieved_context: list[dict] = Field(default_factory=list)
 
     def add_log(self, message: str) -> None:
         self.logs.append(f"[{datetime.now(timezone.utc).isoformat()}] {message}")

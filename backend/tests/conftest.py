@@ -65,6 +65,7 @@ class FakePlaywrightRunner:
     def __init__(self, default_result: PlaywrightRunResult | None = None, result_map: dict[str, PlaywrightRunResult] | None = None):
         self._default = default_result or PlaywrightRunResult(status="passed", duration_seconds=1.5)
         self._result_map = result_map or {}
+        self.calls: list[dict] = []  # the keyword arguments of each run, e.g. target_url
 
     def run(
         self,
@@ -73,6 +74,7 @@ class FakePlaywrightRunner:
         project_id: str | None = None,
         **kwargs,
     ) -> PlaywrightRunResult:
+        self.calls.append({"run_id": run_id, "project_id": project_id, **kwargs})
         return self._result_map.get(run_id, self._default)
 
 

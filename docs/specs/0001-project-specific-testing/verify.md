@@ -29,3 +29,28 @@
 7. [x] Create two projects with equivalent normalized URLs.
    Expect the second creation to return the project URL conflict response.
    Covers AC 7.
+
+---
+
+# Verify: execution carries the project snapshot · spec 0001 · updated 2026-11-17
+_Build plan steps 3 and 4, execution path only (single run and batch). Generation, the 423 edit lock, and snapshot reuse on worker recovery are later slices. `/check verify` runs these; `/test` locks the durable ones._
+
+## UI / manual
+- [ ] Create a project through the repository with no `target_url`, add an approved test case with a script, then `POST /api/v1/projects/<id>/testcases/<tc>/execute` → `422` with `code: PROJECT_NOT_READY`, `missing_fields: ["target_url"]`, and the "Open Project Settings" action; no execution is saved → AC-3
+- [ ] Same legacy project, `POST /api/v1/projects/<id>/batches/execute` with that test case → `422 PROJECT_NOT_READY`, no batch starts → AC-3
+- [ ] Ready project (valid URL and `playwright`), run a test case whose script only does `page.goto(process.env.TARGET_URL!)` → the run passes, which proves the runner set `TARGET_URL` → AC-4
+- [ ] Read that execution back (`GET` the project's executions, or the `executions` table) → `project_config_snapshot` holds `project_id`, the normalized `target_url`, `framework`, and `credential_reference`, and no username or password → AC-4, AC-8
+- [ ] Start the API with `TARGET_URL=https://wrong.example` in its environment, then run the same test case → it still opens the project's URL, never the global one → AC-4
+- [ ] In the chat assistant, ask to run a test case of the legacy project → the action ends `failed` with "Project configuration is incomplete." → AC-3
+
+## Commands
+- [ ] `python -m alembic current` → `d4e8a1b6c372 (head)`, and `executions.project_config_snapshot` exists as a nullable JSON column → data model
+- [ ] `pytest -q backend/tests/test_project_configuration_snapshot.py backend/tests/test_execution_service.py backend/tests/test_workflow_service_langgraph.py` → all pass → AC-4, AC-8
+
+## Value sourcing checks
+- [ ] `target_url` in the snapshot → equals `normalize_target_url(project.target_url)` at accept time (for example, `https://Example.com/` is stored as `https://example.com`)
+- [ ] `credential_reference` → equals the project ID, and the runner reads the vault with it
+- [ ] Immutable snapshot: save the same execution result again with a different snapshot (JSON and PostgreSQL) → the first snapshot is kept → AC-8, AC-12
+
+## Acceptance-criteria coverage (this slice)
+- AC-3: execution and batch refusal steps (generation refusal comes in a later slice) · AC-4: TARGET_URL run, global env step, snapshot contents · AC-8: snapshot saved and immutable (the 423 edit lock comes later) · AC-12: JSON and PostgreSQL parity on the immutable snapshot

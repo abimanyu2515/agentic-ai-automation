@@ -40,7 +40,10 @@ TOOL_LABELS = {
     "get_execution": "an execution",
     "get_dashboard_metrics": "dashboard metrics",
     "list_object_repository_pages": "object repository pages",
+    "search_knowledge": "the project knowledge base",
 }
+
+KNOWLEDGE_TEXT_CHARS = 600
 
 
 class ToolNotFound(Exception):
@@ -133,6 +136,22 @@ TOOL_DEFINITIONS = [
     ),
     _schema("get_execution", "One execution: status, error message, failed step, analysis summary, and which artifacts exist.", {"execution_id": _UUID}, ["execution_id"]),
     _schema("get_dashboard_metrics", "The project's dashboard numbers: totals, pass ratio, coverage, approval and defect counts, recent executions."),
+    _schema("list_object_repository_pages", "List the project's object repository pages and their element counts.", {"limit": _LIMIT}),
+    _schema(
+        "search_knowledge",
+        "Search the project's knowledge base (uploaded documents and indexed project data) for passages about "
+        "product behavior or document content. Returns text passages with their source title and type.",
+        {
+            "query": {"type": "string", "description": "What to look for, in plain words."},
+            "source_types": {
+                "type": "array",
+                "items": {"type": "string", "enum": ["document", "jira_story", "test_case", "execution_failure", "defect", "locator"]},
+                "description": "Only these kinds of sources (default: all).",
+            },
+            "top_k": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Passages to return (default 5, at most 10)."},
+        },
+        ["query"],
+    ),
     _schema("list_object_repository_pages", "List the project's object repository pages, their element counts, and each page's locator detection score (percent of run lookups that found the element; null before any run).", {"limit": _LIMIT}),
 ]
 
@@ -197,9 +216,10 @@ class ChatToolbox:
     """Runs the read tools against the project repository. Tests pass a fake
     repository and object repository store."""
 
-    def __init__(self, project_repository=None, object_repository_store=None, result_chars: int = 4000):
+    def __init__(self, project_repository=None, object_repository_store=None, result_chars: int = 4000, knowledge_service=None):
         self._repo = project_repository
         self._object_store = object_repository_store
+        self._knowledge = knowledge_service
         self.result_chars = result_chars
         self._tools: dict[str, Callable] = {name: getattr(self, f"_{name}") for name in READ_TOOL_NAMES}
 
@@ -477,3 +497,46 @@ class ChatToolbox:
             for p in pages
         ]
         return {"items": rows[: _limit(arguments)], "total": len(rows)}
+
+    # ------------------------------------------------------------ knowledge (spec 0006)
+
+    @property
+    def knowledge(self):
+        if self._knowledge is None:
+            from backend.services.knowledge_service import KnowledgeService
+
+            self._knowledge = KnowledgeService(repository=self._repo)
+        return self._knowledge
+
+    def _search_knowledge(self, project, arguments: dict) -> dict:
+        from backend.services.knowledge_service import NOT_SET_UP, SEARCH_TOP_K_DEFAULT, KnowledgeNotReady
+
+        query = arguments.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query is required")
+        source_types = arguments.get("source_types") or None
+        if source_types is not None and not isinstance(source_types, list):
+            source_types = [source_types]
+        try:
+            top_k = int(arguments.get("top_k") or SEARCH_TOP_K_DEFAULT)
+        except (TypeError, ValueError):
+            top_k = SEARCH_TOP_K_DEFAULT
+        try:
+            found = self.knowledge.search(project, query, top_k=top_k, source_types=source_types)
+        except KnowledgeNotReady:
+            return {"error": NOT_SET_UP}
+        items = []
+        for item in found:
+            text = item["text"]
+            if len(text) > KNOWLEDGE_TEXT_CHARS:
+                text = text[:KNOWLEDGE_TEXT_CHARS] + TRUNCATED
+            items.append(
+                {
+                    "text": text,
+                    "score": item["score"],
+                    "source_type": item["source_type"],
+                    "source_ref": item["source_ref"],
+                    "title": item["title"],
+                }
+            )
+        return {"items": items}

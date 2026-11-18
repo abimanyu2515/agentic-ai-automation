@@ -70,6 +70,9 @@ class TestCase(BaseModel):
     script_validation_attempts: int = Field(default=0, ge=0)
     script_validation_completed_at: datetime | None = None
     script_validation_diagnostic: str | None = None
+    # Spec 0006, AC-26: set only by EvaluationAgent when retrieved context exists. Reported, never enforced.
+    groundedness_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    unsupported_claims: list[str] = Field(default_factory=list)
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     reviewer: str | None = None
     approved_at: datetime | None = None

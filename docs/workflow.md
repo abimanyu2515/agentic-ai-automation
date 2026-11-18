@@ -156,7 +156,7 @@ A form whose steps are shown one at a time (sibling containers of the same tag a
 
 After the listed URLs, reconnaissance starts again at the target URL and follows steps that name a link (a step beginning with click, select, choose, open, go to, navigate to, or tap whose text contains a visible link's exact name), up to 3 links. It clicks the link and inspects the page it leads to, recorded with `reached_by`. That page replaces a direct load of the same URL, because some applications set state when the link is clicked: the Tricentis quote form reads the vehicle type from a cookie that its menu link sets, and opened directly it shows and requires every vehicle's fields. Scripts likewise perform every navigation step the case lists, even when `BASE_URL` seems to show the destination already.
 
-For a project marked as a safe test environment, each data-driven template is first recorded live with one dataset (`generate_data_driven_template` in `backend/agents/script_generator_agent.py`) and then written from that trace. Each recorded click or selection carries `element` facts: the element's text and its control's id, name, type, and value. A styled choice that is an empty label around a hidden input is therefore templated by its value attribute (`label:has(input[value='<marker>'])`), not by text it does not have. A template that leaves out a verified click whose selector names no test data value (such as a menu link before a form) is regenerated once. The `BASE_URL` fallback in every generated script is set to the project's target URL, because the runner does not set `TARGET_URL` and a deeper URL copied from the trace would skip the project's entry steps.
+For a project marked as a safe test environment, each data-driven template is first recorded live with one dataset (`generate_data_driven_template` in `backend/agents/script_generator_agent.py`) and then written from that trace. Each recorded click or selection carries `element` facts: the element's text and its control's id, name, type, and value. A styled choice that is an empty label around a hidden input is therefore templated by its value attribute (`label:has(input[value='<marker>'])`), not by text it does not have. A template that leaves out a verified click whose selector names no test data value (such as a menu link before a form) is regenerated once. The `BASE_URL` fallback in every generated script is set to the project's target URL, because a deeper URL copied from the trace would skip the project's entry steps. Executions set `TARGET_URL` from the run's project configuration snapshot (spec 0001), so the fallback only matters for runs outside that path.
 
 In a multi-step form or wizard, the next step's tab can open even when the application rejected the previous step's data, while that step's controls stay hidden. Generated scripts therefore assert that the first control of each new step is visible before using it, with a message naming both steps, so a rejected earlier value fails within 5 seconds with that message instead of timing out on the click. The runner's `expect` shim in `backend/playwrightt/lib/execution-engine.ts` supports Playwright's `expect(value, 'message')` form and puts the message before the assertion error.
 
@@ -180,6 +180,7 @@ The object repository (spec 0004, guide: [features/object-repository.md](feature
 
 ```python
 class WorkflowState(BaseModel):
+    project_id: UUID | None          # set by every state creator (spec 0006)
     requirement: Requirement | None
     generated_scenarios: list[Scenario]
     selected_scenario_ids: list[UUID]
@@ -191,6 +192,12 @@ class WorkflowState(BaseModel):
     logs: list[str]
     user_stories: list[dict]
     testing_context: dict | None
+    # Retrieval stage (spec 0006), written only by KnowledgeRetrievalAgent
+    retrieval_status: str | None     # "ok", "empty", or "skipped"
+    retrieval_query: str | None
+    retrieval_attempts: int
+    retrieval_sources: list[str]
+    retrieved_context: list[dict]    # {chunk_id, text, score, source_type, source_ref, title, graded}
 ```
 
 ### Design Principles
@@ -273,6 +280,7 @@ def build_graph(
     feature_inventory_agent=None, backlog_creation_agent=None,
     jira_sync_agent=None, qa_story_analyzer_agent=None,
     execution_analysis_agent=None, defect_management_agent=None,
+    knowledge_retrieval_agents=None,  # {"requirements" | "scenarios" | "test_cases" | "analysis": agent}
 ):
 ```
 
@@ -309,13 +317,26 @@ SupervisorAgent routing_map:
 "jira_sync_agent"         → jira_sync_agent
 "execution_analysis"      → execution_analysis_agent
 "defect_management"       → defect_management_agent
+"retrieval_requirements"  → retrieval_requirements
+"retrieval_scenarios"     → retrieval_scenarios
+"retrieval_test_cases"    → retrieval_test_cases
+"retrieval_analysis"      → retrieval_analysis
 "end"                     → END
 ```
 
 Fixed edges (always execute in sequence):
 - `scenario_agent → human_approval_agent_1`
 - `test_case_agent → evaluation_agent → human_approval_agent_2`
-- `execution_agent → execution_analysis_agent → defect_management_agent → report_agent → END`
+- `execution_analysis_agent → defect_management_agent → report_agent → END`
+- each retrieval node to its consumer: `retrieval_requirements → requirement_analyst_agent`, `retrieval_scenarios → scenario_agent`, `retrieval_test_cases → test_case_agent`, `retrieval_analysis → execution_analysis_agent`
+
+### Retrieval stage (spec 0006)
+
+When `RAG_WORKFLOW_RETRIEVAL_ENABLED` is true, `SupervisorAgent._via_retrieval(target)` sends each route that would reach `requirement_analyst_agent`, `scenario_agent`, `test_case_agent`, or `execution_analysis_agent` to that consumer's retrieval node first. It is used in `route_start` (INGEST, GENERATE_SCENARIOS, the no operation fallback, GENERATE_TESTCASES), `route_after_human_approval_1`, and two routers that replaced former fixed edges: `route_after_qa_story_analyzer` (to `scenario_agent`) and `route_after_execution` (to `execution_analysis_agent`). The flag is read on every route call, so the module level `graph` built at import time follows a settings change. With the flag off, the order is the same as before and the retrieval nodes are never reached.
+
+Every `WorkflowState` creator sets `project_id` (`run_workflow(requirement, project_id=...)`, `WorkflowService`, the Jira sync routes, and `GroundedPlaywrightScriptService`). Without it the retrieval stage skips.
+
+Inside each retrieval node, every search, grade, and rewrite is a LangSmith child span when tracing is on (see [agents.md](agents.md), KnowledgeRetrievalAgent). After `test_case_agent`, `evaluation_agent` reuses the `retrieval_test_cases` context to score each test case's groundedness; it is reported on the test case and never changes the evaluation outcome.
 
 ---
 

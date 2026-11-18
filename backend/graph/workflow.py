@@ -70,6 +70,8 @@ LangSmith Integration:
     Gracefully degrades if langsmith is not installed.
 """
 
+from uuid import UUID
+
 from langgraph.graph import END, START, StateGraph
 
 from backend.agents.base import BaseAgent
@@ -88,6 +90,7 @@ from backend.agents.jira_sync_agent import JiraSyncAgent
 from backend.agents.qa_story_analyzer_agent import QAStoryAnalyzerAgent
 from backend.agents.execution_analysis_agent import ExecutionAnalysisAgent
 from backend.agents.defect_management_agent import DefectManagementAgent
+from backend.agents.knowledge_retrieval_agent import STAGE_NODES, KnowledgeRetrievalAgent
 from backend.models.requirement import Requirement
 from backend.models.state import WorkflowState
 
@@ -138,6 +141,7 @@ def build_graph(
     qa_story_analyzer_agent: BaseAgent | None = None,
     execution_analysis_agent: BaseAgent | None = None,
     defect_management_agent: BaseAgent | None = None,
+    knowledge_retrieval_agents: dict[str, BaseAgent] | None = None,
 ):
     """
     Build LangGraph workflow with optional agent dependency injection.
@@ -157,6 +161,9 @@ def build_graph(
         qa_story_analyzer_agent: Optional QAStoryAnalyzerAgent instance
         execution_analysis_agent: Optional ExecutionAnalysisAgent instance
         defect_management_agent: Optional DefectManagementAgent instance
+        knowledge_retrieval_agents: Optional retrieval agents keyed by stage
+            ("requirements", "scenarios", "test_cases", "analysis"); missing
+            stages get a real KnowledgeRetrievalAgent (spec 0006)
         
     Returns:
         Compiled LangGraph CompiledGraph ready for invocation
@@ -185,6 +192,23 @@ def build_graph(
     qa_story_analyzer_agent = qa_story_analyzer_agent or QAStoryAnalyzerAgent()
     execution_analysis_agent = execution_analysis_agent or ExecutionAnalysisAgent()
     defect_management_agent = defect_management_agent or DefectManagementAgent()
+    # Spec 0006: one retrieval agent per stage. Real ones share one knowledge
+    # service and one retrieval LLM service, both built on first use.
+    injected_retrieval = knowledge_retrieval_agents or {}
+    unknown_stages = set(injected_retrieval) - set(STAGE_NODES)
+    if unknown_stages:
+        raise ValueError(f"Unknown retrieval stages: {sorted(unknown_stages)}")
+    shared_with: KnowledgeRetrievalAgent | None = None
+
+    def _retrieval_agent(stage: str) -> BaseAgent:
+        nonlocal shared_with
+        if stage in injected_retrieval:
+            return injected_retrieval[stage]
+        agent = KnowledgeRetrievalAgent(stage=stage, share_with=shared_with)
+        shared_with = shared_with or agent
+        return agent
+
+    retrieval_agents = {stage: _retrieval_agent(stage) for stage in STAGE_NODES}
 
     @traceable(name="SupervisorAgent")
     def _supervisor_node(state: WorkflowState) -> WorkflowState:
@@ -250,6 +274,15 @@ def build_graph(
     def _defect_management_node(state: WorkflowState) -> WorkflowState:
         return defect_management_agent.run(state)
 
+    def _retrieval_node_for(stage: str):
+        agent = retrieval_agents[stage]
+
+        @traceable(name=f"KnowledgeRetrievalAgent[{stage}]")
+        def _node(state: WorkflowState) -> WorkflowState:
+            return agent.run(state)
+
+        return _node
+
     builder = StateGraph(WorkflowState)
     
     # Nodes
@@ -269,6 +302,8 @@ def build_graph(
     builder.add_node("jira_sync_agent", _jira_sync_node)
     builder.add_node("execution_analysis_agent", _execution_analysis_node)
     builder.add_node("defect_management_agent", _defect_management_node)
+    for stage, node_name in STAGE_NODES.items():
+        builder.add_node(node_name, _retrieval_node_for(stage))
 
     # Routing Map
     routing_map = {
@@ -287,6 +322,7 @@ def build_graph(
         "jira_sync_agent": "jira_sync_agent",
         "execution_analysis_agent": "execution_analysis_agent",
         "defect_management_agent": "defect_management_agent",
+        **{node_name: node_name for node_name in STAGE_NODES.values()},
         "end": END,
     }
 
@@ -312,7 +348,13 @@ def build_graph(
         supervisor_agent.route_after_backlog_creation,
         routing_map
     )
-    builder.add_edge("qa_story_analyzer_agent", "scenario_agent")
+    # Spec 0006, AC-17: these two were fixed edges; the router sends them
+    # through retrieval when RAG_WORKFLOW_RETRIEVAL_ENABLED is on.
+    builder.add_conditional_edges(
+        "qa_story_analyzer_agent",
+        supervisor_agent.route_after_qa_story_analyzer,
+        routing_map
+    )
     builder.add_edge("scenario_agent", "human_approval_agent_1")
     
     builder.add_conditional_edges(
@@ -336,11 +378,21 @@ def build_graph(
         routing_map
     )
     
-    builder.add_edge("execution_agent", "execution_analysis_agent")
+    builder.add_conditional_edges(
+        "execution_agent",
+        supervisor_agent.route_after_execution,
+        routing_map
+    )
     builder.add_edge("execution_analysis_agent", "defect_management_agent")
     builder.add_edge("defect_management_agent", "report_agent")
     builder.add_edge("report_agent", END)
     builder.add_edge("jira_sync_agent", END)
+
+    # Each retrieval node feeds exactly one consumer.
+    builder.add_edge("retrieval_requirements", "requirement_analyst_agent")
+    builder.add_edge("retrieval_scenarios", "scenario_agent")
+    builder.add_edge("retrieval_test_cases", "test_case_agent")
+    builder.add_edge("retrieval_analysis", "execution_analysis_agent")
 
     return builder.compile()
 
@@ -353,7 +405,7 @@ def build_graph(
 graph = build_graph()
 
 
-def run_workflow(requirement: Requirement, graph_instance=None) -> WorkflowState:
+def run_workflow(requirement: Requirement, graph_instance=None, project_id: UUID | None = None) -> WorkflowState:
     """
     Execute complete workflow for a requirement.
     
@@ -362,6 +414,8 @@ def run_workflow(requirement: Requirement, graph_instance=None) -> WorkflowState
     Args:
         requirement: Requirement object to process
         graph_instance: Optional graph instance (for testing with mocked agents)
+        project_id: The project the requirement belongs to. The retrieval stage
+            (spec 0006) searches only this project's knowledge and skips without it.
         
     Returns:
         Final workflow state with all generated artifacts
@@ -380,7 +434,7 @@ def run_workflow(requirement: Requirement, graph_instance=None) -> WorkflowState
     """
     graph_instance = graph_instance or graph
 
-    initial_state = WorkflowState(requirement=requirement)
+    initial_state = WorkflowState(project_id=project_id, requirement=requirement)
     initial_state.add_log("Requirement received")
 
     # In E2E tests / full pipeline, we start without a specific operation config,

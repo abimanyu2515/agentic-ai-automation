@@ -28,7 +28,7 @@ def test_map_timeline_event_to_step_dynamic():
     step_1 = map_timeline_event_to_step(event_1, index=0, project_id=project_id, execution_id=execution_id, test_case=test_case)
     assert step_1["title"] == "Step 1: Initialize the portal"
     assert step_1["action"] == "Execute step 1: Initialize the portal"
-    assert step_1["result"] == "Step 1 verification passed."
+    assert step_1["result"] == "Step 1 completed successfully"  # docs/guides/report-audit.md
 
     # 2. Test step 3 mapping (last step, 03-insurant-data.png)
     event_3 = {
@@ -52,6 +52,9 @@ def test_map_timeline_event_to_step_dynamic():
         "details": "10-nonexistent.png"
     }
     step_out = map_timeline_event_to_step(event_out, index=3, project_id=project_id, execution_id=execution_id, test_case=test_case)
-    # Falls back to standard "Visual State Capture" template
-    assert step_out["title"] == "Visual State Capture"
-    assert "Capture screenshot" in step_out["action"]
+    # A screenshot past the last step is not tied to any test case step. The old
+    # "Visual State Capture" template was removed on purpose (see
+    # test_bug_condition_exploration.py), so the event keeps its own name.
+    assert not step_out["title"].startswith("Step ")
+    assert step_out["title"] != "Visual State Capture"
+    assert "Verified expected result" not in step_out["result"]

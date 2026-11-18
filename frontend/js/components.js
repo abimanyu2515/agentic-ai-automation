@@ -665,18 +665,18 @@ export const Components = {
   // Documents Table component inside Knowledge Base
   DocumentsTable(documents, onDelete) {
     if (!documents || documents.length === 0) {
-      return this.EmptyState("No Knowledge Documents", "Knowledge Base is currently empty. Upload files (PDF, DOCX, XLSX, CSV, TXT) to establish RAG database.");
+      return this.EmptyState("No Knowledge Documents", "Knowledge Base is currently empty. Upload PDF, DOCX, TXT, MD, CSV, or XLSX files to give this project its own searchable knowledge base.");
     }
 
     window._deleteDocument = onDelete;
 
     const rows = documents.map(doc => {
       const date = new Date(doc.uploaded_at).toLocaleDateString();
-      let statusBadge = `<span class="badge badge-review">${escapeHTML(doc.embedding_status)}</span>`;
-      if (doc.embedding_status === 'completed') {
-        statusBadge = `<span class="badge badge-approved">Indexed</span>`;
-      } else if (doc.embedding_status === 'failed') {
-        statusBadge = `<span class="badge badge-rejected">Failed</span>`;
+      const labels = { pending: 'Pending', processing: 'Indexing…', completed: 'Indexed', failed: 'Failed' };
+      const badgeClass = { completed: 'badge-approved', failed: 'badge-rejected' }[doc.embedding_status] || 'badge-review';
+      let statusBadge = `<span class="badge ${badgeClass}">${escapeHTML(labels[doc.embedding_status] || doc.embedding_status)}</span>`;
+      if (doc.error) {
+        statusBadge += `<div class="kb-doc-error">${escapeHTML(doc.error)}</div>`;
       }
 
       return `
@@ -687,7 +687,7 @@ export const Components = {
           <td>${statusBadge}</td>
           <td>${escapeHTML(date)}</td>
           <td style="text-align: right;">
-            <button class="btn-icon btn-icon-danger" title="Delete File" onclick="window._deleteDocument('${doc.id}')">
+            <button class="btn-icon btn-icon-danger" title="Delete file" aria-label="Delete ${escapeHTML(doc.original_filename)}" onclick="window._deleteDocument('${doc.id}')">
               <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
             </button>
           </td>
@@ -703,7 +703,7 @@ export const Components = {
               <th>Filename</th>
               <th>Mime Type</th>
               <th>Size</th>
-              <th>Embedding Status</th>
+              <th>Status</th>
               <th>Uploaded Date</th>
               <th style="text-align: right; width: 60px;">Actions</th>
             </tr>

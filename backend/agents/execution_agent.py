@@ -80,7 +80,7 @@ class ExecutionAgent(BaseAgent):
     
     name = "Execution Agent"
 
-    def __init__(self, runner: PlaywrightRunner | None = None, on_log = None, project_id = None, repo = None):
+    def __init__(self, runner: PlaywrightRunner | None = None, on_log = None, project_id = None, repo = None, project_config: dict | None = None):
         """
         Initialize execution agent with runner, logging callback, and project ID.
         
@@ -88,11 +88,14 @@ class ExecutionAgent(BaseAgent):
             runner: PlaywrightRunner instance (injected for testing)
             on_log: Optional callback for real-time execution logging
             project_id: Optional UUID of the active project for credential retrieval
+            project_config: The project snapshot captured when the run was accepted
+                (spec 0001). Sets the runner's TARGET_URL and is saved on every result.
         """
         self.runner = runner or PlaywrightRunner()
         self.on_log = on_log
         self.project_id = project_id
         self.repo = repo
+        self.project_config = project_config
 
     def run(self, state: WorkflowState) -> WorkflowState:
         """
@@ -163,7 +166,8 @@ class ExecutionAgent(BaseAgent):
         context = BatchContext(
             batch_id=batch_id,
             project_id=self.project_id or uuid4(),
-            queue=queue
+            queue=queue,
+            project_config=self.project_config,
         )
 
         # Execute using the queue manager
@@ -195,7 +199,8 @@ class ExecutionAgent(BaseAgent):
                 error_message=error_message,
                 screenshot_path=screenshot_path,
                 video_path=video_path,
-                trace_path=trace_path
+                trace_path=trace_path,
+                project_config_snapshot=self.project_config,
             )
             # Attach timeline & console logs to the raw payload of ExecutionResult
             res._raw_payload = {

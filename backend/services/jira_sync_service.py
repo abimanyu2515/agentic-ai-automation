@@ -509,6 +509,10 @@ async def sync_execution_finished(scenario_id: UUID, execution_result_id: UUID):
 
         if project_id:
             repo.save_execution_result(project_id, execution_result)
+            # Knowledge (spec 0006, AC-14a): the linked bug is indexed from Jira.
+            from backend.services.knowledge_indexer import queue_defect_keys
+
+            queue_defect_keys(project_id, [execution_result.jira_bug_id])
 
         now_time = datetime.now(timezone.utc)
         scenario.last_jira_sync_at = now_time
