@@ -29,11 +29,15 @@ pnpm --dir backend/playwrightt build
 
 # Run backend tests
 pytest -q
+
+# Run browser tests in backend/e2e (start the backend first for the object repository view test)
+cd backend && npx playwright test --project=chromium
 ```
 
 ## Specs
 
 Feature documentation is stored in `docs/`. Architecture specifications may be added under `docs/specs/`.
+Each spec is a numbered folder, `docs/specs/NNNN-title/`, holding `index.md`, `rationale.md`, and `verify.md`.
 
 ## Rules
 

@@ -394,7 +394,15 @@ export class ObjectRepositoryView {
     this.renderPageList();
     const section = this.root?.querySelector('#objrepo-elements-section');
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    section?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    // Scroll only the workspace pane. scrollIntoView would also scroll the document
+    // and every other ancestor, shifting the whole layout.
+    const scroller = section?.closest('.workspace');
+    if (section && scroller) {
+      const margin = parseFloat(getComputedStyle(section).scrollMarginTop) || 0;
+      const top = section.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+        + scroller.scrollTop - margin;
+      scroller.scrollTo({ top, behavior: reduce ? 'auto' : 'smooth' });
+    }
     if (changed) this.loadElements();
   }
 

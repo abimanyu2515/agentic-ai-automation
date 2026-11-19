@@ -60,7 +60,7 @@ Send test data and script generation to Gemini (rotating between two models, at 
   - [x] Every caller on its role, covering AC-1, AC-2 and AC-12
   - [x] Shared role pool with rotation, cap, pacing, 429 failover and deadline, covering AC-3 through AC-8 and AC-13
   - [x] Logging, LangSmith tags, settings endpoints and Master Settings display, covering AC-10 and AC-11
-- [ ] Verify it: `/check verify role based LLM routing`
+- [x] Verify it: `/check verify role based LLM routing`
 - [ ] Test it: `/test role based LLM routing`
 
 ## Locator reliability

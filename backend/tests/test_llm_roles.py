@@ -254,6 +254,32 @@ def test_pool_calls_disable_hidden_retries_and_carry_role_metadata(role_settings
     assert any("role=generation model=A queue_wait=" in r.getMessage() for r in caplog.records)
 
 
+def test_role_call_sends_a_langsmith_run_with_role_and_model(role_settings):
+    """Regression (AC-11): LiteLLM's langsmith callback never sent runs from
+    sync code and dropped llm_role. Each role call now sends its own run."""
+    import litellm
+    from langsmith.run_trees import RunTree
+
+    from backend.config.settings import LangSmithConfig
+
+    settings = _settings()
+    settings.langsmith = LangSmithConfig(tracing_enabled=True, api_key="ls-key", project_name="p")
+    role_settings(settings)
+    sent = []
+    with patch.object(llm_module, "completion", return_value=_Response("ok")), \
+            patch.object(RunTree, "post", autospec=True, side_effect=lambda run, *a, **k: sent.append(run)):
+        LLMService(role="generation").generate(system="s", user="u")
+
+    assert len(sent) == 1
+    run = sent[0]
+    assert run.run_type == "llm"
+    assert run.end_time is not None
+    assert run.extra["metadata"]["llm_role"] == "generation"
+    assert run.extra["metadata"]["llm_model"] == "A"
+    assert run.tags == ["generation", "A"]
+    assert "langsmith" not in (litellm.callbacks or [])
+
+
 def test_cap_holds_the_third_call_until_a_slot_frees(role_settings):
     release_first = threading.Event()
     started = []

@@ -288,7 +288,7 @@ export class TokenUtilizationView {
               <button type="button" class="tu-chip" data-split="role">By role</button>
             </div>
             <select class="form-control tu-bucket" aria-label="Interval">
-              <option value="">Auto interval</option>
+              <option value="">Monthly</option>
               <option value="hour">Hourly</option>
               <option value="day">Daily</option>
               <option value="week">Weekly</option>

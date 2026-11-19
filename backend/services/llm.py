@@ -318,6 +318,59 @@ class _WaitBudget:
         self.waited = 0.0
 
 
+class _LLMTrace:
+    """One LangSmith "llm" run for one role completion (spec 0003 AC-11).
+
+    LiteLLM's own "langsmith" callback is not used. In sync code (no running
+    event loop) it sends only once 512 runs are queued, so traces never
+    arrived, and it drops custom metadata keys such as llm_role. A RunTree is
+    sent by the LangSmith client's background thread, nests under the current
+    agent span, and carries the role and model in its metadata and tags.
+    Tracing never breaks or delays the call."""
+
+    def __init__(self, run=None):
+        self._run = run
+
+    @classmethod
+    def start(cls, *, role: str, model: str, messages: list[dict], metadata: dict) -> "_LLMTrace":
+        try:
+            settings = get_settings().langsmith
+            if not settings.tracing_enabled:
+                return cls()
+            from langsmith.run_helpers import get_current_run_tree
+            from langsmith.run_trees import RunTree
+
+            run_metadata = {key: value for key, value in metadata.items() if key != "tags"}
+            fields = {
+                "name": str(metadata.get("run_name") or "LLMRun"),
+                "run_type": "llm",
+                "inputs": {"messages": messages, "model": model},
+                "tags": list(metadata.get("tags") or [role, model]),
+                "extra": {"metadata": run_metadata},
+            }
+            parent = get_current_run_tree()
+            if parent is not None:
+                return cls(parent.create_child(**fields))
+            if settings.project_name:
+                fields["project_name"] = settings.project_name
+            return cls(RunTree(**fields))
+        except Exception as exc:
+            logger.warning("LangSmith trace start failed: %s", exc)
+            return cls()
+
+    def end(self, *, response=None, outputs: dict | None = None, error: Exception | None = None) -> None:
+        if self._run is None:
+            return
+        run, self._run = self._run, None
+        try:
+            if response is not None and hasattr(response, "model_dump"):
+                outputs = response.model_dump()
+            run.end(outputs=outputs or {}, error=str(error) if error is not None else None)
+            run.post()
+        except Exception as exc:
+            logger.warning("LangSmith trace send failed: %s", exc)
+
+
 class LLMService:
     def __init__(self, config: LLMConfig | None = None, role: str | None = None, agent: str | None = None):
         # Who the token usage of this service is attributed to (Token Utilization page).
@@ -335,8 +388,8 @@ class LLMService:
             role_config = get_settings().llm_roles[self.role]
             self.config = self._config_for(role_config, role_config.models[0])
 
-        # Enable LangSmith tracing for LiteLLM if configured
-        self._init_langsmith_tracing()
+        # LangSmith tracing is done per role call by _LLMTrace, not by
+        # LiteLLM's "langsmith" callback (see _LLMTrace for why).
 
     @staticmethod
     def _config_for(role_config: LLMRoleConfig, model: str) -> LLMConfig:
@@ -347,31 +400,6 @@ class LLMService:
             api_base=role_config.api_base,
         )
     
-    def _init_langsmith_tracing(self) -> None:
-        """Initialize LangSmith tracing for LiteLLM if enabled.
-        
-        This integrates LiteLLM with LangSmith using the official integration.
-        When enabled, all LLM calls will be traced to LangSmith automatically.
-        
-        Error handling: Any tracing setup failure is logged but never breaks LLM functionality.
-        """
-        try:
-            settings = get_settings()
-            if not settings.langsmith.tracing_enabled:
-                return
-            
-            import litellm
-            
-            # Enable LangSmith callback (official LiteLLM integration)
-            if "langsmith" not in (litellm.callbacks or []):
-                litellm.callbacks = (litellm.callbacks or []) + ["langsmith"]
-                logger.info("LiteLLM LangSmith tracing enabled")
-                
-        except Exception as e:
-            # Tracing failure should never break LLM functionality
-            logger.warning(f"Failed to enable LiteLLM LangSmith tracing: {e}")
-
-
     def _model_string(self, config: LLMConfig | None = None) -> str:
         config = config or self.config
         prefix = _PROVIDER_PREFIXES.get(config.provider, "")
@@ -494,6 +522,7 @@ class LLMService:
                 "llm_model": model,
                 "tags": [*caller_tags, self.role, model],
             }
+            trace = _LLMTrace.start(role=self.role, model=model, messages=messages, metadata=metadata)
             started = time.perf_counter()
             try:
                 response = completion(
@@ -507,9 +536,11 @@ class LLMService:
                     **(self._json_mode_kwargs(config) if json_mode else {}),
                     **kwargs,
                 )
+                trace.end(response=response)
                 self._record_usage(config, started, response=response, attempt=attempt)
                 return response
             except RateLimitError as exc:
+                trace.end(error=exc)
                 self._record_usage(config, started, status="rate_limited", error=exc, attempt=attempt)
                 seconds = _cooldown_seconds(exc, role_config.cooldown_seconds)
                 pool.report_429(model, seconds)
@@ -518,6 +549,7 @@ class LLMService:
                     self.role, model, seconds,
                 )
             except Exception as exc:
+                trace.end(error=exc)
                 self._record_usage(config, started, status="error", error=exc, attempt=attempt)
                 raise LLMServiceError(f"LLM call failed ({config.provider}/{config.model}): {exc}") from exc
             finally:
@@ -588,6 +620,8 @@ class LLMService:
             config = self._config_for(role_config, model)
             logger.info("LLM stream role=%s model=%s queue_wait=%.2fs", self.role, model, waited)
 
+            metadata = {"llm_role": self.role, "llm_model": model, "tags": [self.role, model]}
+            trace = _LLMTrace.start(role=self.role, model=model, messages=messages, metadata=metadata)
             started = time.perf_counter()
             try:
                 stream = iter(completion(
@@ -598,13 +632,14 @@ class LLMService:
                     timeout=timeout,
                     num_retries=0,
                     stream=True,
-                    metadata={"llm_role": self.role, "llm_model": model, "tags": [self.role, model]},
+                    metadata=metadata,
                     **tool_kwargs,
                 ))
                 # Providers often report a 429 on the first read, not the call.
                 first = next(stream, None)
             except RateLimitError as exc:
                 pool.release()
+                trace.end(error=exc)
                 self._record_usage(config, started, status="rate_limited", error=exc)
                 seconds = _cooldown_seconds(exc, role_config.cooldown_seconds)
                 pool.report_429(model, seconds)
@@ -615,22 +650,27 @@ class LLMService:
                 continue
             except Exception as exc:
                 pool.release()
+                trace.end(error=exc)
                 self._record_usage(config, started, status="error", error=exc)
                 raise LLMServiceError(f"LLM call failed ({config.provider}/{config.model}): {exc}") from exc
 
             try:
                 yield from self._stream_chunks(
                     stream, first, config,
-                    on_done=self._stream_usage_recorder(config, started, messages),
+                    on_done=self._stream_usage_recorder(config, started, messages, trace),
                 )
             finally:
                 pool.release()
             return
 
-    def _stream_usage_recorder(self, config: LLMConfig, started: float, messages: list[dict]):
+    def _stream_usage_recorder(
+        self, config: LLMConfig, started: float, messages: list[dict], trace: "_LLMTrace | None" = None,
+    ):
         """Token usage callback for one stream, called once with every chunk read.
         A client disconnect still records the tokens the provider produced."""
         def done(chunks: list, error: Exception | None) -> None:
+            if trace is not None:
+                trace.end(outputs={"chunks": len(chunks)}, error=error)
             self._record_usage(
                 config,
                 started,

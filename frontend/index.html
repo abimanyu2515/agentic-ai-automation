@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agentic AI Automation</title>
-  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="stylesheet" href="/css/styles.css?v=3">
   <link rel="stylesheet" href="/css/token-utilization.css">
   <!-- Chart.js (dashboard and Token Utilization) and the chat assistant's Markdown
        rendering (spec 0005): pinned versions, the Markdown sanitized before use.
@@ -168,6 +168,9 @@
     <!-- Top Navbar -->
     <header class="top-nav" id="project-select-wrapper" style="display: none;">
       <div class="project-selector-container" style="display: flex; align-items: center; gap: 12px;">
+        <button type="button" id="sidebar-toggle" class="btn-icon sidebar-toggle" aria-controls="sidebar-container" aria-expanded="true" aria-label="Close sidebar (Ctrl+B)" title="Close sidebar (Ctrl+B)">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M9 4v16"/></svg>
+        </button>
         <select id="project-select" style="display: none;"></select>
         <div id="project-combobox" class="project-combobox" style="position: relative;">
           <div id="project-combobox-display" class="project-combobox-display" tabindex="0" style="cursor: pointer; display: flex; align-items: center; gap: 6px; background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--border-radius-md); padding: 6px 12px; font-size: 0.85rem; font-weight: 500; color: var(--text-primary); min-width: 200px; height: 32px;">
@@ -1404,7 +1407,7 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=29"></script>
+  <script type="module" src="/js/app.js?v=30"></script>
   <script>
     document.getElementById('login-form').addEventListener('submit', async function(e) {
       e.preventDefault();

@@ -68,3 +68,4 @@ proj-guide.md
 .agents/
 # Chat assistant store (spec 0005)
 backend/database/chat_store.json
+.claude/worktrees/

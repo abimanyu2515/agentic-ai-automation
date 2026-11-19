@@ -4,9 +4,9 @@ _Steps derived from spec 0003 acceptance criteria. `/check verify` runs these; `
 ## UI / manual
 - [x] Start the app (`uvicorn backend.main:app --reload --port 8000`), open Master Settings, General Settings → an "LLM Roles (read only)" section shows Generation (gemini, both Gemini models, max concurrent 2, min interval 4s, cooldown 60s, max wait 180s) and Analysis (nvidia, the Nemotron model, max concurrent 2, min interval 0s) → AC-10
 - [x] Save the General Settings form → the role section is unchanged, and `backend/config/override.yaml` has no `llm_roles` key → AC-10
-- [ ] Run a requirement through test data generation on a real project → the server log shows `LLM call role=generation model=gemini-3.5-flash-lite`, then `model=gemini-3.1-flash-lite`, alternating → AC-1, AC-3, AC-11
-- [ ] In the same run, scenario, test case and evaluation steps log `role=analysis model=nvidia/nemotron-3-ultra-550b-a55b` → AC-2, AC-11
-- [ ] With LangSmith tracing on, open a generation trace → its metadata carries `llm_role` and `llm_model`, and its tags include the role and the model → AC-11
+- [x] Run a requirement through test data generation on a real project → the server log shows `LLM call role=generation model=gemini-3.5-flash-lite`, then `model=gemini-3.1-flash-lite`, alternating → AC-1, AC-3, AC-11
+- [x] In the same run, scenario, test case and evaluation steps log `role=analysis model=nvidia/nemotron-3-ultra-550b-a55b` → AC-2, AC-11
+- [x] With LangSmith tracing on, open a generation trace → its metadata carries `llm_role` and `llm_model`, and its tags include the role and the model → AC-11
 - [ ] Generate test data for several test cases at once → the log never shows more than 2 generation calls in flight, and later calls report a `queue_wait` above 0 → AC-4
 
 ## Commands
@@ -18,7 +18,7 @@ _Steps derived from spec 0003 acceptance criteria. `/check verify` runs these; `
 ## Value sourcing
 - [x] Role choice: build `TestDataAgent()` and `ScenarioAgent()` with no service → roles `generation` and `analysis` → AC-1, AC-2
 - [x] Model string: generation calls go to `gemini/<model>`, analysis to `openai/nvidia/<model>` (the `_PROVIDER_PREFIXES` entry) → AC-1, AC-2
-- [ ] Pacing: set `GENERATION_LLM_MODELS` to one model and `GENERATION_LLM_MIN_INTERVAL_SECONDS=10` → two calls start at least 10s apart; set it to 0 → no gap → AC-5
+- [x] Pacing: set `GENERATION_LLM_MODELS` to one model and `GENERATION_LLM_MIN_INTERVAL_SECONDS=10` → two calls start at least 10s apart; set it to 0 → no gap → AC-5
 - [x] Cooldown length: a 429 with `Retry-After: 30` cools that model 30s; one with `retryDelay "15s"` in the message cools it 15s; one with neither uses `GENERATION_LLM_COOLDOWN_SECONDS`; `Retry-After: 99999` is clamped to 3600 → AC-6
 - [x] Max wait: set `GENERATION_LLM_MAX_WAIT_SECONDS=20` and force 429s on every model → the call fails with `generation LLM rate limited: models [...] unavailable after ~20s`, and does not retry again → AC-7
 - [x] Analysis 429: the single analysis model returns 429 once → the call waits out the cooldown and succeeds, with no switch → AC-8

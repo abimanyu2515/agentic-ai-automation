@@ -13,6 +13,8 @@ This workspace is a Next.js application and a local Playwright test runner used 
 | `backend/playwrightt/lib/execution-engine.ts` | Browser execution coordination |
 | `backend/playwrightt/lib/execution-queue.ts` | Execution queue behavior |
 | `backend/playwrightt/components/` | Execution results and artifact presentation |
+| `backend/playwrightt/lib/object-harvest.js` | Shared element extractor used by reconnaissance, the engine, and the Python runner |
+| `backend/playwrightt/lib/object-harvest-session.ts` | Harvest timing during a run: settle rule, once per path, deadline, redaction |
 | `backend/services/playwright_runner.py` | Python side that creates and invokes generated Playwright tests |
 
 ## Commands
@@ -45,6 +47,8 @@ pnpm lint
 * `next.config.mjs` currently allows TypeScript build errors. Do not treat a successful Next build as a complete type safety check.
 * The workspace uses a `pnpm-lock.yaml`. Prefer pnpm for dependency operations.
 * Generated artifacts under `public/artifacts/` can be large and should not be edited as source files.
+* `lib/object-harvest.js` must stay one plain function expression with no `import`, `export`, or globals, because Python reads its text and embeds it. Never fork a second copy of its element rules.
+* Both `completed` webhook payloads carry `logs` (only `[OBJREPO]` lines) and `harvest`. The harvest listener is attached per execution on the shared page and removed in `finally`.
 * `lib/execution-engine.ts` runs scripts with its own `test()` shim on one shared page, not the Playwright test runner. Declared tests are queued and run one at a time, with cookies and storage cleared between them; running them concurrently made every `page.goto` abort the others (`net::ERR_ABORTED`). After two consecutive tests fail with the same error, the rest are skipped. `slowMo` applies only to headed runs, and strict mode violations are not retried. The shim's web-first assertions (`toBeVisible`, `toHaveURL`, `toHaveText` and the rest) wait `EXPECT_TIMEOUT_MS` (15000 ms) unless the script passes its own `timeout`, so a page that confirms after a server-side delay still passes.
 * The engine's `expect(...).toBeVisible()` shim treats a hidden radio or checkbox input as visible once one of its `<label>`s is visible, because styled choices (such as Tricentis price options) hide the native input permanently.
 * The execution API returns before the browser work finishes. Queue metadata is written to `public/artifacts/active_executions.json` for local recovery, and the active index is pruned.
