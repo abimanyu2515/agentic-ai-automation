@@ -22,10 +22,12 @@ This area contains pytest coverage for API routes, workflow agents, repositories
 * Include explicit project context in agent and execution fixtures.
 * Test JSON and PostgreSQL behavior separately when persistence or transaction handling is changed.
 * Keep credentials out of snapshots, logs, fixtures, and generated artifacts.
+* Swap the retriever with `set_retriever(InMemoryRetriever())` in knowledge tests.
 
 ## Gotchas
 
 * A successful unit test does not prove queue recovery or live PostgreSQL behavior.
 * The shared scenario fixture requires `path_type` because the scenario schema validates it.
+* `test_object_harvest_browser.py` launches Chromium and skips when no browser is installed, so a green run without a browser does not cover harvesting.
 
 _Drafted by /audit from the repo, worth a quick human pass. Edit freely: once a line stops matching it, later runs treat it as curated and will flag rather than overwrite it._

@@ -1,9 +1,10 @@
 import { API } from './api.js?v=22';
 import { ChatPanel } from './chat.js?v=3';
 import { OpenRows, ROW_VIEWS } from './chat-context.js?v=1';
-import { ObjectRepositoryView } from './object-repository.js?v=6';
+import { ObjectRepositoryView } from './object-repository.js?v=7';
 import { TokenUtilizationView } from './token-utilization.js?v=1';
 import { Components, escapeHTML } from './components.js?v=6';
+import { initSidebarToggle } from './sidebar-toggle.js?v=1';
 
 // Permissions behind buttons that tables render after login (spec 0009, AC-10).
 const PERMISSION_GATED_ACTIONS = [
@@ -5353,6 +5354,7 @@ window.resetDemoData = async () => {
 };
 
 window.addEventListener('DOMContentLoaded', () => {
+  initSidebarToggle();
   const app = new App();
   window.appInstance = app;
   app.init().catch(console.error);

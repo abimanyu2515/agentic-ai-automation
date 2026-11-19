@@ -26,6 +26,14 @@ Services contain backend business behavior that supports API routes and workflow
 | `backend/services/script_generation_jobs.py` | In memory background jobs for live verified script generation; the page polls them |
 | `backend/services/execution_service.py` | Batch execution runs and their live event logs |
 | `backend/services/dashboard_metrics.py` | Dashboard metric computation, shared by the dashboard and chat tools |
+| `backend/services/object_repository_service.py` | Object repository rules: CRUD, recon and harvest ingest (`ingest_recon`), run markers, detection score |
+| `backend/services/object_repository_script.py` | Inserts (render) and removes (strip) the `orx` block in scripts, and rewrites recorded selectors to keys |
+| `backend/services/object_repository_harvest.py` | Shared extractor loading, harvest parsing, redaction, and path normalization |
+| `backend/services/object_repository_matcher.py` | `ObjectKeyResolver`: matches a recorded selector to a stored element by DOM node during generation |
+| `backend/services/object_repository_scan.py` | In memory Scan now jobs |
+| `backend/services/knowledge_service.py` | Per project knowledge base upload and search (spec 0006) |
+| `backend/services/knowledge_indexer.py` | Background worker that indexes project knowledge into RAGFlow |
+| `backend/services/retrieval/` | Retriever interface, RAGFlow implementation, and test doubles |
 
 ## Conventions
 
@@ -45,5 +53,10 @@ Services contain backend business behavior that supports API routes and workflow
 * The chat model can only propose an action through a `propose_<type>` tool. Nothing runs until the user confirms, and confirm runs the saved `params`, never values the browser sends.
 * Every chat tool checks that each ID belongs to the current project and never returns credentials, vault data, passwords, or API keys.
 * Script generation jobs live in memory. A backend restart loses running jobs, and polling then reports the job as not found.
+* Stored scripts hold object repository keys only. Strip happens only in `project_service`'s test case script update; render happens in the `TestCase` response mapper, the workspace responses, and `ExecutionAgent`. Never save a rendered script.
+* Only `ExecutionService.finalize_execution` applies `[OBJREPO]` markers, and only `ExecutionService.apply_object_repository_harvest` ingests harvests. A harvest error must never change a run's result or fail a webhook.
+* The `orx` strategy mapping exists in three places that must agree: the injected block in `object_repository_script.py`, `playwright_locator` in `object_repository_matcher.py`, and the in page match table in `backend/playwrightt/lib/object-harvest.js`.
+* Get the retriever with `get_retriever()`. With RAG off it is a `NullRetriever`.
+* Knowledge indexer queue items carry IDs only, and every remote RAGFlow delete is saved as a `KnowledgeRemoteDelete` row before it is sent (spec 0007).
 
 _Drafted by /audit from the repo, worth a quick human pass. Edit freely: once a line stops matching this draft, later runs treat it as curated and will flag rather than overwrite it._

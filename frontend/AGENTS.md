@@ -16,6 +16,7 @@ The frontend is a vanilla HTML, CSS, and JavaScript single page application serv
 | `frontend/js/chat.js` | Chat assistant floating button and panel (spec 0005) |
 | `frontend/js/chat-context.js` | Pure open item bookkeeping per list view, sent to chat as view context |
 | `frontend/js/object-repository.js` | Object repository view |
+| `frontend/js/sidebar-toggle.js` | Sidebar open/close button, Ctrl+B shortcut, and the collapsed state hint in `localStorage` |
 | `frontend/css/styles.css` | Global layout, themes, forms, tables, and dashboard styling |
 
 ## Conventions

@@ -37,11 +37,17 @@
   padding: 0;
 }
 
+html {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   font-family: var(--font-family);
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  overflow-x: hidden;
+  /* The page itself never scrolls: the sidebar nav and .workspace own their scrolling. */
+  overflow: hidden;
   height: 100vh;
   display: flex;
 }
@@ -70,9 +76,43 @@ aside.sidebar {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+  transition: width var(--transition-normal), border-color var(--transition-normal);
+}
+
+/* Collapsed sidebar: slides to zero width; the toggle lives in the top nav. */
+body.sidebar-collapsed aside.sidebar {
+  width: 0;
+  border-right-color: transparent;
+}
+
+aside.sidebar > * {
+  min-width: 260px;
+}
+
+.sidebar-toggle {
+  padding: 6px;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle svg {
+  width: 20px;
+  height: 20px;
+}
+
+.sidebar-toggle:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  aside.sidebar { transition: none; }
 }
 
 .sidebar-header {
+  flex-shrink: 0;
   padding: 24px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
@@ -99,7 +139,14 @@ nav.sidebar-nav {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  flex-grow: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+nav.sidebar-nav > .nav-item {
+  flex-shrink: 0;
 }
 
 .nav-item {
@@ -173,6 +220,8 @@ main.main-content {
   flex-direction: column;
   overflow: hidden;
   height: 100vh;
+  min-width: 0;
+  position: relative;
 }
 
 header.top-nav {
@@ -269,7 +318,13 @@ header.top-nav {
 .workspace {
   flex-grow: 1;
   padding: 32px;
+  min-height: 0;
   overflow-y: auto;
+  /* Containing block for absolutely positioned descendants (visually hidden labels,
+     hidden file inputs). Without it they are placed against the document and push it
+     taller than the viewport, which lets the whole page scroll. */
+  position: relative;
+  overscroll-behavior: contain;
   background-color: var(--bg-primary);
 }
 
