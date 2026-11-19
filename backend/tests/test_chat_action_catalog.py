@@ -106,6 +106,12 @@ class FakeProjectService:
         self.added.append({"test_case_id": test_case_id, **fields})
         return SimpleNamespace(id=test_case_id, title="Case", scenario_id=uuid4())
 
+    def update_scenario(self, scenario_id, **fields):
+        self.added.append({"scenario_id": scenario_id, **fields})
+        return SimpleNamespace(
+            id=scenario_id, scenario_name="Valid sign in", requirement_id=uuid4(), jira_issue_key=None,
+        )
+
 
 class FakeScriptJobs:
     def __init__(self):
@@ -162,6 +168,7 @@ def world(tmp_path):
     execution_events: dict = {}
     batch_events: dict = {}
     audits: list = []
+    jira_syncs: list = []
     executor = ChatActionExecutor(
         project_repository=repo,
         workflow_service=SimpleNamespace(generate_scenarios=None),
@@ -172,6 +179,7 @@ def world(tmp_path):
         execution_service=FakeExecutionService(execution_events, batch_events),
         batch_events=batch_events,
         execution_events=execution_events,
+        scenario_sync=lambda scenario_id, created: jira_syncs.append((scenario_id, created)),
     )
     chats = JsonChatRepository(tmp_path / "chat_store.json")
     service = ChatService(
@@ -195,7 +203,7 @@ def world(tmp_path):
     return SimpleNamespace(
         project=project, requirement=requirement, scenario=scenario, cases=cases, repo=repo, executor=executor,
         chats=chats, service=service, user_id=user_id, card=card, confirm=confirm, audits=audits,
-        execution_events=execution_events, batch_events=batch_events,
+        execution_events=execution_events, batch_events=batch_events, jira_syncs=jira_syncs,
     )
 
 
@@ -314,6 +322,44 @@ def test_a_test_case_is_approved_or_rejected_through_the_button_service(world, d
     assert call["test_case_id"] == case.id
     assert call["evaluation_status"].value == decision
     assert action["result"]["summary"].startswith("Approved" if decision == "approved" else "Rejected")
+
+
+def test_a_scenario_is_approved_through_the_button_service_and_synced_to_jira(world):
+    message_id = world.card("review_scenario", {"scenario_id": str(world.scenario.id), "decision": "approved"})
+    action = world.confirm(message_id)
+    assert action["status"] == "succeeded"
+    (call,) = world.executor.project_service.added
+    assert call == {"scenario_id": world.scenario.id, "approved": True}
+    assert world.jira_syncs == [(world.scenario.id, True)]
+    assert action["result"]["summary"] == "Approved 'Valid sign in'"
+    assert action["result"]["link_view"] == "scenarios"
+
+
+def test_a_rejected_scenario_without_a_jira_issue_is_not_synced(world):
+    action = world.confirm(world.card("review_scenario", {"scenario_id": str(world.scenario.id), "decision": "rejected"}))
+    assert action["status"] == "succeeded"
+    (call,) = world.executor.project_service.added
+    assert call == {"scenario_id": world.scenario.id, "rejected": True}
+    assert world.jira_syncs == []
+    assert action["result"]["summary"].startswith("Rejected")
+
+
+def test_a_jira_failure_does_not_fail_the_scenario_approval(world):
+    def failing_sync(scenario_id, created):
+        raise RuntimeError("jira down")
+
+    world.executor._scenario_sync = failing_sync
+    action = world.confirm(world.card("review_scenario", {"scenario_id": str(world.scenario.id), "decision": "approved"}))
+    assert action["status"] == "succeeded"
+
+
+def test_scenario_review_rejects_unknown_scenarios_and_decisions(world):
+    with pytest.raises(ActionInvalid, match="scenario not found"):
+        world.executor.propose(world.project, "review_scenario", {"scenario_id": str(uuid4()), "decision": "approved"})
+    with pytest.raises(ActionInvalid, match="decision"):
+        world.executor.propose(world.project, "review_scenario", {
+            "scenario_id": str(world.scenario.id), "decision": "pending",
+        })
 
 
 def test_review_only_accepts_approve_or_reject(world):

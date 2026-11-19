@@ -203,7 +203,7 @@ def test_action_catalog_exposes_only_the_specified_action_tools():
 
     assert set(ACTION_CATALOG) == {
         "generate_scenarios", "generate_test_cases", "generate_script", "run_test_case", "run_batch",
-        "create_requirement", "update_requirement", "delete_requirement", "update_scenario",
+        "create_requirement", "update_requirement", "delete_requirement", "update_scenario", "review_scenario",
         "duplicate_scenario", "delete_scenario", "update_test_case", "review_test_case", "generate_test_data",
         "delete_test_case",
         "delete_execution", "delete_failed_executions",

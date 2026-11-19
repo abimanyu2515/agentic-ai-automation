@@ -158,6 +158,10 @@ function describeAction(action) {
     const title = params.decision === 'rejected' ? 'Reject test case' : 'Approve test case';
     return { title, listLabel: 'On:', list: targets };
   }
+  if (action.type === 'review_scenario') {
+    const title = params.decision === 'rejected' ? 'Reject scenario' : 'Approve scenario';
+    return { title, listLabel: 'On:', list: targets };
+  }
   if (action.type === 'generate_test_data') {
     return { title: 'Generate test data (20 datasets)', listLabel: 'For:', list: targets };
   }
@@ -215,7 +219,7 @@ export class ChatPanel {
         <div class="chat-messages"></div>
         <div class="chat-context" hidden></div>
         <form class="chat-form">
-          <textarea class="chat-input" rows="2" maxlength="4000" placeholder="Ask about this project"></textarea>
+          <textarea class="chat-input" rows="2" maxlength="4000" placeholder="Ask about this project (Enter to send, Shift+Enter for a new line)"></textarea>
           <div class="chat-form-actions">
             <span class="chat-hint"></span>
             <button type="button" class="btn btn-secondary chat-stop" hidden>Stop</button>
@@ -247,6 +251,12 @@ export class ChatPanel {
     root.querySelector('[data-chat="threads"]').addEventListener('click', () => this.toggleThreads());
     this.el.threadsMore.addEventListener('click', () => this.loadThreads(true));
     this.el.form.addEventListener('submit', e => { e.preventDefault(); this.send(); });
+    // Enter sends; Shift+Enter adds a line. Skip while an IME is composing text.
+    this.el.input.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+      e.preventDefault();
+      this.send();
+    });
     this.el.stop.addEventListener('click', () => this.stop());
     this.el.messages.addEventListener('click', e => this.onCardClick(e));
     this.el.messages.addEventListener('input', e => this.onCardInput(e));

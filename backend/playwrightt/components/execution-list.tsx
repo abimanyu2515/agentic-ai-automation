@@ -38,6 +38,17 @@ function formatDuration(seconds?: number): string {
   return `${mins}m ${secs}s`;
 }
 
+// Date and time, e.g. "19 Nov 2026, 3:42:10 pm", in the viewer's locale.
+function formatStarted(started?: string | number | Date): string {
+  if (!started) return '-';
+  const date = new Date(started);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString(undefined, {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', second: '2-digit',
+  });
+}
+
 export function ExecutionList({
   executions,
   queue,
@@ -104,7 +115,7 @@ export function ExecutionList({
                     {formatDuration(execution?.metadata?.duration)}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
-                    {execution?.metadata?.started ? new Date(execution.metadata.started).toLocaleTimeString() : '-'}
+                    {formatStarted(execution?.metadata?.started)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div

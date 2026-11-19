@@ -167,6 +167,15 @@ class DeleteRequirementParams(BaseModel):
     requirement_id: UUID
 
 
+class ReviewScenarioParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenario_id: UUID
+    decision: Literal["approved", "rejected"] = Field(
+        description="approved when the user asks to approve the scenario, rejected when they ask to reject it.",
+    )
+
+
 class DeleteScenarioParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -264,6 +273,11 @@ ACTION_CATALOG: dict[str, ActionSpec] = {
             "Scenarios", "edit", ("scenarios",), server_fields=frozenset({"old_values"}),
         ),
         ActionSpec(
+            "review_scenario",
+            "Propose approving or rejecting one scenario. Rejecting deletes the scenario's test cases.",
+            ReviewScenarioParams, "Scenarios", "edit", ("scenarios", "testcases"),
+        ),
+        ActionSpec(
             "duplicate_scenario", "Propose duplicating a scenario.", DeleteScenarioParams,
             "Scenarios", "create", ("scenarios",),
         ),
@@ -359,6 +373,16 @@ def _thread_runner(work: Callable[[], None]) -> None:
     threading.Thread(target=work, name="chat-action", daemon=True).start()
 
 
+def _sync_scenario_to_jira(scenario_id: UUID, created: bool) -> None:
+    """The Jira sync the scenario update route queues after a review. Runs in
+    the action's worker thread, which has no event loop of its own."""
+    import asyncio
+
+    from backend.services.jira_sync_service import sync_scenario_created, sync_scenario_updated
+
+    asyncio.run((sync_scenario_created if created else sync_scenario_updated)(scenario_id))
+
+
 class ChatActionExecutor:
     """Builds proposals, rechecks them at confirm, and runs confirmed work."""
 
@@ -373,6 +397,7 @@ class ChatActionExecutor:
         execution_service=None,
         batch_events: dict | None = None,
         execution_events: dict | None = None,
+        scenario_sync: Callable[[UUID, bool], None] | None = None,
     ):
         self._repo = project_repository
         # A service or a zero argument callable returning one, so the app can
@@ -387,6 +412,9 @@ class ChatActionExecutor:
         # batches (keyed by batch ID). Tests pass plain dicts.
         self._batch_events = batch_events
         self._execution_events = execution_events
+        # Jira sync after a scenario review, as the Scenarios screen does.
+        # Tests pass a stub so no Jira call is made.
+        self._scenario_sync = scenario_sync or _sync_scenario_to_jira
 
     @property
     def repo(self):
@@ -776,6 +804,34 @@ class ChatActionExecutor:
         if updated is None:
             raise ActionInvalid(CHANGED_MESSAGE)
         return {"summary": f"Updated {len(params['changes'])} fields on '{updated.scenario_name}'", "link_view": "scenarios", "link_id": str(updated.requirement_id)}
+
+    def _resolve_review_scenario(self, project, params: ReviewScenarioParams) -> dict:
+        scenario = self._scenario(project, params.scenario_id)
+        return {"params": params.model_dump(mode="json"), "targets": [self._target("scenario", scenario)], "danger": "change"}
+
+    def _run_review_scenario(self, project, action: dict, user_id) -> dict:
+        params = action["params"]
+        scenario = self._scenario(project, UUID(params["scenario_id"]))
+        had_jira_issue = bool(getattr(scenario, "jira_issue_key", None))
+        approved = params["decision"] == "approved"
+        # Same call as the approve and reject buttons on the Scenarios screen.
+        # Rejecting removes the scenario's test cases, so read them first.
+        removed = [] if approved else self.repo.get_test_cases(scenario.id)
+        updated = self.project_service.update_scenario(
+            scenario_id=scenario.id, **({"approved": True} if approved else {"rejected": True}),
+        )
+        if updated is None:
+            raise ActionInvalid(CHANGED_MESSAGE)
+        if removed:
+            queue_test_case_removals(project.id, removed)
+        if approved or getattr(updated, "jira_issue_key", None):
+            try:
+                self._scenario_sync(updated.id, approved and not had_jira_issue)
+            except Exception:
+                # The review is saved; a Jira failure is logged, not reported as a failed action.
+                logger.exception("Jira sync failed after chat review of scenario %s", updated.id)
+        verb = "Approved" if approved else "Rejected"
+        return {"summary": f"{verb} '{updated.scenario_name}'", "link_view": "scenarios", "link_id": str(updated.requirement_id)}
 
     def _resolve_duplicate_scenario(self, project, params: DeleteScenarioParams) -> dict:
         scenario = self._scenario(project, params.scenario_id)
