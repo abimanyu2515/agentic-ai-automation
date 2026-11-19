@@ -323,7 +323,8 @@ function PlaywrightWorkspaceContent() {
   const handleFreeze = async () => {
     if (!testCaseId) return;
     try {
-      const response = await fetch(`${getBackendUrl()}/api/v1/playwright/freeze`, {
+      // The workspace server route adds the secret (spec 0009, AC-9).
+      const response = await fetch('/api/playwright/freeze', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -346,7 +347,8 @@ function PlaywrightWorkspaceContent() {
     setSaveSuccess(false);
     setError(null);
     try {
-      const response = await fetch(`${getBackendUrl()}/api/v1/playwright/script`, {
+      // The workspace server route adds the secret (spec 0009, AC-9).
+      const response = await fetch('/api/playwright/script', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

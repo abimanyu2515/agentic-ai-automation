@@ -4,6 +4,64 @@ Base URL: `/api/v1`
 
 Authentication: JWT Bearer token in `Authorization` header.
 
+## Access control on data changing routes
+
+Spec 0009. Every `POST`, `PUT`, `PATCH`, and `DELETE` route checks its caller. The only open ones are `POST /auth/login` and `POST /auth/refresh`. A pytest route audit (`backend/tests/test_route_audit.py`) fails when a new data changing route has no login or secret check.
+
+**User routes** run their checks in this order, and a refused request starts no generation, execution, or queued job:
+
+| Order | Check | Result when it fails |
+|---|---|---|
+| 1 | A valid bearer token | `401` |
+| 2 | The route's module and action (project role first, then global role; Superadmin always) | `403` `Access Denied: Role '<role>' does not have '<action>' permission for '<module>'` |
+| 3 | The project exists | `404` `Project not found` |
+| 4 | Project access: Superadmin, Admin, the project owner, or a project assignment | `403` `You do not have access to this project.` |
+| 5 | Every requirement, scenario, test case, or execution named in the path or body belongs to the project | `404` `<Record> not found` |
+| 6 | Body validation | `422` |
+
+A test case resolves to its project through scenario, requirement, project. A broken or deleted link anywhere in that chain counts as not found. Routes with no `project_id` in the path (scenario notes, test case notes, release cycles, freeze, script) first resolve the project from the record (`404` when the record is missing), then run checks 2 and 4 against it.
+
+| Route | Permission |
+|---|---|
+| `POST /projects/{id}/requirements`, `/requirements/import`, `/requirements/import-jira` | `Requirements.create` |
+| `POST /projects/{id}/requirements/{rid}/generate-backlog` | `Requirements.create` |
+| `POST /projects/{id}/requirements/{rid}/sync-jira` | `Requirements.edit` |
+| `POST /projects/{id}/requirements/{rid}/generate-scenarios` | `Scenarios.create` |
+| `PUT /projects/{id}/scenarios/{sid}` | `Scenarios.edit` |
+| `DELETE /projects/{id}/scenarios/{sid}` | `Scenarios.delete` |
+| `POST /projects/{id}/scenarios/duplicate/{sid}` | `Scenarios.create` |
+| `POST /scenarios/{sid}/notes` | `Scenarios.edit` |
+| `POST /projects/{id}/requirements/{rid}/generate-testcases`, `/generate-testdata-tests` | `TestCases.create` |
+| `POST /projects/{id}/requirements/{rid}/testcases/{tid}/generate-testdata` | `TestCases.edit` |
+| `POST /projects/{id}/requirements/{rid}/testcases/{tid}/generate-testdata-script` | `Playwright.create` |
+| `POST /testcases/{tid}/notes` | `TestCases.edit` |
+| `POST /projects/{id}/testcases/{tid}/generate-script`, `/generate-script/jobs` | `Playwright.create` |
+| `POST /projects/{id}/import-framework` | `Playwright.create` |
+| `PUT /playwright/freeze`, `PUT /playwright/script` | `TestCases.edit`, or the workspace secret |
+| `POST /projects/{id}/testcases/{tid}/execute`, `POST /projects/{id}/batches/execute` | `Executions.create` |
+| `POST /projects/{id}/executions/{eid}/sync-bug` | `Executions.edit` |
+| `POST /projects/{id}/releases`, `POST /releases/{rid}/cycles` | `Executions.create` |
+| `POST /projects/{id}/users` | `Users.edit` plus project access |
+| Object repository `POST`, `PATCH`, `DELETE` | `ObjectRepository.*` plus project access |
+| `POST`, `DELETE /external-tools`, `POST /admin/reset-demo-data` | `Settings.edit` (global) |
+
+`POST /projects/{id}/batches/execute`: an empty list or a malformed ID is `422`, and duplicate IDs count once, all before the ownership check. One test case from another project refuses the whole batch with `404`, and nothing is queued.
+
+**Machine routes** prove the caller with a shared secret in the `X-Webhook-Secret` header, compared in constant time:
+
+| Route | Secret |
+|---|---|
+| `POST /projects/{id}/executions/webhook` | `WORKSPACE_WEBHOOK_SECRET` |
+| `GET /projects/{id}/credentials` | `WORKSPACE_WEBHOOK_SECRET` |
+| `PUT /playwright/freeze`, `PUT /playwright/script` | `WORKSPACE_WEBHOOK_SECRET`, or a signed in user |
+| `POST /webhooks/jira` | `JIRA_WEBHOOK_SECRET`, from the header or the `secret` query parameter |
+
+A missing or wrong secret returns `401`. An empty secret variable returns `503` `Webhook secret not configured: <VAR>` (the routes stay closed), and startup logs one warning per empty variable. The access log masks `?secret=` as `secret=***`.
+
+**Refusal log**: every `401` from a bad secret and every `403` writes one warning: `Request refused reason=<no_permission|no_project_access|bad_secret> user_id=<id or machine> role=<role, workspace, or jira> method=<method> path=<path without query> module=<module> action=<action> project_id=<id>`. It never includes a secret, token, or request body.
+
+**UI**: a `403` shows the backend's reason in a toast, and the view stays as it was. Buttons for generate, execute, scenario edit, delete and duplicate, requirement create and import, and release actions are hidden when the signed in role lacks their permission. The UI reads the role's permissions from `GET /api/v1/auth/me`, which any signed in user may call: it returns `id`, `email`, `full_name`, `role`, and `permissions`, a sorted list of `Module.action` strings for the user's global role (every permission for Superadmin). Hiding a button is only a convenience; the backend checks every request.
+
 ---
 
 ## Projects
@@ -586,7 +644,7 @@ Both `completed` payloads (passed and failed) carry an optional `harvest` list, 
 
 ### `GET /api/v1/object-repository/harvest-settings`
 
-No authentication (global settings, no secrets). The execution engine calls it at run start, like its credentials fetch.
+No authentication (global settings, no secrets). The execution engine calls it at run start, before its credentials fetch (which needs the workspace secret).
 
 ```json
 {"enabled": true, "max_pages": 20, "budget_ms": 5000}
@@ -876,14 +934,14 @@ Returns cycles across all releases for the project.
 GET /api/v1/projects/{project_id}/credentials
 ```
 
-Returns decrypted username and password from vault. Falls back to first non-null vault entry, then hardcoded defaults.
+For the Playwright workspace only: needs the `X-Webhook-Secret` header matching `WORKSPACE_WEBHOOK_SECRET` (`401` when missing or wrong, `503` when the variable is empty). Returns this project's own decrypted username and password from the vault. It never falls back to another project's credentials.
 
-**Response**: `200`
+**Response**: `200`, or `404` when the project has no stored credentials.
 
 ```json
 {
-  "username": "ADACTINFORQA",
-  "password": "hanish13"
+  "username": "qa-user",
+  "password": "********"
 }
 ```
 

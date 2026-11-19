@@ -428,7 +428,7 @@ def test_malformed_and_unknown_markers_are_skipped(service, project):
     assert service.apply_run_markers(project.id, uuid4(), lines) == 0
 
 
-def test_completed_webhook_applies_markers_once(repo, service, project):
+def test_completed_webhook_applies_markers_once(repo, service, project, webhook_headers):
     _, element = _login_button(service, project)
     case = _test_case(repo, project)
     payload = {
@@ -440,7 +440,7 @@ def test_completed_webhook_applies_markers_once(repo, service, project):
     }
     client = TestClient(app)
     for _ in range(2):
-        assert client.post(f"/api/v1/projects/{project.id}/executions/webhook", json=payload).status_code == 200
+        assert client.post(f"/api/v1/projects/{project.id}/executions/webhook", json=payload, headers=webhook_headers()).status_code == 200
     element = _element(service, project, element.id)
     assert element.health == "needs_review"
     assert element.locators[1].success_count == 1
@@ -670,26 +670,13 @@ def test_api_create_and_list(repo, project):
     assert client.post(f"{base}/scan").status_code == 409
 
 
-@pytest.fixture
-def seeded():
-    from backend.database.db import SessionLocal
-    from backend.database.db_seeder import seed_database
-
-    db = SessionLocal()
-    seed_database(db)
-    db.close()
-
-
-def _token(client, email, password):
-    return client.post("/api/v1/auth/login", json={"email": email, "password": password}).json()["access_token"]
-
-
-def test_permissions(seeded, repo, service, project):
+def test_permissions(sign_in, repo, service, project):
     _, element = _login_button(service, project)
     client = TestClient(app)
     base = f"/api/v1/projects/{project.id}/object-repository"
-    stakeholder = {"Authorization": f"Bearer {_token(client, 'stakeholder@agenticai.com', 'stakeholderpassword')}"}
-    tester = {"Authorization": f"Bearer {_token(client, 'tester@agenticai.com', 'testerpassword')}"}
+    stakeholder = sign_in("Stakeholder", projects=[project.id]).headers
+    tester = sign_in("Tester", projects=[project.id]).headers
+    outsider = sign_in("Tester").headers
 
     assert client.get(f"{base}/pages", headers=stakeholder).status_code == 200
     assert client.get(f"{base}/permissions", headers=stakeholder).json() == {"actions": ["view"]}
@@ -697,6 +684,8 @@ def test_permissions(seeded, repo, service, project):
     assert client.patch(f"{base}/elements/{element.id}", json={"description": "x"}, headers=stakeholder).status_code == 403
     assert client.patch(f"{base}/elements/{element.id}", json={"description": "x"}, headers=tester).status_code == 200
     assert client.delete(f"{base}/elements/{element.id}", headers=tester).status_code == 403
+    # Spec 0009: the permission alone is not enough without the project.
+    assert client.patch(f"{base}/elements/{element.id}", json={"description": "y"}, headers=outsider).status_code == 403
 
 
 # ----------------------------------------------------------------- AC-14
@@ -882,7 +871,7 @@ def test_apply_harvest_redacts_vault_credentials_and_test_data(repo, service, pr
     assert {e.name for e in page.elements} == {"search_x", "checkout"}
 
 
-def test_completed_webhook_ingests_harvest_from_passed_and_failed_runs(repo, service, project, vault):
+def test_completed_webhook_ingests_harvest_from_passed_and_failed_runs(repo, service, project, vault, webhook_headers):
     case = _test_case(repo, project)
     client = TestClient(app)
     for status, path in (("passed", "/inventory.html"), ("failed", "/cart.html")):
@@ -894,11 +883,11 @@ def test_completed_webhook_ingests_harvest_from_passed_and_failed_runs(repo, ser
             "logs": [],
             "harvest": [_snapshot(path, _recon(f"Open {path}"))],
         }
-        assert client.post(f"/api/v1/projects/{project.id}/executions/webhook", json=payload).status_code == 200
+        assert client.post(f"/api/v1/projects/{project.id}/executions/webhook", json=payload, headers=webhook_headers()).status_code == 200
     assert {p.url_pattern for p in service.load(project.id).active_pages()} == {"/inventory.html", "/cart.html"}
 
     garbage = {"event": "completed", "execution_id": str(uuid4()), "test_case_id": str(case.id), "status": "passed", "harvest": "nope"}
-    assert client.post(f"/api/v1/projects/{project.id}/executions/webhook", json=garbage).status_code == 200
+    assert client.post(f"/api/v1/projects/{project.id}/executions/webhook", json=garbage, headers=webhook_headers()).status_code == 200
 
 
 def test_harvest_kill_switch_turns_off_both_runners_and_ingest(repo, service, project, vault, monkeypatch):

@@ -321,7 +321,7 @@ def test_the_execution_delete_route_queues_the_removal_of_its_failure_entry(hook
 
 
 @pytest.mark.parametrize("status, queued", [("failed", True), ("timed_out", True), ("passed", False)])
-def test_the_workspace_webhook_queues_only_failed_runs_for_knowledge(hooks, monkeypatch, status, queued):
+def test_the_workspace_webhook_queues_only_failed_runs_for_knowledge(hooks, monkeypatch, status, queued, webhook_headers):
     # covers: AC-14, AC-15 (task 12b): the UI run save path through the workspace webhook.
     import backend.services.execution_service as execution_service
 
@@ -333,6 +333,7 @@ def test_the_workspace_webhook_queues_only_failed_runs_for_knowledge(hooks, monk
         f"/api/v1/projects/{project.id}/executions/webhook",
         json={"event": "completed", "execution_id": execution_id, "test_case_id": str(case.id),
               "status": status, "error_message": None if status == "passed" else "Pay button missing"},
+        headers=webhook_headers(),
     )
 
     assert response.status_code == 200
@@ -363,11 +364,11 @@ def test_the_scenario_delete_route_removes_its_test_cases_from_knowledge(hooks):
     assert _defect_jobs(hooks) == [(project.id, "BUG-7")]
 
 
-def test_the_jira_webhook_reindexes_every_linked_project_before_the_status_filter(hooks):
+def test_the_jira_webhook_reindexes_every_linked_project_before_the_status_filter(hooks, webhook_headers):
     project, _, _ = _seed(hooks.repo)
     other = hooks.repo.create_project(name="B", description="d", target_url="https://b.example.com")
     payload = {"issue": {"key": "BUG-1", "fields": {"status": {"name": "In Progress"}}}}
-    response = hooks.client.post("/api/v1/webhooks/jira", json=payload)
+    response = hooks.client.post("/api/v1/webhooks/jira", json=payload, headers=webhook_headers("jira"))
     assert response.json()["status"] == "ignored"  # not a resolved status, but still reindexed
     assert _defect_jobs(hooks) == [(project.id, "BUG-1")]
     assert all(p != other.id for p, _ in _defect_jobs(hooks))

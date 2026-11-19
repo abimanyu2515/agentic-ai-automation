@@ -196,6 +196,13 @@ class JiraConfig(BaseModel):
     resolved_statuses: list[str] = ["Done", "Closed", "Ready for Testing", "Resolved"]
 
 
+class WebhookConfig(BaseModel):
+    """Shared secrets for the machine callers (spec 0009). Read only from
+    .env, never from YAML. Empty means the routes they gate return 503."""
+    workspace_secret: str = ""
+    jira_secret: str = ""
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_nested_delimiter="__", extra="ignore")
 
@@ -216,6 +223,7 @@ class Settings(BaseSettings):
     object_repository: ObjectRepositoryConfig = ObjectRepositoryConfig()
     chat: ChatConfig = ChatConfig()
     token_usage: TokenUsageConfig = TokenUsageConfig()
+    webhooks: WebhookConfig = WebhookConfig()
     # Read only from .env (never override.yaml); filled from llm.* when unset.
     llm_roles: dict[str, LLMRoleConfig] = {}
 
@@ -313,6 +321,12 @@ class Settings(BaseSettings):
                     raw["jira"]["resolved_statuses"] = [s.strip() for s in env_resolved.split(",")]
             else:
                 raw["jira"]["resolved_statuses"] = [s.strip() for s in env_resolved.split(",")]
+
+        # Webhook secrets (spec 0009): .env only, so a YAML value is dropped.
+        raw["webhooks"] = {
+            "workspace_secret": (_env("WORKSPACE_WEBHOOK_SECRET") or "").strip(),
+            "jira_secret": (_env("JIRA_WEBHOOK_SECRET") or "").strip(),
+        }
 
         return cls(**raw)
 

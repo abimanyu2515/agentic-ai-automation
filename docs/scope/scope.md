@@ -17,7 +17,7 @@ _These recommendations keep the build orderly. You can skip any step that does n
 | 4 | Role based LLM routing | LLM reliability | in-progress |
 | 5 | Object repository | Locator reliability | in-progress |
 | 6 | Chat assistant | Assistant | in-progress |
-| 7 | Permission checks on data changing routes | Assistant | planned |
+| 7 | Permission checks on data changing routes | Assistant | in-progress |
 | 8 | Agentic RAG | Project knowledge | done |
 | 9 | Jira knowledge sources | Project knowledge | in-progress |
 | 10 | Failure analysis for UI and batch runs | Project knowledge | planned |
@@ -97,10 +97,17 @@ A floating chat button on every screen. The assistant answers questions about th
 - [ ] Verify it: `/check verify chat assistant`
 - [x] Test it: `/test chat assistant`
 
-### 7. Permission checks on data changing routes · planned · from spec 0005
+### 7. Permission checks on data changing routes · in-progress · from spec 0005
 Add `has_permission` checks to the routes that change data without one today (generate scenarios, generate test cases, execute, batch execute, scenario and test case edit and delete), so the UI enforces the same rules the chat assistant does.
 **Done when:** each of those routes checks its seeded module and action, and a user without the permission gets 403 in the UI as in chat.
 - [ ] Design it (spec): `/architect permission checks on data changing routes`
+- Spec: [0009](../specs/0009-route-permission-checks/index.md)
+- Code: `backend/dependencies/auth_dependencies.py`, `backend/main.py`, `backend/repository/`, `backend/config/settings.py`, `backend/tests/test_route_permissions.py`, `backend/tests/test_route_audit.py`, `backend/tests/conftest.py`, `frontend/js/api.js`, `frontend/js/components.js`, `frontend/js/app.js`, `backend/playwrightt/lib/backend-auth.ts`, `backend/playwrightt/lib/execution-engine.ts`, `backend/playwrightt/app/api/playwright/`, `backend/playwrightt/app/page.tsx`
+- [x] Build it: `/develop permission checks on data changing routes`
+  - [x] Generate scenarios end to end: login, permission, project access, ownership, refusal log, 403 toast, sign in fixture, grid tests, and the route audit, covering AC-1 to AC-4, AC-10 to AC-12
+  - [x] Every other user route, the record based routes, and the global admin routes, covering AC-1 to AC-5 and AC-13
+  - [x] Workspace and Jira secrets, the credentials lockdown, the access log mask, the freeze and script fix with the workspace proxy, covering AC-6 to AC-9 and AC-11
+  - [x] Hidden buttons, empty audit list, API and setup docs, covering AC-10, AC-12, AC-6, and AC-7
 
 ## Project knowledge
 

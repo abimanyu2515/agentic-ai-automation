@@ -35,6 +35,36 @@ def client():
     return TestClient(app)
 
 
+def _seed_chain(client, name="Chain Proj"):
+    """A real project -> requirement -> scenario -> test case chain. Data
+    changing routes check that each record belongs to the project (spec 0009, AC-4)."""
+    from backend.models.scenario import Scenario
+    from backend.models.test_case import TestCase
+
+    response = client.post(
+        "/api/v1/projects",
+        json={"name": name, "description": "d", "framework": "playwright",
+              "target_url": f"https://{name.lower().replace(' ', '-')}.example.com"},
+    )
+    assert response.status_code == 201
+    project_id = response.json()["id"]
+    response = client.post(
+        f"/api/v1/projects/{project_id}/requirements",
+        json={"title": "REQ", "description": "d", "priority": "high", "business_domain": "general"},
+    )
+    requirement_id = response.json()["id"]
+    repo = get_project_repository()
+    scenario = Scenario(requirement_id=requirement_id, scenario_name="S", description="d", approved=True)
+    repo.save_scenarios([scenario])
+    case = TestCase(
+        scenario_id=scenario.id, title="T", steps=["Step 1"], expected_result="Done",
+        evaluation_status="approved", confidence=1.0,
+        playwright_script="await page.goto('https://google.com');",
+    )
+    repo.save_test_cases([case])
+    return project_id, requirement_id, scenario.id, case.id
+
+
 def test_create_and_list_projects(client):
     # Check initially empty
     response = client.get("/api/v1/projects")
@@ -111,9 +141,7 @@ def test_generate_test_data_script_endpoint(client, monkeypatch):
     from backend.main import workflow_service
     from types import SimpleNamespace
 
-    project_id = uuid4()
-    requirement_id = uuid4()
-    test_case_id = uuid4()
+    project_id, requirement_id, _, test_case_id = _seed_chain(client)
     monkeypatch.setattr(
         workflow_service,
         "generate_test_data_script_for_test_case",
@@ -135,9 +163,7 @@ def test_generate_test_data_endpoint_reports_matching_script_readiness(client, m
     from backend.main import workflow_service
     from types import SimpleNamespace
 
-    project_id = uuid4()
-    requirement_id = uuid4()
-    test_case_id = uuid4()
+    project_id, requirement_id, _, test_case_id = _seed_chain(client)
     report = {"sample_dataset": {"rows": [{"test_data_id": "TD-001"}]}}
     monkeypatch.setattr(
         workflow_service,
@@ -424,9 +450,7 @@ def test_project_with_line_of_business(client):
 
 
 def test_notes_creation(client):
-    from uuid import uuid4
-    sc_id = uuid4()
-    tc_id = uuid4()
+    _, _, sc_id, tc_id = _seed_chain(client, "Notes Proj")
 
     # Create scenario notes
     response = client.post(f"/api/v1/scenarios/{sc_id}/notes", json={"note": "Scenario remark content"})
@@ -575,8 +599,12 @@ def test_batch_execution_endpoints(client):
     from uuid import uuid4
 
     repo = get_project_repository()
+    requirement_id = client.post(
+        f"/api/v1/projects/{proj_id}/requirements",
+        json={"title": "REQ", "description": "d", "priority": "high", "business_domain": "general"},
+    ).json()["id"]
     sc_id = uuid4()
-    scenario = Scenario(id=sc_id, requirement_id=uuid4(), scenario_name="API Scenario", description="desc", approved=True)
+    scenario = Scenario(id=sc_id, requirement_id=requirement_id, scenario_name="API Scenario", description="desc", approved=True)
     repo.save_scenarios([scenario])
 
     tc_id = uuid4()

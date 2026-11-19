@@ -2443,6 +2443,28 @@ body.light-theme {
 }
 
 .objrepo-toast[hidden] { display: none; }
+
+/* App wide toast (spec 0009, AC-10): same look as the object repository toast. */
+.app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 10000;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 16px;
+  border-radius: var(--border-radius-md);
+  border: 1px solid var(--border-focus);
+  border-left: 4px solid var(--accent-primary);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  animation: objrepo-toast-in 0.2s ease-out;
+}
+
+.app-toast[hidden] { display: none; }
+.app-toast[data-tone="error"] { border-left-color: var(--color-danger); }
 .objrepo-toast[data-tone="warning"] { border-left-color: var(--color-warning); }
 .objrepo-toast[data-tone="error"] { border-left-color: var(--color-danger); }
 

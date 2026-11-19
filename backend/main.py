@@ -169,7 +169,9 @@ import backend.services.report_service
 
 from sqlalchemy.orm import Session
 from backend.dependencies.auth_dependencies import (
-    check_permission, get_db, get_current_user, has_permission, permitted_actions, require_project_access,
+    authorize_project, check_permission, get_db, own_permissions, get_current_user, has_permission, install_access_log_filter,
+    permitted_actions, require_jira_secret, require_project_access, require_project_permission,
+    require_workspace_secret, warn_missing_webhook_secrets, workspace_or_user, Caller,
 )
 from backend.services.auth_service import hash_password, verify_password, create_access_token, create_refresh_token, decode_token
 from backend.services.audit_service import log_audit
@@ -303,6 +305,9 @@ def on_startup():
     from backend.database.db_seeder import seed_database
     if provider == "json":
         Base.metadata.create_all(engine)
+    # Spec 0009: mask `?secret=` in access lines and warn about empty secrets.
+    install_access_log_filter()
+    warn_missing_webhook_secrets()
     db = SessionLocal()
     try:
         seed_database(db)
@@ -917,8 +922,12 @@ def get_all_projects_dashboard_metrics():
 
 
 @app.get("/api/v1/auth/me")
-def get_me(user: UserDB = Depends(get_current_user)):
-    return {"id": str(user.id), "email": user.email, "full_name": user.full_name, "role": user.role}
+def get_me(user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    # `permissions` lets the UI hide actions for any role (spec 0009, AC-10).
+    return {
+        "id": str(user.id), "email": user.email, "full_name": user.full_name, "role": user.role,
+        "permissions": own_permissions(db, user),
+    }
 
 
 # ==========================================================
@@ -1111,7 +1120,10 @@ def get_external_tools():
 
 
 @app.post("/api/v1/external-tools", response_model=ExternalToolResponse, status_code=status.HTTP_201_CREATED)
-def create_external_tool(tool_config: ExternalToolConfig):
+def create_external_tool(
+    tool_config: ExternalToolConfig,
+    authorized: bool = Depends(has_permission("Settings", "edit")),
+):
     """Create a new external tool configuration."""
     try:
         save_external_tool_to_env(tool_config)
@@ -1130,7 +1142,10 @@ def create_external_tool(tool_config: ExternalToolConfig):
 
 
 @app.delete("/api/v1/external-tools/{tool_id}")
-def delete_external_tool(tool_id: str):
+def delete_external_tool(
+    tool_id: str,
+    authorized: bool = Depends(has_permission("Settings", "edit")),
+):
     """Delete an external tool configuration."""
     try:
         delete_external_tool_from_env(tool_id)
@@ -1146,7 +1161,11 @@ def get_releases(project_id: UUID):
 
 
 @app.post("/api/v1/projects/{project_id}/releases", response_model=ReleaseResponse, status_code=status.HTTP_201_CREATED)
-def create_release(project_id: UUID, data: ReleaseCreate):
+def create_release(
+    project_id: UUID,
+    data: ReleaseCreate,
+    user: UserDB = Depends(require_project_permission("Executions", "create")),
+):
     repo = project_service.repo
     return repo.create_release(
         project_id=project_id,
@@ -1165,8 +1184,19 @@ def get_test_cycles(release_id: UUID):
 
 
 @app.post("/api/v1/releases/{release_id}/cycles", response_model=TestCycleResponse, status_code=status.HTTP_201_CREATED)
-def create_test_cycle(release_id: UUID, data: TestCycleCreate):
+def create_test_cycle(
+    request: Request,
+    release_id: UUID,
+    data: TestCycleCreate,
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     repo = project_service.repo
+    # Spec 0009, AC-5: the project comes from the release.
+    release = repo.get_release(release_id)
+    if release is None:
+        raise HTTPException(status_code=404, detail="Release not found")
+    authorize_project(user, db, release.project_id, "Executions", "create", request)
     return repo.create_test_cycle(
         release_id=release_id,
         name=name if 'name' in locals() else data.name,
@@ -1218,7 +1248,11 @@ def get_requirements(project_id: UUID):
 
 
 @app.post("/api/v1/projects/{project_id}/requirements", response_model=RequirementResponse, status_code=status.HTTP_201_CREATED)
-def create_requirement(project_id: UUID, data: RequirementCreate):
+def create_requirement(
+    project_id: UUID,
+    data: RequirementCreate,
+    user: UserDB = Depends(require_project_permission("Requirements", "create")),
+):
     p = project_service.get_project(project_id)
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1259,7 +1293,12 @@ def create_requirement(project_id: UUID, data: RequirementCreate):
 
 
 @app.post("/api/v1/projects/{project_id}/requirements/import", response_model=list[RequirementResponse])
-async def import_requirements(project_id: UUID, release_id: UUID | None = None, file: UploadFile = File(...)):
+async def import_requirements(
+    project_id: UUID,
+    release_id: UUID | None = None,
+    file: UploadFile = File(...),
+    user: UserDB = Depends(require_project_permission("Requirements", "create")),
+):
     p = project_service.get_project(project_id)
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1319,7 +1358,12 @@ async def import_requirements(project_id: UUID, release_id: UUID | None = None, 
 
 
 @app.post("/api/v1/projects/{project_id}/requirements/import-jira", response_model=RequirementResponse)
-def import_jira_story(project_id: UUID, issue_key: str, release_id: UUID | None = None, user: UserDB = Depends(get_current_user)):
+def import_jira_story(
+    project_id: UUID,
+    issue_key: str,
+    release_id: UUID | None = None,
+    user: UserDB = Depends(require_project_permission("Requirements", "create")),
+):
     p = project_service.get_project(project_id)
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1383,7 +1427,13 @@ def import_jira_story(project_id: UUID, issue_key: str, release_id: UUID | None 
 
 
 @app.post("/api/v1/projects/{project_id}/requirements/{requirement_id}/generate-scenarios", response_model=list[ScenarioResponse])
-def generate_scenarios(project_id: UUID, requirement_id: UUID, payload: dict = Body(...)):
+def generate_scenarios(
+    project_id: UUID,
+    requirement_id: UUID,
+    payload: dict = Body(...),
+    user: UserDB = Depends(require_project_permission("Scenarios", "create")),
+):
+    _require_requirement_in_project(project_id, requirement_id)
     count = payload.get("count", 3)
     mode = payload.get("mode", "append")
     try:
@@ -1398,7 +1448,12 @@ def generate_scenarios(project_id: UUID, requirement_id: UUID, payload: dict = B
 
 
 @app.post("/api/v1/projects/{project_id}/requirements/{requirement_id}/generate-backlog", response_model=list[ScenarioResponse])
-def generate_backlog(project_id: UUID, requirement_id: UUID):
+def generate_backlog(
+    project_id: UUID,
+    requirement_id: UUID,
+    user: UserDB = Depends(require_project_permission("Requirements", "create")),
+):
+    _require_requirement_in_project(project_id, requirement_id)
     try:
         scenarios = workflow_service.generate_backlog(project_id, requirement_id)
         return [resolve_scenario_response(s) for s in scenarios]
@@ -1418,7 +1473,14 @@ def get_scenarios(project_id: UUID):
 
 
 @app.put("/api/v1/projects/{project_id}/scenarios/{scenario_id}", response_model=ScenarioResponse)
-def update_scenario(project_id: UUID, scenario_id: UUID, data: ScenarioUpdate, background_tasks: BackgroundTasks):
+def update_scenario(
+    project_id: UUID,
+    scenario_id: UUID,
+    data: ScenarioUpdate,
+    background_tasks: BackgroundTasks,
+    user: UserDB = Depends(require_project_permission("Scenarios", "edit")),
+):
+    _require_scenario_in_project(project_id, scenario_id)
     original = project_service.repo.get_scenario(scenario_id)
     updated = project_service.update_scenario(
         scenario_id=scenario_id,
@@ -1444,7 +1506,12 @@ def update_scenario(project_id: UUID, scenario_id: UUID, data: ScenarioUpdate, b
 
 
 @app.delete("/api/v1/projects/{project_id}/scenarios/{scenario_id}")
-def delete_scenario(project_id: UUID, scenario_id: UUID):
+def delete_scenario(
+    project_id: UUID,
+    scenario_id: UUID,
+    user: UserDB = Depends(require_project_permission("Scenarios", "delete")),
+):
+    _require_scenario_in_project(project_id, scenario_id)
     # Its test cases are soft deleted with it, so read them first to drop their knowledge entries.
     test_cases = get_project_repository().get_test_cases(scenario_id)
     success = project_service.delete_scenario(scenario_id)
@@ -1455,15 +1522,25 @@ def delete_scenario(project_id: UUID, scenario_id: UUID):
 
 
 @app.post("/api/v1/projects/{project_id}/scenarios/duplicate/{scenario_id}", response_model=ScenarioResponse)
-def duplicate_scenario(project_id: UUID, scenario_id: UUID):
+def duplicate_scenario(
+    project_id: UUID,
+    scenario_id: UUID,
+    user: UserDB = Depends(require_project_permission("Scenarios", "create")),
+):
+    _require_scenario_in_project(project_id, scenario_id)
     duplicated = project_service.duplicate_scenario(scenario_id)
     if not duplicated:
         raise HTTPException(status_code=404, detail="Scenario not found")
-        return resolve_scenario_response(duplicated)
+    return resolve_scenario_response(duplicated)
 
 
 @app.post("/api/v1/projects/{project_id}/requirements/{requirement_id}/generate-testcases", response_model=list[TestCaseResponse])
-def generate_test_cases(project_id: UUID, requirement_id: UUID):
+def generate_test_cases(
+    project_id: UUID,
+    requirement_id: UUID,
+    user: UserDB = Depends(require_project_permission("TestCases", "create")),
+):
+    _require_requirement_in_project(project_id, requirement_id)
     try:
         test_cases = workflow_service.generate_test_cases(project_id, requirement_id)
         renderer = object_repository_service.renderer()
@@ -1484,7 +1561,9 @@ def generate_test_data_tests(
     project_id: UUID,
     requirement_id: UUID,
     generate_scripts: bool = True,
+    user: UserDB = Depends(require_project_permission("TestCases", "create")),
 ):
+    _require_requirement_in_project(project_id, requirement_id)
     try:
         report, test_cases = workflow_service.generate_test_data_test_cases(
             project_id, requirement_id, generate_scripts=generate_scripts
@@ -1512,7 +1591,10 @@ def generate_test_data_for_test_case(
     project_id: UUID,
     requirement_id: UUID,
     test_case_id: UUID,
+    user: UserDB = Depends(require_project_permission("TestCases", "edit")),
 ):
+    _require_requirement_in_project(project_id, requirement_id)
+    _require_test_case_in_project(project_id, test_case_id)
     try:
         report, test_case = workflow_service.generate_test_data_for_test_case(
             project_id,
@@ -1543,7 +1625,10 @@ def generate_test_data_script_for_test_case(
     project_id: UUID,
     requirement_id: UUID,
     test_case_id: UUID,
+    user: UserDB = Depends(require_project_permission("Playwright", "create")),
 ):
+    _require_requirement_in_project(project_id, requirement_id)
+    _require_test_case_in_project(project_id, test_case_id)
     try:
         test_case = workflow_service.generate_test_data_script_for_test_case(
             project_id,
@@ -1575,10 +1660,50 @@ def get_test_cases(project_id: UUID):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# Ownership (spec 0009, AC-4 and AC-5). Neither a scenario nor a test case
+# stores a project_id, so each resolves up its parent chain:
+# test case -> scenario -> requirement -> project. A missing or deleted link
+# anywhere in that chain means "not found".
+
+
+def _project_of_scenario(scenario_id: UUID) -> UUID | None:
+    repo = get_project_repository()
+    scenario = repo.get_scenario(scenario_id)
+    if scenario is None:
+        return None
+    # The JSON store's get_scenario also returns soft deleted rows; the
+    # requirement's scenario list never does, in either store.
+    if not any(s.id == scenario_id for s in repo.get_scenarios(scenario.requirement_id)):
+        return None
+    return repo.get_requirement_project_id(scenario.requirement_id)
+
+
+def _project_of_test_case(test_case_id: UUID) -> UUID | None:
+    test_case = get_project_repository().get_test_case(test_case_id)
+    if test_case is None:
+        return None
+    return _project_of_scenario(test_case.scenario_id)
+
+
+def _require_requirement_in_project(project_id: UUID, requirement_id: UUID) -> None:
+    if get_project_repository().get_requirement_project_id(requirement_id) != project_id:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+
+def _require_scenario_in_project(project_id: UUID, scenario_id: UUID) -> None:
+    if _project_of_scenario(scenario_id) != project_id:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+
+
 def _require_test_case_in_project(project_id: UUID, test_case_id: UUID) -> None:
     """404 unless the test case belongs to this project, so a project grant never reaches another project's test case."""
-    if not any(tc.id == test_case_id for tc in project_service.get_test_cases_for_project(project_id)):
+    if _project_of_test_case(test_case_id) != project_id:
         raise HTTPException(status_code=404, detail="Test case not found")
+
+
+def _require_execution_in_project(project_id: UUID, execution_id: UUID) -> None:
+    if get_project_repository().get_execution_result(project_id, execution_id) is None:
+        raise HTTPException(status_code=404, detail="Execution not found")
 
 
 @app.put("/api/v1/projects/{project_id}/testcases/{test_case_id}", response_model=TestCaseResponse)
@@ -1754,37 +1879,19 @@ def read_settings():
 
 
 @app.get("/api/v1/projects/{project_id}/credentials")
-def get_project_credentials(project_id: UUID):
+def get_project_credentials(project_id: UUID, caller: str = Depends(require_workspace_secret)):
+    """Decrypted credentials for the workspace only (spec 0009, AC-6). Only
+    this project's own vault entry; 404 when it has none, never another
+    project's credentials."""
+    from backend.services.vault_service import VaultService
+
     try:
-        from backend.services.vault_service import VaultService
         username, password = VaultService().get_credentials(str(project_id))
-        
-        # Fallback to first non-null credentials in vault
-        if not username or not password:
-            vault = VaultService()._read_vault()
-            for pid, creds in vault.items():
-                from backend.utils.crypto import decrypt_value
-                u = decrypt_value(creds.get("username_enc"))
-                p = decrypt_value(creds.get("password_enc"))
-                if u and p:
-                    username = u
-                    password = p
-                    break
-                    
-        # No hardcoded demo-app fallback: credentials must come from the
-        # project's vault. Return None when unset so callers handle it
-        # explicitly (e.g. placeholder credentials in generated scripts).
-        if not username or not password:
-            username = username or None
-            password = password or None
-            
-        return {
-            "username": username,
-            "password": password
-        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+    if not username and not password:
+        raise HTTPException(status_code=404, detail="No credentials stored for this project")
+    return {"username": username or None, "password": password or None}
 
 
 @app.put("/api/v1/settings")
@@ -1900,6 +2007,7 @@ def import_framework(
     project_id: UUID,
     file: UploadFile = File(None),
     git_url: str = Body(None),
+    user: UserDB = Depends(require_project_permission("Playwright", "create")),
 ):
     import os
     import tempfile
@@ -1967,7 +2075,13 @@ class ScriptValidationBatchRequest(BaseModel):
 
 
 @app.post("/api/v1/projects/{project_id}/testcases/{test_case_id}/generate-script", response_model=TestCaseResponse)
-def generate_playwright_script(project_id: UUID, test_case_id: UUID, payload: GenerateScriptPayload = Body(default=GenerateScriptPayload())):
+def generate_playwright_script(
+    project_id: UUID,
+    test_case_id: UUID,
+    payload: GenerateScriptPayload = Body(default=GenerateScriptPayload()),
+    user: UserDB = Depends(require_project_permission("Playwright", "create")),
+):
+    _require_test_case_in_project(project_id, test_case_id)
     try:
         updated_tc = workflow_service.generate_playwright_script(project_id, test_case_id, automation_framework=payload.framework)
         return _test_case_response(updated_tc)
@@ -1998,9 +2112,10 @@ def start_script_generation_job(
     project_id: UUID,
     test_case_id: UUID,
     payload: GenerateScriptPayload = Body(default=GenerateScriptPayload()),
-    user: UserDB = Depends(get_current_user),
+    user: UserDB = Depends(require_project_permission("Playwright", "create")),
 ):
     """Start script generation in the background; poll the returned job until it finishes."""
+    _require_test_case_in_project(project_id, test_case_id)
     job = script_generation_jobs.start(project_id, test_case_id, payload.framework)
     return _script_generation_job_response(job)
 
@@ -2068,8 +2183,15 @@ def validate_project_scripts(
 
 
 @app.post("/api/v1/projects/{project_id}/testcases/{test_case_id}/execute")
-def execute_test_case(project_id: UUID, test_case_id: UUID, background_tasks: BackgroundTasks):
+def execute_test_case(
+    project_id: UUID,
+    test_case_id: UUID,
+    background_tasks: BackgroundTasks,
+    user: UserDB = Depends(require_project_permission("Executions", "create")),
+):
     from backend.services.execution_service import ExecutionService
+
+    _require_test_case_in_project(project_id, test_case_id)
 
     try:
         execution_id = ExecutionService().start_test_case_run(
@@ -2111,12 +2233,26 @@ from backend.services.execution_service import active_batch_events
 
 
 @app.post("/api/v1/projects/{project_id}/batches/execute")
-def execute_batch(project_id: UUID, test_case_ids: list[UUID], background_tasks: BackgroundTasks):
+def execute_batch(
+    project_id: UUID,
+    test_case_ids: list[UUID],
+    background_tasks: BackgroundTasks,
+    user: UserDB = Depends(require_project_permission("Executions", "create")),
+):
     from backend.services.execution_service import ExecutionService
+
+    # Spec 0009, AC-4: an empty list is a 422 and duplicates count once, both
+    # before ownership. One foreign test case refuses the whole batch.
+    if not test_case_ids:
+        raise HTTPException(status_code=422, detail="test_case_ids must name at least one test case")
+    unique_ids = list(dict.fromkeys(test_case_ids))
+    owned = {tc.id for tc in project_service.get_test_cases_for_project(project_id)}
+    if any(test_case_id not in owned for test_case_id in unique_ids):
+        raise HTTPException(status_code=404, detail="Test case not found")
 
     try:
         batch_id = ExecutionService().start_batch_run(
-            project_id, test_case_ids, background_tasks, enforce_project_scope=False,
+            project_id, unique_ids, background_tasks, enforce_project_scope=False,
         )
     except ProjectConfigurationError as exc:
         return JSONResponse(status_code=exc.status_code, content=exc.as_detail())
@@ -2501,7 +2637,18 @@ def get_scenario_notes(scenario_id: UUID):
 
 
 @app.post("/api/v1/scenarios/{scenario_id}/notes")
-def add_scenario_note(scenario_id: UUID, payload: dict = Body(...)):
+def add_scenario_note(
+    request: Request,
+    scenario_id: UUID,
+    payload: dict = Body(...),
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Spec 0009, AC-5: the project comes from the scenario.
+    project_id = _project_of_scenario(scenario_id)
+    if project_id is None:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    authorize_project(user, db, project_id, "Scenarios", "edit", request)
     note = payload.get("note")
     if not note:
         raise HTTPException(status_code=400, detail="Note content is required")
@@ -2515,7 +2662,18 @@ def get_test_case_notes(test_case_id: UUID):
 
 
 @app.post("/api/v1/testcases/{test_case_id}/notes")
-def add_test_case_note(test_case_id: UUID, payload: dict = Body(...)):
+def add_test_case_note(
+    request: Request,
+    test_case_id: UUID,
+    payload: dict = Body(...),
+    user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Spec 0009, AC-5: the project comes from the test case.
+    project_id = _project_of_test_case(test_case_id)
+    if project_id is None:
+        raise HTTPException(status_code=404, detail="Test case not found")
+    authorize_project(user, db, project_id, "TestCases", "edit", request)
     note = payload.get("note")
     if not note:
         raise HTTPException(status_code=400, detail="Note content is required")
@@ -2589,43 +2747,66 @@ def get_playwright_workspace(
     }
 
 
+class FreezeScriptBody(BaseModel):
+    test_case_id: UUID
+    is_frozen: bool = True
+
+
+class SaveScriptBody(BaseModel):
+    project_id: UUID
+    test_case_id: UUID
+    script: str
+
+
 @app.put("/api/v1/playwright/freeze")
-def freeze_playwright_script(payload: dict = Body(...)):
-    test_case_id = payload.get("test_case_id")
-    is_frozen = payload.get("is_frozen", True)
-    if not test_case_id:
-        raise HTTPException(status_code=400, detail="test_case_id is required")
-    
-    tc = project_service.get_test_case(UUID(test_case_id))
+def freeze_playwright_script(
+    request: Request,
+    caller: Caller = Depends(workspace_or_user(FreezeScriptBody)),
+):
+    """The workspace secret or a user with TestCases.edit on the test case's project (spec 0009, AC-9)."""
+    payload: FreezeScriptBody = caller.payload
+    project_id = _project_of_test_case(payload.test_case_id)
+    if project_id is None:
+        raise HTTPException(status_code=404, detail="Test case not found")
+    if not caller.is_workspace:
+        authorize_project(caller.user, caller.db, project_id, "TestCases", "edit", request)
+
+    tc = project_service.get_test_case(payload.test_case_id)
     if not tc:
         raise HTTPException(status_code=404, detail="Test case not found")
-    
-    tc.is_frozen = is_frozen
+    tc.is_frozen = payload.is_frozen
     project_service.repo.update_test_case(tc)
     return {"status": "success", "is_frozen": tc.is_frozen}
 
 
 @app.put("/api/v1/playwright/script")
-def save_playwright_script(payload: dict = Body(...)):
-    project_id = payload.get("project_id")
-    test_case_id = payload.get("test_case_id")
-    script = payload.get("script")
-    if not project_id or not test_case_id or script is None:
-        raise HTTPException(status_code=400, detail="project_id, test_case_id, and script are required")
-    
-    tc = project_service.get_test_case(UUID(test_case_id))
+def save_playwright_script(
+    request: Request,
+    caller: Caller = Depends(workspace_or_user(SaveScriptBody)),
+):
+    """The body project_id must own the test case; it is never trusted alone (spec 0009, AC-9)."""
+    payload: SaveScriptBody = caller.payload
+    if _project_of_test_case(payload.test_case_id) != payload.project_id:
+        raise HTTPException(status_code=404, detail="Test case not found")
+    if not caller.is_workspace:
+        authorize_project(caller.user, caller.db, payload.project_id, "TestCases", "edit", request)
+
+    tc = project_service.get_test_case(payload.test_case_id)
     if tc and (tc.is_frozen or tc.evaluation_status == "approved"):
         raise HTTPException(status_code=403, detail="Cannot modify script because it is frozen or approved")
 
-    from uuid import UUID
-    updated = project_service.update_test_case_script(UUID(test_case_id), script)
+    updated = project_service.update_test_case_script(payload.test_case_id, payload.script)
     if not updated:
         raise HTTPException(status_code=404, detail="Test case not found")
     return {"status": "success"}
 
 
 @app.post("/api/v1/projects/{project_id}/executions/webhook")
-def process_execution_webhook(project_id: UUID, payload: dict = Body(...)):
+def process_execution_webhook(
+    project_id: UUID,
+    payload: dict = Body(...),
+    caller: str = Depends(require_workspace_secret),
+):
     from backend.services.execution_service import ExecutionService
     from backend.services.workflow_service import active_execution_events
     
@@ -2790,9 +2971,8 @@ def list_object_pages(
 def create_object_page(
     project_id: UUID,
     payload: PageCreate,
-    user: UserDB = Depends(get_current_user),
+    user: UserDB = Depends(require_project_permission("ObjectRepository", "create")),
     db: Session = Depends(get_db),
-    authorized: bool = Depends(has_permission("ObjectRepository", "create")),
 ):
     try:
         page = object_repository_service.create_page(
@@ -2809,9 +2989,8 @@ def update_object_page(
     project_id: UUID,
     page_id: UUID,
     payload: PageUpdate,
-    user: UserDB = Depends(get_current_user),
+    user: UserDB = Depends(require_project_permission("ObjectRepository", "edit")),
     db: Session = Depends(get_db),
-    authorized: bool = Depends(has_permission("ObjectRepository", "edit")),
 ):
     try:
         page, rewritten = object_repository_service.update_page(
@@ -2827,9 +3006,8 @@ def update_object_page(
 def delete_object_page(
     project_id: UUID,
     page_id: UUID,
-    user: UserDB = Depends(get_current_user),
+    user: UserDB = Depends(require_project_permission("ObjectRepository", "delete")),
     db: Session = Depends(get_db),
-    authorized: bool = Depends(has_permission("ObjectRepository", "delete")),
 ):
     try:
         deleted, references = object_repository_service.delete_page(
@@ -2862,9 +3040,8 @@ def create_object_element(
     project_id: UUID,
     page_id: UUID,
     payload: ElementCreate,
-    user: UserDB = Depends(get_current_user),
+    user: UserDB = Depends(require_project_permission("ObjectRepository", "create")),
     db: Session = Depends(get_db),
-    authorized: bool = Depends(has_permission("ObjectRepository", "create")),
 ):
     try:
         page, element = object_repository_service.create_element(
@@ -2887,9 +3064,8 @@ def update_object_element(
     project_id: UUID,
     element_id: UUID,
     payload: ElementUpdate,
-    user: UserDB = Depends(get_current_user),
+    user: UserDB = Depends(require_project_permission("ObjectRepository", "edit")),
     db: Session = Depends(get_db),
-    authorized: bool = Depends(has_permission("ObjectRepository", "edit")),
 ):
     changes = payload.model_dump(exclude_unset=True)
     try:
@@ -2906,9 +3082,8 @@ def update_object_element(
 def delete_object_element(
     project_id: UUID,
     element_id: UUID,
-    user: UserDB = Depends(get_current_user),
+    user: UserDB = Depends(require_project_permission("ObjectRepository", "delete")),
     db: Session = Depends(get_db),
-    authorized: bool = Depends(has_permission("ObjectRepository", "delete")),
 ):
     try:
         references = object_repository_service.delete_element(
@@ -2935,8 +3110,7 @@ def _queue_element_page(project_id: UUID, element_id: UUID) -> None:
 def start_object_repository_scan(
     project_id: UUID,
     background_tasks: BackgroundTasks,
-    user: UserDB = Depends(get_current_user),
-    authorized: bool = Depends(has_permission("ObjectRepository", "create")),
+    user: UserDB = Depends(require_project_permission("ObjectRepository", "create")),
 ):
     try:
         scan_id = object_repository_scan_service.start(project_id, user.id)
@@ -3165,10 +3339,14 @@ def update_role_permissions(
 def assign_user_to_project(
     project_id: UUID,
     payload: ProjectUserAssign,
+    request: Request,
     user: UserDB = Depends(get_current_user),
     db: Session = Depends(get_db),
     authorized: bool = Depends(has_permission("Users", "edit"))
 ):
+    require_project_access(
+        user, project_id, db, projects=project_service, request=request, module="Users", action="edit",
+    )
     user_uuid = UUID(payload.user_id)
     role_uuid = UUID(payload.role_id)
     
@@ -3237,7 +3415,11 @@ def get_audit_logs(
 
 
 @app.post("/api/v1/webhooks/jira")
-def jira_webhook(payload: dict = Body(...), db: Session = Depends(get_db)):
+def jira_webhook(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    caller: str = Depends(require_jira_secret),
+):
     """Receives JIRA webhook events when bugs are updated/resolved."""
     issue = payload.get("issue", {})
     key = issue.get("key")
@@ -3285,8 +3467,13 @@ def jira_webhook(payload: dict = Body(...), db: Session = Depends(get_db)):
 
 
 @app.post("/api/v1/projects/{project_id}/requirements/{requirement_id}/sync-jira")
-def sync_requirement_jira(project_id: UUID, requirement_id: UUID, user: UserDB = Depends(get_current_user)):
+def sync_requirement_jira(
+    project_id: UUID,
+    requirement_id: UUID,
+    user: UserDB = Depends(require_project_permission("Requirements", "edit")),
+):
     """Manually synchronize approved scenarios to JIRA as Stories."""
+    _require_requirement_in_project(project_id, requirement_id)
     repo = get_project_repository()
     requirement = repo.get_requirement(requirement_id)
     if not requirement:
@@ -3314,8 +3501,13 @@ def sync_requirement_jira(project_id: UUID, requirement_id: UUID, user: UserDB =
 
 
 @app.post("/api/v1/projects/{project_id}/executions/{execution_id}/sync-bug")
-def sync_execution_bug(project_id: UUID, execution_id: UUID, user: UserDB = Depends(get_current_user)):
+def sync_execution_bug(
+    project_id: UUID,
+    execution_id: UUID,
+    user: UserDB = Depends(require_project_permission("Executions", "edit")),
+):
     """Manually synchronize a failed test run to JIRA as a Bug defect."""
+    _require_execution_in_project(project_id, execution_id)
     repo = get_project_repository()
     ex = repo.get_execution_result(project_id, execution_id)
     if not ex:
@@ -3350,10 +3542,12 @@ def sync_execution_bug(project_id: UUID, execution_id: UUID, user: UserDB = Depe
 
 
 @app.post("/api/v1/admin/reset-demo-data")
-def reset_demo_data(user: UserDB = Depends(get_current_user)):
-    if user.role not in ["Superadmin", "Admin"]:
-        raise HTTPException(status_code=403, detail="Only Superadmins and Admins can reset demo data")
-    
+def reset_demo_data(
+    user: UserDB = Depends(get_current_user),
+    authorized: bool = Depends(has_permission("Settings", "edit")),
+):
+    # Spec 0009, AC-13: Settings.edit, not a hardcoded role list.
+
     try:
         repo = get_project_repository()
         repo.reset_demo_data()

@@ -128,10 +128,12 @@ The application will be available at `http://localhost:8000`. The frontend is se
 
 ```bash
 pnpm --dir backend/playwrightt install
+cp backend/playwrightt/.env.example backend/playwrightt/.env.local
+# Set WORKSPACE_WEBHOOK_SECRET to the same value as in the backend .env
 pnpm --dir backend/playwrightt dev
 ```
 
-The workspace is available at `http://localhost:3000` by default. The UI reports when this server is unavailable.
+The workspace is available at `http://localhost:3000` by default. The UI reports when this server is unavailable. Without a matching `WORKSPACE_WEBHOOK_SECRET` in both `.env` and `backend/playwrightt/.env.local`, run results are not saved and project credentials are not read (the backend answers `401`, or `503` when the backend value is empty). Keep the workspace on localhost: anyone who can open port 3000 can freeze and save scripts through it.
 
 ### Quick Start
 
@@ -191,6 +193,8 @@ Key environment variables (`.env`):
 | `JIRA_BASE_URL` | JIRA instance URL | — |
 | `JIRA_EMAIL` | JIRA account email | — |
 | `JIRA_API_TOKEN` | JIRA API token | — |
+| `WORKSPACE_WEBHOOK_SECRET` | Shared secret for the Playwright workspace (run results, credentials, script freeze and save). Same value in `backend/playwrightt/.env.local`. Empty means those routes return 503 | — |
+| `JIRA_WEBHOOK_SECRET` | Secret for `POST /api/v1/webhooks/jira`, sent as `?secret=` in the Jira webhook URL or an `X-Webhook-Secret` header. Empty means 503 | — |
 
 Settings can also be modified at runtime via the **Settings** panel in the UI or the `/api/v1/settings` endpoint.
 

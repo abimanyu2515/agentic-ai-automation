@@ -152,7 +152,7 @@ def test_jira_sync_agent_sync_bug(mock_llm_service):
     assert updated_tc.jira_sync_status == "created"
 
 
-def test_jira_webhook_resolves_status():
+def test_jira_webhook_resolves_status(webhook_headers):
     client = TestClient(app)
     repo = get_project_repository()
     
@@ -202,7 +202,7 @@ def test_jira_webhook_resolves_status():
         }
     }
     
-    response = client.post("/api/v1/webhooks/jira", json=payload)
+    response = client.post("/api/v1/webhooks/jira", json=payload, headers=webhook_headers("jira"))
     assert response.status_code == 200
     assert response.json()["status"] == "success"
     
