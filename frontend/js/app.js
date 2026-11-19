@@ -1,5 +1,5 @@
 import { API } from './api.js?v=22';
-import { ChatPanel } from './chat.js?v=3';
+import { ChatPanel } from './chat.js?v=5';
 import { OpenRows, ROW_VIEWS } from './chat-context.js?v=1';
 import { ObjectRepositoryView } from './object-repository.js?v=7';
 import { TokenUtilizationView } from './token-utilization.js?v=1';

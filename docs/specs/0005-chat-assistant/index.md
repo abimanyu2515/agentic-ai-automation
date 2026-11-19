@@ -164,6 +164,7 @@ Propose tools (one per action type), named `propose_<type>` (for example `propos
 | `duplicate_scenario` | `scenario_id` | Scenarios/create | `change` | the service the duplicate route uses | `inline` |
 | `delete_scenario` | `scenario_id` | Scenarios/delete | `delete` | `repo.delete_scenario(deleted_by=user.id)` | `inline` |
 | `update_test_case` | `test_case_id`, changed fields (title, steps, expected results, data) | TestCases/edit | `change` | `repo.update_test_case` | `inline` |
+| `review_scenario` | `scenario_id`, `decision` `approved`/`rejected` | Scenarios/edit | `change` | `project_service.update_scenario(approved=True)` or `(rejected=True)`, the call the approve and reject buttons use, then the same Jira sync the route queues (a sync failure is logged, not a failed action) | `inline` |
 | `review_test_case` | `test_case_id`, `decision` `approved`/`rejected` | TestCases/edit | `change` | `project_service.update_test_case(evaluation_status=...)`, the call the approve and reject buttons use | `inline` |
 | `generate_test_data` | `test_case_id` (Playwright project and test case only, checked at propose time) | TestCases/edit | `change` | `workflow_service.generate_test_data_for_test_case` in a worker thread; a script that no longer matches the new datasets is cleared, as on the Test Cases screen | `inline` |
 | `delete_test_case` | `test_case_id` | TestCases/delete | `delete` | `repo.delete_test_case(deleted_by=user.id)` | `inline` |

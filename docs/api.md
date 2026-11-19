@@ -1055,6 +1055,7 @@ Supported action types:
 | `duplicate_scenario` | `scenario_id` | Scenarios / create | `change` | `scenarios` |
 | `delete_scenario` | `scenario_id` | Scenarios / delete | `delete` | `scenarios` |
 | `update_test_case` | `test_case_id`, non-empty `changes` | TestCases / edit | `change` | `testcases` |
+| `review_scenario` | `scenario_id`, `decision` `approved` or `rejected`; rejecting deletes the scenario's test cases | Scenarios / edit | `change` | `scenarios` |
 | `review_test_case` | `test_case_id`, `decision` `approved` or `rejected` | TestCases / edit | `change` | `testcases` |
 | `generate_test_data` | `test_case_id` (Playwright project and test case only) | TestCases / edit | `change` | `testcases` |
 | `delete_test_case` | `test_case_id` | TestCases / delete | `delete` | `testcases` |

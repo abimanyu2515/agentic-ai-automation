@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef, Suspense } from 'react';
 import Editor from '@monaco-editor/react';
 import { Button } from '@/components/ui/button';
 import { ExecutionList } from '@/components/execution-list';
-import { Play, Code2, Save, Sun, Moon } from 'lucide-react';
+import { Play, Code2, Save, Sun, Moon, ChevronDown } from 'lucide-react';
 import { Execution } from '@/lib/execution-queue';
 
 const SAMPLE_SCRIPT = `// Adactin Hotel Application Test
@@ -92,6 +92,8 @@ function PlaywrightWorkspaceContent() {
   const [current, setCurrent] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Recent Executions starts collapsed; the user opens it when they want the history.
+  const [showExecutions, setShowExecutions] = useState(false);
 
   const [projectId, setProjectId] = useState<string | null>(null);
   const [testCaseId, setTestCaseId] = useState<string | null>(null);
@@ -756,7 +758,26 @@ function PlaywrightWorkspaceContent() {
 
             {/* Recent Executions - below the Monaco Editor */}
             <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
-              <h2 className="text-lg font-semibold mb-4 text-foreground">Recent Executions</h2>
+              <h2 className="text-lg font-semibold text-foreground">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 text-left"
+                  aria-expanded={showExecutions}
+                  aria-controls="recent-executions"
+                  onClick={() => setShowExecutions((open) => !open)}
+                >
+                  <span>
+                    Recent Executions{' '}
+                    <span className="text-sm font-normal text-muted-foreground">({executions.length})</span>
+                  </span>
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={`h-5 w-5 text-muted-foreground transition-transform ${showExecutions ? 'rotate-180' : ''}`}
+                  />
+                </button>
+              </h2>
+              {showExecutions && (
+              <div id="recent-executions" className="mt-4">
               <ExecutionList
                 executions={executions}
                 queue={queue}
@@ -767,6 +788,8 @@ function PlaywrightWorkspaceContent() {
                   handleExecute(rerunScript);
                 }}
               />
+              </div>
+              )}
             </div>
 
             {/* Status Summary */}
