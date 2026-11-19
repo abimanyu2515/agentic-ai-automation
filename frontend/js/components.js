@@ -61,6 +61,27 @@ window.toggleTestCaseRow = (id) => {
   }
 };
 
+// One app wide toast (spec 0009, AC-10). The text is set with textContent,
+// so a backend message is never parsed as HTML.
+let toastTimer = null;
+
+export function showToast(message, kind = 'info') {
+  let toast = document.getElementById('app-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'app-toast';
+    toast.className = 'app-toast';
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    document.body.appendChild(toast);
+  }
+  toast.textContent = String(message || '');
+  toast.dataset.tone = kind;
+  toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.hidden = true; }, 6000);
+}
+
 export function formatBytes(bytes) {
   if (bytes === 0) return '0 Bytes';
   const k = 1024;
@@ -335,20 +356,20 @@ export const Components = {
                 <!-- Action buttons (visible if NOT approved) -->
                 <div class="cell-actions" id="actions-view-${sc.id}" style="display: flex; gap: 8px;">
                   ${sc.approved ? '' : `
-                    <button class="btn btn-secondary btn-icon-success" title="Approve" onclick="window._scenarioActions.onApprove('${sc.id}')" style="padding: 6px 12px; display: inline-flex; align-items: center; gap: 6px;">
+                    <button data-requires="Scenarios.edit" class="btn btn-secondary btn-icon-success" title="Approve" onclick="window._scenarioActions.onApprove('${sc.id}')" style="padding: 6px 12px; display: inline-flex; align-items: center; gap: 6px;">
                       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" /></svg> Approve
                     </button>
-                    <button class="btn btn-secondary btn-icon-danger" title="Reject / Disapprove" onclick="window._scenarioActions.onReject('${sc.id}')" style="padding: 6px 12px; display: inline-flex; align-items: center; gap: 6px;">
+                    <button data-requires="Scenarios.edit" class="btn btn-secondary btn-icon-danger" title="Reject / Disapprove" onclick="window._scenarioActions.onReject('${sc.id}')" style="padding: 6px 12px; display: inline-flex; align-items: center; gap: 6px;">
                       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12" /></svg> Reject
                     </button>
                   `}
-                  <button class="btn btn-secondary" title="Edit" onclick="window.chatRowEdit && window.chatRowEdit('scenario', '${sc.id}', true); document.getElementById('name-txt-${sc.id}').style.display='none'; document.getElementById('name-in-${sc.id}').style.display='block'; document.getElementById('desc-txt-${sc.id}').style.display='none'; document.getElementById('desc-in-${sc.id}').style.display='block'; document.getElementById('prio-txt-${sc.id}').style.display='none'; document.getElementById('prio-in-${sc.id}').style.display='block'; document.getElementById('actions-view-${sc.id}').style.display='none'; document.getElementById('actions-edit-${sc.id}').style.display='flex';" style="padding: 6px 12px;">
+                  <button data-requires="Scenarios.edit" class="btn btn-secondary" title="Edit" onclick="window.chatRowEdit && window.chatRowEdit('scenario', '${sc.id}', true); document.getElementById('name-txt-${sc.id}').style.display='none'; document.getElementById('name-in-${sc.id}').style.display='block'; document.getElementById('desc-txt-${sc.id}').style.display='none'; document.getElementById('desc-in-${sc.id}').style.display='block'; document.getElementById('prio-txt-${sc.id}').style.display='none'; document.getElementById('prio-in-${sc.id}').style.display='block'; document.getElementById('actions-view-${sc.id}').style.display='none'; document.getElementById('actions-edit-${sc.id}').style.display='flex';" style="padding: 6px 12px;">
                     Edit
                   </button>
-                  <button class="btn btn-secondary" title="Duplicate" onclick="window._scenarioActions.onDuplicate('${sc.id}')" style="padding: 6px 12px;">
+                  <button data-requires="Scenarios.create" class="btn btn-secondary" title="Duplicate" onclick="window._scenarioActions.onDuplicate('${sc.id}')" style="padding: 6px 12px;">
                     Duplicate
                   </button>
-                  <button class="btn btn-secondary btn-icon-danger" title="Delete" onclick="window._scenarioActions.onDelete('${sc.id}')" style="padding: 6px 12px;">
+                  <button data-requires="Scenarios.delete" class="btn btn-secondary btn-icon-danger" title="Delete" onclick="window._scenarioActions.onDelete('${sc.id}')" style="padding: 6px 12px;">
                     Delete
                   </button>
                 </div>
@@ -570,7 +591,7 @@ export const Components = {
                           <option value="cucumber">Cucumber</option>
                           <option value="imported">Existing Framework</option>
                         </select>
-                        <button class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="window._testCaseActions.onGenerateScript('${tc.id}', this, document.getElementById('framework-select-${tc.id}').value)">Generate Script</button>
+                        <button data-requires="Playwright.create" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="window._testCaseActions.onGenerateScript('${tc.id}', this, document.getElementById('framework-select-${tc.id}').value)">Generate Script</button>
                       `}
                       <a href="javascript:void(0)" onclick="window._testCaseActions.onViewScript('${tc.id}')" style="font-size: 0.8rem; color: var(--accent-primary); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; margin-left: 8px;">Open in Workspace →</a>
                     ` : `
@@ -883,9 +904,9 @@ export const Components = {
             <div class="cell-actions" style="justify-content: flex-end; gap: 8px;">
               ${hasScript ? `
                 <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.75rem;" onclick="window._playwrightActions.onViewScript('${tc.id}')">Open Monaco Editor</button>
-                <button class="btn btn-primary" style="padding: 6px 12px; font-size: 0.75rem; background-color: var(--color-success); border-color: var(--color-success);" onclick="window._playwrightActions.onRunTest('${tc.id}', this)">Run Test</button>
+                <button data-requires="Executions.create" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.75rem; background-color: var(--color-success); border-color: var(--color-success);" onclick="window._playwrightActions.onRunTest('${tc.id}', this)">Run Test</button>
               ` : `
-                <button class="btn btn-primary" style="padding: 6px 12px; font-size: 0.75rem;" onclick="window._playwrightActions.onGenerateScript('${tc.id}', this)">Generate Script</button>
+                <button data-requires="Playwright.create" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.75rem;" onclick="window._playwrightActions.onGenerateScript('${tc.id}', this)">Generate Script</button>
               `}
             </div>
           </td>

@@ -193,7 +193,7 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
           </svg>
         </button>
-        <button class="btn btn-primary" id="btn-create-requirement">+ Create Requirement</button>
+        <button data-requires="Requirements.create" class="btn btn-primary" id="btn-create-requirement">+ Create Requirement</button>
         <div id="user-profile-widget" style="display: flex; align-items: center; gap: 12px; border-left: 1px solid var(--border-color); padding-left: 16px; margin-left: 8px;">
           <div style="text-align: right;">
             <div id="current-user-name" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Guest</div>
@@ -406,9 +406,9 @@
           <div class="gap-12" style="display: flex; align-items: center; gap: 12px;">
             <div style="display: flex; align-items: center; border: 1px solid var(--border-color); border-radius: var(--border-radius); overflow: hidden; height: 38px;">
               <input type="text" id="jira-story-key-input" placeholder="JIRA Story Key (e.g. QA-101)" style="border: none; padding: 0 12px; font-size: 0.85rem; background: var(--bg-secondary); color: var(--text-primary); outline: none; width: 220px; height: 100%;" />
-              <button class="btn btn-primary" id="btn-import-jira-story" style="border: none; border-radius: 0; height: 100%; display: flex; align-items: center; padding: 0 16px; font-size: 0.85rem;">Import JIRA Story</button>
+              <button data-requires="Requirements.create" class="btn btn-primary" id="btn-import-jira-story" style="border: none; border-radius: 0; height: 100%; display: flex; align-items: center; padding: 0 16px; font-size: 0.85rem;">Import JIRA Story</button>
             </div>
-            <button class="btn btn-secondary" onclick="document.getElementById('import-req-file').click()">Import Requirement File</button>
+            <button data-requires="Requirements.create" class="btn btn-secondary" onclick="document.getElementById('import-req-file').click()">Import Requirement File</button>
             <input type="file" id="import-req-file" style="display: none;" accept=".xlsx,.xls,.pdf,.docx,.doc,.txt" />
           </div>
         </div>
@@ -437,7 +437,7 @@
               <span style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 500;">Count:</span>
               <input type="number" id="sc-generation-count" class="form-control" value="3" min="1" max="50" style="width: 60px; padding: 4px 8px; font-size: 0.85rem;" />
             </div>
-            <button class="btn btn-primary" id="btn-generate-scenarios">Generate Scenarios</button>
+            <button data-requires="Scenarios.create" class="btn btn-primary" id="btn-generate-scenarios">Generate Scenarios</button>
           </div>
         </div>
         
@@ -462,7 +462,7 @@
             <button class="btn btn-secondary" id="btn-bulk-tc-approve">Bulk Approve</button>
             <button class="btn btn-secondary" id="btn-bulk-tc-reject">Bulk Reject</button>
             <span id="tc-generation-warning" style="color: var(--color-warning); font-size: 0.8rem; align-self: center; display: none;"></span>
-            <button class="btn btn-primary" id="btn-generate-testcases">Generate & Evaluate Test Cases</button>
+            <button data-requires="TestCases.create" class="btn btn-primary" id="btn-generate-testcases">Generate & Evaluate Test Cases</button>
           </div>
         </div>
 
@@ -492,8 +492,8 @@
             </select>
           </div>
           <div id="testcase-bulk-script-container" style="display: none; gap: 12px;">
-            <button class="btn btn-primary" id="btn-generate-all-scripts" style="padding: 10px 20px; font-size: 0.9rem;">Generate Playwright Scripts for All Approved Test Cases</button>
-            <button class="btn btn-primary" id="btn-run-selected-batch" style="padding: 10px 20px; font-size: 0.9rem; background-color: var(--color-success); border-color: var(--color-success);">Run Selected Batch</button>
+            <button data-requires="Playwright.create" class="btn btn-primary" id="btn-generate-all-scripts" style="padding: 10px 20px; font-size: 0.9rem;">Generate Playwright Scripts for All Approved Test Cases</button>
+            <button data-requires="Executions.create" class="btn btn-primary" id="btn-run-selected-batch" style="padding: 10px 20px; font-size: 0.9rem; background-color: var(--color-success); border-color: var(--color-success);">Run Selected Batch</button>
           </div>
         </div>
         <div id="script-validation-status" role="status" aria-live="polite" style="margin-top: 12px;"></div>
@@ -524,7 +524,7 @@
             <option value="">Choose Requirement</option>
           </select>
         </div>
-        <button class="btn btn-primary" id="btn-run-testdata-agent" disabled>Run TestDataAgent</button>
+        <button data-requires="TestCases.create" class="btn btn-primary" id="btn-run-testdata-agent" disabled>Run TestDataAgent</button>
         <div id="testdata-agent-run-status" style="display: none; margin-top: 20px;"></div>
       </div>
 
@@ -1262,7 +1262,7 @@
         </div>
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" onclick="closeModal('create-release-modal')">Cancel</button>
-          <button type="submit" class="btn btn-primary">Create Release</button>
+          <button data-requires="Executions.create" type="submit" class="btn btn-primary">Create Release</button>
         </div>
       </form>
     </div>
@@ -1293,7 +1293,7 @@
         </div>
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" onclick="closeModal('create-cycle-modal')">Cancel</button>
-          <button type="submit" class="btn btn-primary">Create Cycle</button>
+          <button data-requires="Executions.create" type="submit" class="btn btn-primary">Create Cycle</button>
         </div>
       </form>
     </div>
@@ -1404,7 +1404,7 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=26"></script>
+  <script type="module" src="/js/app.js?v=29"></script>
   <script>
     document.getElementById('login-form').addEventListener('submit', async function(e) {
       e.preventDefault();

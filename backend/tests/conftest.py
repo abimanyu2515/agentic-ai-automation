@@ -225,3 +225,100 @@ def token_usage_service(tmp_path):
     set_token_usage_service(service)
     yield service
     set_token_usage_service(None)
+
+
+# ---------------------------------------------------------------- spec 0009: users, roles, and secrets
+
+TEST_WORKSPACE_SECRET = "test-workspace-secret"
+TEST_JIRA_SECRET = "test-jira-secret"
+
+
+@pytest.fixture(autouse=True)
+def webhook_secrets():
+    """Both webhook secrets are set for every test, so the machine routes
+    behave as configured. Tests of the unset case clear one with monkeypatch.
+    This restores by hand on purpose: an autouse fixture that requests
+    `monkeypatch` makes it set up first and tear down last, which undoes
+    other fixtures' restores (for example a swapped project repository)."""
+    from backend.config.settings import get_settings
+
+    webhooks = get_settings().webhooks
+    saved = (webhooks.workspace_secret, webhooks.jira_secret)
+    webhooks.workspace_secret, webhooks.jira_secret = TEST_WORKSPACE_SECRET, TEST_JIRA_SECRET
+    yield webhooks
+    webhooks.workspace_secret, webhooks.jira_secret = saved
+
+
+@pytest.fixture
+def webhook_headers():
+    """`webhook_headers()` for the workspace, `webhook_headers("jira")` for Jira."""
+    def headers(caller: str = "workspace") -> dict[str, str]:
+        secret = TEST_JIRA_SECRET if caller == "jira" else TEST_WORKSPACE_SECRET
+        return {"X-Webhook-Secret": secret}
+    return headers
+
+
+@pytest.fixture(scope="session")
+def rbac_db():
+    """An isolated SQLite database with only the auth tables, seeded with the
+    real roles and permissions. Session scope: seeding hashes the dev
+    passwords, which is slow. Tests only add users with unique emails."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    import backend.database.db_models  # noqa: F401  (registers the tables)
+    from backend.database.db import Base
+    from backend.database.db_seeder import seed_database
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    with engine.connect() as conn:
+        # Users are assigned to JSON store projects that have no projects row.
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+    auth_tables = ["users", "roles", "permissions", "role_permissions", "project_users"]
+    Base.metadata.create_all(engine, tables=[Base.metadata.tables[name] for name in auth_tables])
+    session = sessionmaker(bind=engine)()
+    seed_database(session)
+    yield session
+    session.close()
+    engine.dispose()
+
+
+class SignedInUser:
+    def __init__(self, user, token: str):
+        self.user = user
+        self.id = user.id
+        self.role = user.role
+        self.headers = {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def sign_in(rbac_db):
+    """`sign_in(role, projects=[...], project_role=None)` creates a user with
+    that global role, assigns it to each project (as `project_role`, default
+    the same role), points the app at the seeded RBAC database, and returns
+    the user with real bearer token headers."""
+    from uuid import UUID, uuid4
+
+    from backend.database.db_models import ProjectUserDB, RoleDB, UserDB
+    from backend.dependencies.auth_dependencies import get_db
+    from backend.main import app
+    from backend.services.auth_service import create_access_token
+
+    app.dependency_overrides[get_db] = lambda: rbac_db
+
+    def make(role: str, projects=(), project_role: str | None = None) -> SignedInUser:
+        user = UserDB(
+            id=uuid4(), email=f"{uuid4().hex}@example.com", full_name=role,
+            role=role, password_hash="unused", is_active=True,
+        )
+        rbac_db.add(user)
+        assigned_role = rbac_db.query(RoleDB).filter(RoleDB.name == (project_role or role)).one()
+        for project_id in projects:
+            rbac_db.add(ProjectUserDB(project_id=UUID(str(project_id)), user_id=user.id, role_id=assigned_role.id))
+        rbac_db.commit()
+        token = create_access_token(data={"sub": user.email, "role": user.role})
+        return SignedInUser(user, token)
+
+    yield make
+    app.dependency_overrides.pop(get_db, None)

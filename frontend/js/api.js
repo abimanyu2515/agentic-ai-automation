@@ -1,3 +1,5 @@
+import { showToast } from './components.js?v=6';
+
 const API_BASE = '/api/v1';
 const TEST_CASE_GENERATION_TIMEOUT_MS = 20 * 60 * 1000;
 const SCRIPT_GENERATION_POLL_MS = 3000;
@@ -119,6 +121,12 @@ async function request(url, options = {}) {
       const error = new Error(errorMsg);
       error.status = response.status;
       error.detail = detail;
+      if (response.status === 403) {
+        // Spec 0009, AC-10: the backend's reason in a toast. Callers check
+        // error.shown to skip their own alert.
+        showToast(errorMsg, 'error');
+        error.shown = true;
+      }
       throw error;
     }
 
@@ -689,6 +697,11 @@ export const API = {
 
   async getRoles() {
     return request('/admin/roles');
+  },
+
+  // The signed in user, with the `Module.action` permissions of their role.
+  async getMe() {
+    return request('/auth/me');
   },
 
   async createRole(name) {

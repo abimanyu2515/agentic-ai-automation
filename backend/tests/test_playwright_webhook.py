@@ -9,7 +9,7 @@ from backend.services.project_service import ProjectService
 
 client = TestClient(app)
 
-def test_playwright_webhook_flow():
+def test_playwright_webhook_flow(webhook_headers):
     # 1. Setup a dummy project and test case
     project_service = ProjectService()
     project = project_service.create_project("Test Project", "Description", "insurance")
@@ -59,7 +59,7 @@ def test_playwright_webhook_flow():
         "event": "started",
         "status": "running"
       }
-    response = client.post(f"/api/v1/projects/{project.id}/executions/webhook", json=started_payload)
+    response = client.post(f"/api/v1/projects/{project.id}/executions/webhook", json=started_payload, headers=webhook_headers())
     assert response.status_code == 200
     
     # Check active stream events
@@ -81,7 +81,7 @@ def test_playwright_webhook_flow():
             "type": "success"
         }
     }
-    response = client.post(f"/api/v1/projects/{project.id}/executions/webhook", json=updated_payload)
+    response = client.post(f"/api/v1/projects/{project.id}/executions/webhook", json=updated_payload, headers=webhook_headers())
     assert response.status_code == 200
     assert len(events) == 2
     assert events[1]["log"] == "Page loaded successfully"
@@ -99,7 +99,7 @@ def test_playwright_webhook_flow():
         "trace_path": "trace/trace.zip",
         "error_message": None
     }
-    response = client.post(f"/api/v1/projects/{project.id}/executions/webhook", json=completed_payload)
+    response = client.post(f"/api/v1/projects/{project.id}/executions/webhook", json=completed_payload, headers=webhook_headers())
     assert response.status_code == 200
     
     # Verify execution result in database

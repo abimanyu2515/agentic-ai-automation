@@ -1318,6 +1318,14 @@ class PostgresProjectRepository(ProjectRepository):
             release_id=r.release_id
         )
 
+    def get_requirement_project_id(self, requirement_id: UUID) -> UUID | None:
+        session = self.session
+        stmt = select(RequirementDB.project_id).where(
+            RequirementDB.id == requirement_id,
+            RequirementDB.is_deleted.is_(False),
+        )
+        return session.scalar(stmt)
+
     def get_scenario(self, scenario_id: UUID) -> Scenario | None:
         session = self.session
         stmt = select(ScenarioDB).where(ScenarioDB.id == scenario_id, ScenarioDB.deleted_at.is_(None))

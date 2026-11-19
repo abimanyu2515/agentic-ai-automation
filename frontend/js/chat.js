@@ -3,8 +3,8 @@
 // switching views never resets them. The open state and the active thread
 // per project are kept in localStorage only as hints; the thread itself is
 // always loaded from the server.
-import { API } from './api.js?v=20';
-import { escapeHTML } from './components.js?v=5';
+import { API } from './api.js?v=22';
+import { escapeHTML } from './components.js?v=6';
 
 const OPEN_KEY = 'chat_panel_open';
 const EXPANDED_KEY = 'chat_panel_expanded';

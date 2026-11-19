@@ -121,20 +121,42 @@ def test_job_is_hidden_from_other_projects_and_pruned_after_ttl():
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
+    """A Superadmin (no RBAC lookups needed) and a real project and test case
+    in an isolated JSON store, since the start route checks the test case
+    belongs to the project (spec 0009, AC-4)."""
+    from types import SimpleNamespace
+
+    import backend.repository.project_repository as repo_module
+    from backend.dependencies.auth_dependencies import get_db
+    from backend.models.scenario import Scenario
+    from backend.repository.project_repository import JSONProjectRepository
+
+    previous = repo_module._active_project_repo
+    repo = JSONProjectRepository(tmp_path / "store.json")
+    repo_module._active_project_repo = repo
+    project = repo.create_project("Jobs", "", framework="playwright", target_url="https://jobs.example.test")
+    requirement = repo.create_requirement(project.id, "Login", "Users log in", "high", "auth")
+    scenario = Scenario(requirement_id=requirement.id, scenario_name="Login", description="Login", path_type="happy_path")
+    repo.save_scenarios([scenario])
+    case = _case().model_copy(update={"scenario_id": scenario.id})
+    repo.save_test_cases([case])
+
     generator = _Generator()
     monkeypatch.setattr(main, "script_generation_jobs", ScriptGenerationJobs(generator))
-    main.app.dependency_overrides[get_current_user] = lambda: object()
+    main.app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=uuid4(), role="Superadmin")
+    main.app.dependency_overrides[get_db] = lambda: None
     try:
-        yield TestClient(main.app), generator
+        yield TestClient(main.app), generator, project.id, case.id
     finally:
         main.app.dependency_overrides.pop(get_current_user, None)
+        main.app.dependency_overrides.pop(get_db, None)
         generator.release.set()
+        repo_module._active_project_repo = previous
 
 
 def test_routes_start_a_job_and_report_the_generated_test_case(client):
-    http, generator = client
-    project_id, test_case_id = uuid4(), uuid4()
+    http, generator, project_id, test_case_id = client
 
     started = http.post(
         f"/api/v1/projects/{project_id}/testcases/{test_case_id}/generate-script/jobs",
@@ -157,7 +179,7 @@ def test_routes_start_a_job_and_report_the_generated_test_case(client):
 
 
 def test_unknown_job_is_404(client):
-    http, _ = client
+    http, *_ = client
 
     response = http.get(f"/api/v1/projects/{uuid4()}/script-generation-jobs/{uuid4()}")
 

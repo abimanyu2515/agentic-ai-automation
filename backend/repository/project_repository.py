@@ -317,6 +317,15 @@ class ProjectRepository(ABC):
     def get_test_cycle(self, cycle_id: UUID) -> TestCycle | None:
         pass
 
+    def get_requirement_project_id(self, requirement_id: UUID) -> UUID | None:
+        """The project that owns a live requirement, or None when the
+        requirement is missing or deleted (spec 0009, AC-4 and AC-5).
+        Stores override this with a direct lookup."""
+        for project in self.list_projects():
+            if any(r.id == requirement_id for r in self.get_requirements(project.id)):
+                return project.id
+        return None
+
     def get_scenarios_for_project(self, project_id: UUID) -> list[Scenario]:
         reqs = self.get_requirements(project_id)
         scs = []
@@ -1145,6 +1154,17 @@ class JSONProjectRepository(ProjectRepository):
         req_id_str = str(requirement_id)
         if req_id_str in reqs_raw:
             return Requirement.model_validate(reqs_raw[req_id_str])
+        return None
+
+    def get_requirement_project_id(self, requirement_id: UUID) -> UUID | None:
+        raw = self._read_raw()
+        req_id_str = str(requirement_id)
+        req_data = raw.get("requirements", {}).get(req_id_str)
+        if not req_data or req_data.get("is_deleted", False):
+            return None
+        for project in raw.get("projects", []):
+            if req_id_str in [str(r) for r in project.get("requirements", [])]:
+                return UUID(project["id"])
         return None
 
     def get_scenario(self, scenario_id: UUID) -> Scenario | None:

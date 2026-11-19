@@ -1,9 +1,15 @@
-import { API } from './api.js?v=20';
+import { API } from './api.js?v=22';
 import { ChatPanel } from './chat.js?v=3';
 import { OpenRows, ROW_VIEWS } from './chat-context.js?v=1';
 import { ObjectRepositoryView } from './object-repository.js?v=6';
 import { TokenUtilizationView } from './token-utilization.js?v=1';
-import { Components, escapeHTML } from './components.js?v=5';
+import { Components, escapeHTML } from './components.js?v=6';
+
+// Permissions behind buttons that tables render after login (spec 0009, AC-10).
+const PERMISSION_GATED_ACTIONS = [
+  'Scenarios.create', 'Scenarios.edit', 'Scenarios.delete',
+  'TestCases.create', 'Playwright.create', 'Executions.create', 'Requirements.create',
+];
 
 class App {
   constructor() {
@@ -216,7 +222,7 @@ class App {
           await this.loadReleasesForProject();
           await this.selectRelease(rel.id);
         } catch (err) {
-          alert(`Failed to create release: ${err.message}`);
+          if (!err.shown) alert(`Failed to create release: ${err.message}`);
         }
       });
     }
@@ -241,7 +247,7 @@ class App {
           await this.loadCyclesForRelease();
           await this.selectTestCycle(cyc.id);
         } catch (err) {
-          alert(`Failed to create test cycle: ${err.message}`);
+          if (!err.shown) alert(`Failed to create test cycle: ${err.message}`);
         }
       });
     }
@@ -359,7 +365,7 @@ class App {
           await this.refreshProjectData();
           this.navigateTo('requirements');
         } catch (err) {
-          alert(`Failed to add requirement: ${err.message}`);
+          if (!err.shown) alert(`Failed to add requirement: ${err.message}`);
         }
       });
     }
@@ -620,7 +626,7 @@ class App {
       this.addLog(`Imported ${imported.length} requirement(s) from '${file.name}'`);
       await this.refreshProjectData();
     } catch (err) {
-      alert(`Import failed: ${err.message}`);
+      if (!err.shown) alert(`Import failed: ${err.message}`);
       await this.refreshProjectData();
     }
   }
@@ -639,7 +645,7 @@ class App {
       document.getElementById('jira-story-key-input').value = '';
       await this.refreshProjectData();
     } catch (err) {
-      alert(`Import failed: ${err.message}`);
+      if (!err.shown) alert(`Import failed: ${err.message}`);
       await this.refreshProjectData();
     }
   }
@@ -967,7 +973,7 @@ class App {
         relSelect.innerHTML = `
           <option value="" disabled selected>▼ Select Release</option>
           ${this.releases.map(r => `<option value="${r.id}">${escapeHTML(r.name)}</option>`).join('')}
-          <option value="__create_new__" style="color: var(--accent-primary); font-weight: 600;">+ Create Release</option>
+          <option data-requires="Executions.create" value="__create_new__" style="color: var(--accent-primary); font-weight: 600;">+ Create Release</option>
         `;
         if (this.currentRelease) {
           relSelect.value = this.currentRelease.id;
@@ -1027,7 +1033,7 @@ class App {
         cySelect.innerHTML = `
           <option value="" disabled selected>▼ Select Cycle</option>
           ${this.testCycles.map(c => `<option value="${c.id}">${escapeHTML(c.name)}</option>`).join('')}
-          <option value="__create_new__" style="color: var(--accent-primary); font-weight: 600;">+ Create Cycle</option>
+          <option data-requires="Executions.create" value="__create_new__" style="color: var(--accent-primary); font-weight: 600;">+ Create Cycle</option>
         `;
         if (this.currentTestCycle) {
           cySelect.value = this.currentTestCycle.id;
@@ -1959,6 +1965,12 @@ class App {
             && this.selectedRequirementId === requirementId
           ) {
             this.renderScenarios();
+          }
+          if (
+            !err.shown
+            && this.currentProject?.id === projectId
+            && this.selectedRequirementId === requirementId
+          ) {
             const errorMessage = document.createElement('div');
             errorMessage.setAttribute('role', 'alert');
             errorMessage.style.color = 'var(--color-danger)';
@@ -1966,7 +1978,7 @@ class App {
             errorMessage.textContent = `Scenario generation failed: ${err.message}`;
             container.prepend(errorMessage);
           }
-          alert(`Scenario generation failed: ${err.message}`);
+          if (!err.shown) alert(`Scenario generation failed: ${err.message}`);
         } finally {
           genBtn.disabled = false;
         }
@@ -1997,7 +2009,7 @@ class App {
           await this.refreshProjectData();
           this.renderScenarios();
         } catch (err) {
-          alert(`Failed to approve: ${err.message}`);
+          if (!err.shown) alert(`Failed to approve: ${err.message}`);
         }
       },
       onReject: async (id) => {
@@ -2007,7 +2019,7 @@ class App {
           await this.refreshProjectData();
           this.renderScenarios();
         } catch (err) {
-          alert(`Failed to reject: ${err.message}`);
+          if (!err.shown) alert(`Failed to reject: ${err.message}`);
         }
       },
       onSave: async (id, name, desc, priority) => {
@@ -2021,7 +2033,7 @@ class App {
           await this.refreshProjectData();
           this.renderScenarios();
         } catch (err) {
-          alert(`Failed to save: ${err.message}`);
+          if (!err.shown) alert(`Failed to save: ${err.message}`);
         }
       },
       onDuplicate: async (id) => {
@@ -2031,7 +2043,7 @@ class App {
           await this.refreshProjectData();
           this.renderScenarios();
         } catch (err) {
-          alert(`Failed to duplicate: ${err.message}`);
+          if (!err.shown) alert(`Failed to duplicate: ${err.message}`);
         }
       },
       onDelete: async (id) => {
@@ -2042,7 +2054,7 @@ class App {
           await this.refreshProjectData();
           this.renderScenarios();
         } catch (err) {
-          alert(`Failed to delete: ${err.message}`);
+          if (!err.shown) alert(`Failed to delete: ${err.message}`);
         }
       },
       onAddNote: async (id, note) => {
@@ -2288,7 +2300,7 @@ class App {
         this.addLog("Test cases generated and evaluated");
         this.refreshProjectData();
       } catch (err) {
-        alert(`Test case generation failed: ${err.message}`);
+        if (!err.shown) alert(`Test case generation failed: ${err.message}`);
       } finally {
         genBtn.disabled = false;
         this.renderTestCases();
@@ -2351,7 +2363,7 @@ class App {
           await this.refreshProjectData();
           this.renderTestCases();
         } catch (err) {
-          alert(`Script generation failed: ${err.message}`);
+          if (!err.shown) alert(`Script generation failed: ${err.message}`);
         } finally {
           btn.disabled = false;
           btn.innerText = "Generate Script";
@@ -2924,7 +2936,7 @@ class App {
       this.addLog(`Generated 20 unique test datasets for "${selectedTestCase.title}"`);
       generated = true;
     } catch (err) {
-      alert(`Test-data generation failed for "${selectedTestCase.title}": ${err.message}`);
+      if (!err.shown) alert(`Test-data generation failed for "${selectedTestCase.title}": ${err.message}`);
     } finally {
       this.generatingTestDataCaseIds.delete(testCaseId);
       this.renderTestCases();
@@ -3000,7 +3012,7 @@ class App {
           this.addLog("Scenario approved");
           await this.refreshProjectData();
         } catch (err) {
-          alert(`Failed to approve: ${err.message}`);
+          if (!err.shown) alert(`Failed to approve: ${err.message}`);
         }
       },
       onReject: async (id) => {
@@ -3009,7 +3021,7 @@ class App {
           this.addLog("Scenario marked rejected");
           await this.refreshProjectData();
         } catch (err) {
-          alert(`Failed to reject: ${err.message}`);
+          if (!err.shown) alert(`Failed to reject: ${err.message}`);
         }
       },
       onSave: async (id, name, desc, priority) => {
@@ -3022,7 +3034,7 @@ class App {
           this.addLog("Scenario updated");
           await this.refreshProjectData();
         } catch (err) {
-          alert(`Failed to save: ${err.message}`);
+          if (!err.shown) alert(`Failed to save: ${err.message}`);
         }
       },
       onDuplicate: async (id) => {
@@ -3031,7 +3043,7 @@ class App {
           this.addLog("Scenario duplicated");
           await this.refreshProjectData();
         } catch (err) {
-          alert(`Failed to duplicate: ${err.message}`);
+          if (!err.shown) alert(`Failed to duplicate: ${err.message}`);
         }
       },
       onDelete: async (id) => {
@@ -3041,7 +3053,7 @@ class App {
           this.addLog("Scenario deleted");
           await this.refreshProjectData();
         } catch (err) {
-          alert(`Failed to delete: ${err.message}`);
+          if (!err.shown) alert(`Failed to delete: ${err.message}`);
         }
       },
       onAddNote: async (id, note) => {
@@ -3177,7 +3189,7 @@ class App {
           await this.refreshProjectData();
           this.renderTestCaseApproval();
         } catch (err) {
-          alert(`Script generation failed: ${err.message}`);
+          if (!err.shown) alert(`Script generation failed: ${err.message}`);
         } finally {
           btn.disabled = false;
           btn.innerText = "Generate Script";
@@ -4377,32 +4389,41 @@ class App {
           // A route change closes the triage modal's chat context.
           if (this.triageExecutionId) this.closeModal('triage-modal');
           this.notifyChatContext();
+          // While startup restores the saved project, routing would see no
+          // project and clear active_project_id. Startup routes the current
+          // hash itself once it finishes.
+          if (this.startingUp) return;
           this.handleRouting();
         });
       }
 
+      this.startingUp = true;
       try {
-        await this.loadRolesAndPermissions();
-        this.enforceUIPermissions();
-      } catch (err) {
-        console.error("Failed to load permissions:", err);
-      }
-      
-      await this.loadSettings();
-      this.mountChat();
-      await this.loadProjects();
-
-      if (isAdmin) {
-        this.currentProject = null;
-        localStorage.removeItem('active_project_id');
-        this.navigateTo('dashboard');
-      } else {
-        const savedProjectId = localStorage.getItem('active_project_id');
-        if (savedProjectId && this.projects.some(p => p.id === savedProjectId)) {
-          await this.selectProject(savedProjectId);
-        } else {
-          this.showProjectStartScreen();
+        try {
+          await this.loadMyPermissions();
+          this.enforceUIPermissions();
+        } catch (err) {
+          console.error("Failed to load permissions:", err);
         }
+
+        await this.loadSettings();
+        this.mountChat();
+        await this.loadProjects();
+
+        if (isAdmin) {
+          this.currentProject = null;
+          localStorage.removeItem('active_project_id');
+          this.navigateTo('dashboard');
+        } else {
+          const savedProjectId = localStorage.getItem('active_project_id');
+          if (savedProjectId && this.projects.some(p => p.id === savedProjectId)) {
+            await this.selectProject(savedProjectId);
+          } else {
+            this.showProjectStartScreen();
+          }
+        }
+      } finally {
+        this.startingUp = false;
       }
 
       this.selectedRequirementId = localStorage.getItem('playwright_active_req_id') || null;
@@ -4558,6 +4579,14 @@ class App {
     this.navigateTo(view);
   }
 
+  // The signed in user's own `Module.action` permissions from /auth/me. Any
+  // role can read them; the admin matrix (/admin/permissions, /admin/roles)
+  // needs Permissions.view and Roles.view, so hasPermission must not rely on it.
+  async loadMyPermissions() {
+    const me = await API.getMe();
+    window.myPermissions = new Set((me.permissions || []).map(p => p.toLowerCase()));
+  }
+
   async loadRolesAndPermissions() {
     try {
       const data = await API.getPermissions();
@@ -4579,15 +4608,8 @@ class App {
     
     window.hasPermission = (module, action) => {
       if (roleName === 'Superadmin') return true;
-      if (!window.permissionsList || !window.rolePermissionsList) return false;
-      
-      const perm = window.permissionsList.find(p => p.module.toLowerCase() === module.toLowerCase() && p.action.toLowerCase() === action.toLowerCase());
-      if (!perm) return false;
-      
-      const role = window.rolesList ? window.rolesList.find(r => r.name === roleName) : null;
-      if (!role) return false;
-      
-      return window.rolePermissionsList.some(rp => rp.role_id === role.id && rp.permission_id === perm.id);
+      if (!window.myPermissions) return false;
+      return window.myPermissions.has(`${module}.${action}`.toLowerCase());
     };
 
     // Show/Hide sidebar items depending on view rights
@@ -4613,10 +4635,24 @@ class App {
       }
     });
 
-    const createReqBtn = document.getElementById('btn-create-requirement');
-    if (createReqBtn) {
-      createReqBtn.style.display = window.hasPermission('Requirements', 'create') ? 'block' : 'none';
+    // Spec 0009, AC-10: hide every action the role cannot perform. Buttons
+    // carry data-requires="Module.action". One style rule per denied
+    // permission also covers tables that render their buttons later.
+    // This only tidies the UI; the backend refuses the request either way.
+    const required = new Set();
+    document.querySelectorAll('[data-requires]').forEach(el => required.add(el.dataset.requires));
+    PERMISSION_GATED_ACTIONS.forEach(perm => required.add(perm));
+    const denied = [...required].filter(perm => {
+      const [module, action] = perm.split('.');
+      return !window.hasPermission(module, action);
+    });
+    let sheet = document.getElementById('permission-rules');
+    if (!sheet) {
+      sheet = document.createElement('style');
+      sheet.id = 'permission-rules';
+      document.head.appendChild(sheet);
     }
+    sheet.textContent = denied.map(perm => `[data-requires="${perm}"] { display: none !important; }`).join('\n');
   }
 
   async handleLoginSubmit(e) {
@@ -5054,6 +5090,7 @@ class App {
       alert("Permissions grid updated successfully.");
       
       await this.loadRolesAndPermissions();
+      await this.loadMyPermissions();
       this.enforceUIPermissions();
     } catch (err) {
       alert(`Failed to save permissions: ${err.message}`);

@@ -8,6 +8,7 @@ import { startHarvest, HarvestSession, HarvestSettings } from './object-harvest-
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import ts from 'typescript';
+import { workspaceSecretHeaders } from './backend-auth';
 
 interface ExecutionRunnerOptions {
   executionId: string;
@@ -93,7 +94,8 @@ async function sendWebhook(projectId: string | undefined, payload: any) {
   try {
     const response = await fetch(`http://127.0.0.1:8000/api/v1/projects/${projectId}/executions/webhook`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // Spec 0009, AC-6: the backend accepts run results only with the workspace secret.
+      headers: { 'Content-Type': 'application/json', ...workspaceSecretHeaders() },
       body: JSON.stringify(payload)
     });
     if (!response.ok) {
@@ -850,11 +852,18 @@ export class ExecutionEngine {
           let password = '';
           if (projectId) {
             try {
-              const credsRes = await fetch(`http://127.0.0.1:8000/api/v1/projects/${projectId}/credentials`);
+              const credsRes = await fetch(`http://127.0.0.1:8000/api/v1/projects/${projectId}/credentials`, {
+                headers: workspaceSecretHeaders(),
+              });
               if (credsRes.ok) {
                 const creds = await credsRes.json();
                 username = creds.username || '';
                 password = creds.password || '';
+              } else if (credsRes.status !== 404) {
+                // Spec 0009, AC-6: 404 means the project has no credentials. A 401
+                // or 503 means WORKSPACE_WEBHOOK_SECRET is wrong or unset; run
+                // without credentials so the login step fails clearly.
+                console.warn(`[Credentials] Backend refused the credentials request (status: ${credsRes.status}). Check WORKSPACE_WEBHOOK_SECRET in .env.local and the backend .env.`);
               }
             } catch (e) {
               console.warn('Failed to fetch credentials from vault:', e);
