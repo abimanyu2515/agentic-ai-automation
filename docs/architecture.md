@@ -41,7 +41,7 @@ The platform follows a **layered architecture** with clear separation of concern
 │  │       ├── TestCaseAgent            ─── EvaluationAgent          │   │
 │  │       ├── PlaywrightAgent                                      │   │
 │  │       ├── ExecutionAgent           ─── ExecutionAnalysisAgent   │   │
-│  │       ├── DefectManagementAgent    ─── ReportAgent              │   │
+│  │       ├── BugReportingAgent        ─── ReportAgent              │   │
 │  │       └── JiraSyncAgent                                        │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                             │                                         │
@@ -252,7 +252,7 @@ SupervisorAgent (Traffic Controller)
 │   ↓
 │   ExecutionAnalysisAgent (Failure Triage & Root Cause)
 │   ↓
-│   DefectManagementAgent (JIRA Bug Lifecycle)
+│   BugReportingAgent (Bug Report Drafts, reviewed before Jira)
 │   ↓
 │   ReportAgent (Report Generation)
 │   ↓
@@ -303,7 +303,7 @@ SupervisorAgent → QAAutomationOrchestratorAgent → PlaywrightAgent → END
 
 #### 6. EXECUTE Operation
 ```
-SupervisorAgent → ExecutionAgent → ExecutionAnalysisAgent → DefectManagementAgent → ReportAgent → END
+SupervisorAgent → ExecutionAgent → ExecutionAnalysisAgent → BugReportingAgent → ReportAgent → END
 ```
 - Runs Playwright tests
 - Analyzes failures (triages: Product Bug vs Environment vs Flaky)
@@ -361,13 +361,12 @@ SupervisorAgent → ExecutionAgent → ExecutionAnalysisAgent → DefectManageme
 - Determines root cause
 - Only Product Bugs proceed to defect management
 
-#### DefectManagementAgent
-- Uses LLM to generate semantic JQL queries for duplicate detection
-- Searches JIRA for existing bugs
-- Links to existing bugs if duplicates found
-- Creates new JIRA bug tickets if no duplicates
-- Uploads screenshots as attachments
-- Updates test cases with JIRA linkage
+#### BugReportingAgent
+- Drafts a structured bug report for each Product Bug failure (`BugReportService`)
+- Reuses the open report when the same error signature repeats
+- A person reviews and submits the draft in the Bug Reports view (or the project auto-submits above a confidence threshold)
+- On submit: searches Jira for a duplicate, then comments on it or creates a Bug with screenshot and trace attached, linked to the Story
+- Updates the run and test case with the Jira link
 
 #### ReportAgent
 - Generates execution reports (HTML/PDF/JUnit XML)
@@ -467,7 +466,7 @@ LANGSMITH_PROJECT=My Project
 
 **Architecture**:
 ```
-DefectManagementAgent
+BugReportService (submit)
   ↓
   ├─ Sync failures as JIRA bugs
   │  ↓

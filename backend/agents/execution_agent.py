@@ -24,7 +24,7 @@ Workflow Position:
         ↓
     ExecutionAnalysisAgent
         ↓
-    DefectManagementAgent
+    BugReportingAgent
         ↓
     ReportAgent
 

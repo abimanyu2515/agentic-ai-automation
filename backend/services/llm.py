@@ -484,6 +484,7 @@ class LLMService:
                     api_base=self._api_base(),
                     api_key=self.config.api_key,
                     timeout=timeout,
+                    drop_params=True,
                     **(self._json_mode_kwargs() if json_mode else {}),
                     **kwargs,
                 )
@@ -533,6 +534,7 @@ class LLMService:
                     timeout=timeout,
                     num_retries=0,
                     metadata=metadata,
+                    drop_params=True,
                     **(self._json_mode_kwargs(config) if json_mode else {}),
                     **kwargs,
                 )

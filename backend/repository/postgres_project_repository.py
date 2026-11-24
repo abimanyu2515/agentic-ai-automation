@@ -93,6 +93,11 @@ def _document_from_db(d) -> Document:
 db_session = scoped_session(SessionLocal)
 
 
+def _min_confidence(row) -> float:
+    value = getattr(row, "bug_auto_submit_min_confidence", None)
+    return 0.85 if value is None else float(value)
+
+
 @_rollback_on_database_errors
 class PostgresProjectRepository(ProjectRepository):
     def __init__(self):
@@ -157,6 +162,8 @@ class PostgresProjectRepository(ProjectRepository):
                 target_password_enc=getattr(p, "target_password_enc", None),
                 is_safe_test_environment=getattr(p, "is_safe_test_environment", False),
                 rag_dataset_id=getattr(p, "rag_dataset_id", None),
+                bug_auto_submit=bool(getattr(p, "bug_auto_submit", False)),
+                bug_auto_submit_min_confidence=_min_confidence(p),
                 created_at=p.created_at,
                 requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted],
                 is_deleted=p.is_deleted,
@@ -186,6 +193,8 @@ class PostgresProjectRepository(ProjectRepository):
             target_password_enc=getattr(p, "target_password_enc", None),
             is_safe_test_environment=getattr(p, "is_safe_test_environment", False),
             rag_dataset_id=getattr(p, "rag_dataset_id", None),
+            bug_auto_submit=bool(getattr(p, "bug_auto_submit", False)),
+            bug_auto_submit_min_confidence=_min_confidence(p),
             created_at=p.created_at,
             requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted],
             is_deleted=p.is_deleted,
@@ -268,6 +277,8 @@ class PostgresProjectRepository(ProjectRepository):
         db_proj.target_username = project.target_username
         db_proj.target_password_enc = project.target_password_enc
         db_proj.is_safe_test_environment = project.is_safe_test_environment
+        db_proj.bug_auto_submit = project.bug_auto_submit
+        db_proj.bug_auto_submit_min_confidence = project.bug_auto_submit_min_confidence
         owner_id = db_proj.owner_id
         try:
             self._flush_or_commit()
@@ -1149,40 +1160,28 @@ class PostgresProjectRepository(ProjectRepository):
         self._flush_or_commit()
         return removed
 
-    def get_execution_results(self, project_id: UUID) -> list[ExecutionResult]:
-        session = self.session
-        stmt = select(ExecutionDB).where(ExecutionDB.project_id == project_id)
-        db_execs = session.scalars(stmt).all()
-        return [
-            ExecutionResult(
-                id=ex.id,
-                test_case_id=ex.test_case_id,
-                status=ex.status,
-                duration_seconds=ex.duration_seconds,
-                error_message=ex.error_message,
-                screenshot_path=ex.screenshot_path,
-                video_path=ex.video_path,
-                trace_path=ex.trace_path,
-                browser_version=ex.browser_version,
-                executed_at=ex.executed_at,
-                test_cycle_id=ex.test_cycle_id,
-                failure_category=ex.failure_category,
-                root_cause_summary=ex.root_cause_summary,
-                suggest_retry=ex.suggest_retry,
-                retest_pending_candidate=ex.retest_pending_candidate,
-                jira_bug_id=ex.jira_bug_id,
-                jira_bug_url=ex.jira_bug_url,
-                project_config_snapshot=getattr(ex, 'project_config_snapshot', None)
-            )
-            for ex in db_execs
-        ]
+    # Triage fields written by the log analyser (ExecutionAnalysisAgent and
+    # LogAnalysisService) and Jira sync; mapped the same way on read and write.
+    _EXECUTION_TRIAGE_FIELDS = (
+        "failure_category",
+        "root_cause_summary",
+        "trace_analysis",
+        "screenshot_findings",
+        "suggest_retry",
+        "retest_pending_candidate",
+        "failing_step",
+        "evidence",
+        "confidence",
+        "flaky_score",
+        "frontend_error_detected",
+        "frontend_error_details",
+        "run_history_summary",
+        "jira_bug_id",
+        "jira_bug_url",
+        "bug_report_id",
+    )
 
-    def get_execution_result(self, project_id: UUID, execution_id: UUID) -> ExecutionResult | None:
-        session = self.session
-        stmt = select(ExecutionDB).where(ExecutionDB.project_id == project_id, ExecutionDB.id == execution_id)
-        ex = session.scalar(stmt)
-        if not ex:
-            return None
+    def _to_execution_result(self, ex: ExecutionDB) -> ExecutionResult:
         return ExecutionResult(
             id=ex.id,
             test_case_id=ex.test_case_id,
@@ -1195,16 +1194,22 @@ class PostgresProjectRepository(ProjectRepository):
             browser_version=ex.browser_version,
             executed_at=ex.executed_at,
             test_cycle_id=ex.test_cycle_id,
-            timeline=ex.timeline if hasattr(ex, 'timeline') else [],
-            screenshots=ex.screenshots if hasattr(ex, 'screenshots') else [],
-            failure_category=ex.failure_category,
-            root_cause_summary=ex.root_cause_summary,
-            suggest_retry=ex.suggest_retry,
-            retest_pending_candidate=ex.retest_pending_candidate,
-            jira_bug_id=ex.jira_bug_id,
-            jira_bug_url=ex.jira_bug_url,
-            project_config_snapshot=getattr(ex, 'project_config_snapshot', None)
+            timeline=ex.timeline,
+            screenshots=ex.screenshots,
+            project_config_snapshot=ex.project_config_snapshot,
+            **{field: getattr(ex, field) for field in self._EXECUTION_TRIAGE_FIELDS},
         )
+
+    def get_execution_results(self, project_id: UUID) -> list[ExecutionResult]:
+        session = self.session
+        stmt = select(ExecutionDB).where(ExecutionDB.project_id == project_id)
+        return [self._to_execution_result(ex) for ex in session.scalars(stmt).all()]
+
+    def get_execution_result(self, project_id: UUID, execution_id: UUID) -> ExecutionResult | None:
+        session = self.session
+        stmt = select(ExecutionDB).where(ExecutionDB.project_id == project_id, ExecutionDB.id == execution_id)
+        ex = session.scalar(stmt)
+        return self._to_execution_result(ex) if ex else None
 
     def save_execution_result(self, project_id: UUID, result: ExecutionResult) -> None:
         session = self.session
@@ -1237,13 +1242,8 @@ class PostgresProjectRepository(ProjectRepository):
                 executed_at=result.executed_at,
                 timeline=result.timeline,
                 screenshots=result.screenshots,
-                failure_category=result.failure_category,
-                root_cause_summary=result.root_cause_summary,
-                suggest_retry=result.suggest_retry,
-                retest_pending_candidate=result.retest_pending_candidate,
-                jira_bug_id=result.jira_bug_id,
-                jira_bug_url=result.jira_bug_url,
                 project_config_snapshot=result.project_config_snapshot,
+                **{field: getattr(result, field) for field in self._EXECUTION_TRIAGE_FIELDS},
             )
             session.add(db_ex)
         else:
@@ -1258,12 +1258,8 @@ class PostgresProjectRepository(ProjectRepository):
             db_ex.test_cycle_id = test_cycle_id_to_use
             db_ex.timeline = result.timeline
             db_ex.screenshots = result.screenshots
-            db_ex.failure_category = result.failure_category
-            db_ex.root_cause_summary = result.root_cause_summary
-            db_ex.suggest_retry = result.suggest_retry
-            db_ex.retest_pending_candidate = result.retest_pending_candidate
-            db_ex.jira_bug_id = result.jira_bug_id
-            db_ex.jira_bug_url = result.jira_bug_url
+            for field in self._EXECUTION_TRIAGE_FIELDS:
+                setattr(db_ex, field, getattr(result, field))
             # The snapshot is immutable: keep the first one, only fill it when missing.
             if db_ex.project_config_snapshot is None:
                 db_ex.project_config_snapshot = result.project_config_snapshot

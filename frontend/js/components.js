@@ -769,9 +769,14 @@ export const Components = {
           if (ex.failure_category === 'Flaky Test / Automation Issue') badgeClass = 'badge-pending';
           failureCategoryBadge = `<span class="badge ${badgeClass}" style="font-size: 0.7rem;">${escapeHTML(ex.failure_category)}</span>`;
         }
+        if (typeof ex.flaky_score === 'number' && ex.flaky_score >= 0.5) {
+          failureCategoryBadge += ` <span class="badge badge-pending" style="font-size: 0.65rem;" title="Flaky score ${Math.round(ex.flaky_score * 100)}% from recent run history">flaky</span>`;
+        }
         
         if (ex.jira_bug_id && ex.jira_bug_url) {
-          jiraBugLink = `<a href="${escapeHTML(ex.jira_bug_url)}" target="_blank" class="btn btn-secondary" style="padding: 2px 6px; font-size: 0.7rem; text-decoration: none;">${escapeHTML(ex.jira_bug_id)}</a>`;
+          jiraBugLink = `<a href="${escapeHTML(ex.jira_bug_url)}" target="_blank" rel="noopener" class="btn btn-secondary" style="padding: 2px 6px; font-size: 0.7rem; text-decoration: none;">${escapeHTML(ex.jira_bug_id)}</a>`;
+        } else if (ex.bug_report_id) {
+          jiraBugLink = `<button type="button" class="btn btn-secondary" onclick="window.openBugReport('${escapeHTML(ex.bug_report_id)}')" style="padding: 2px 6px; font-size: 0.7rem;" title="Open the bug report draft">Bug report</button>`;
         }
       }
 

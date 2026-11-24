@@ -49,7 +49,8 @@ AGENT_STAGES: dict[str, str] = {
     "playwright_agent": "Scripts",
     "script_generator_agent": "Scripts",
     "execution_analysis_agent": "Analysis",
-    "defect_management_agent": "Analysis",
+    "defect_management_agent": "Analysis",  # retired; kept so old usage rows keep their group
+    "bug_reporting_agent": "Analysis",
     "execution_analyzer": "Analysis",
     "report_agent": "Reports",
     "report_service": "Reports",

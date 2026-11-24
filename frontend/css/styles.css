@@ -3196,3 +3196,129 @@ body.light-theme {
   line-height: 1.4;
   color: var(--text-secondary);
 }
+
+/* ---------------------------------------------------------------- Bug reports view */
+.btn[hidden] {
+  display: none;
+}
+
+.bug-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.bug-filter {
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 9999px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.bug-filter.active {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary);
+  color: #fff;
+}
+
+.bug-filter:focus-visible,
+.bug-row:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.bug-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.bug-layout.has-detail {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 520px);
+}
+
+@media (max-width: 1100px) {
+  .bug-layout.has-detail {
+    grid-template-columns: 1fr;
+  }
+}
+
+.bug-row {
+  cursor: pointer;
+}
+
+.bug-row.selected td {
+  background: var(--bg-tertiary);
+}
+
+.bug-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.bug-meta {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.bug-detail {
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-lg);
+  background: var(--bg-secondary);
+}
+
+.bug-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.bug-error {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: var(--border-radius-md);
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-danger);
+  font-size: 0.85rem;
+}
+
+.bug-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.bug-evidence {
+  margin: 8px 0 16px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.bug-evidence summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.bug-evidence ul {
+  margin: 8px 0;
+  padding-left: 18px;
+  font-family: monospace;
+  font-size: 0.8rem;
+  word-break: break-word;
+}
+
+.bug-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

@@ -11,7 +11,7 @@ Workflow Position:
         retrieval_requirements -> requirement_analyst_agent
         retrieval_scenarios    -> scenario_agent
         retrieval_test_cases   -> test_case_agent
-        retrieval_analysis     -> execution_analysis_agent (defect_management_agent reuses it)
+        retrieval_analysis     -> execution_analysis_agent (bug_reporting_agent reuses it)
 
 Inputs:
     - state.project_id, state.requirement

@@ -3,8 +3,8 @@
 // switching views never resets them. The open state and the active thread
 // per project are kept in localStorage only as hints; the thread itself is
 // always loaded from the server.
-import { API } from './api.js?v=22';
-import { escapeHTML } from './components.js?v=6';
+import { API } from './api.js?v=25';
+import { escapeHTML } from './components.js?v=8';
 
 const OPEN_KEY = 'chat_panel_open';
 const EXPANDED_KEY = 'chat_panel_expanded';
@@ -105,6 +105,7 @@ const LINK_LABELS = {
   testcases: 'Open test cases',
   playwright: 'Open the script',
   executions: 'Open executions',
+  bugs: 'Open bug report',
   requirements: 'Open requirements'
 };
 const ACTION_ERROR_TEXT = { 403: 'You no longer have permission' };
@@ -161,6 +162,12 @@ function describeAction(action) {
   if (action.type === 'review_scenario') {
     const title = params.decision === 'rejected' ? 'Reject scenario' : 'Approve scenario';
     return { title, listLabel: 'On:', list: targets };
+  }
+  if (action.type === 'report_bug') {
+    return { title: 'Draft a bug report (not sent to Jira)', listLabel: 'For:', list: targets };
+  }
+  if (action.type === 'submit_bug_report') {
+    return { title: 'Submit bug report to Jira', listLabel: 'Report:', list: targets };
   }
   if (action.type === 'generate_test_data') {
     return { title: 'Generate test data (20 datasets)', listLabel: 'For:', list: targets };

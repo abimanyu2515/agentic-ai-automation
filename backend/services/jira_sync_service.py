@@ -404,6 +404,10 @@ async def sync_execution_finished(scenario_id: UUID, execution_result_id: UUID):
             f"Execution Time: {execution_result.duration_seconds:.2f} sec\n\n"
             f"Execution Report attached."
         )
+        if execution_result.jira_bug_id:
+            audit_comment += f"\nLinked bug: {execution_result.jira_bug_id}"
+        elif execution_result.bug_report_id:
+            audit_comment += "\nA bug report draft is waiting for review in the QA platform."
         jira_client.add_comment(issue_key, audit_comment)
 
         # 4. Resilient PDF Report Upload
@@ -439,80 +443,8 @@ async def sync_execution_finished(scenario_id: UUID, execution_result_id: UUID):
                     jira_client.add_comment(issue_key, f"⚠️ Note: Failed to attach PDF report for Execution #{execution_count}. Error: {upload_err}")
                     log_sync_event(str(scenario_id), issue_key, "UPLOAD_PDF", "FAILED", reason=str(upload_err))
 
-        # 5. Handle Defect/Bug Ticket if failed
-        if execution_result.status != ExecutionStatus.PASSED:
-            project_key = issue_key.split("-")[0]
-            jql_bug = f"project = '{project_key}' AND issuetype = Bug AND labels = 'scenario_{scenario_id}' AND status != 'Closed' AND status != 'Resolved'"
-            existing_bugs = jira_client.search_issues(jql_bug)
-            
-            if existing_bugs:
-                bug_issue = existing_bugs[0]
-                bug_key = bug_issue["key"]
-                bug_url = f"{jira_client.config.base_url.rstrip('/')}/browse/{bug_key}"
-                
-                bug_comment = (
-                    f"Test execution failed again at {execution_result.executed_at.isoformat() if hasattr(execution_result.executed_at, 'isoformat') else str(execution_result.executed_at)}.\n"
-                    f"Failure Reason: {execution_result.error_message or 'No specific error log provided.'}"
-                )
-                jira_client.add_comment(bug_key, bug_comment)
-                jira_client.transition_issue(bug_key, "In Progress")
-
-                execution_result.jira_bug_id = bug_key
-                execution_result.jira_bug_url = bug_url
-                
-                for tc in scenario_tcs:
-                    tc.jira_issue_key = bug_key
-                    tc.jira_issue_url = bug_url
-                    tc.jira_sync_status = "linked"
-                    tc.jira_last_synced_at = datetime.now(timezone.utc)
-                    repo.update_test_case(tc)
-
-                log_sync_event(str(scenario_id), bug_key, "LINK_EXISTING_BUG", "SUCCESS")
-
-            else:
-                bug_summary = f"Bug: Test Failure - {scenario.scenario_name}"
-                bug_desc = (
-                    f"*Failure Summary*\n"
-                    f"{execution_result.root_cause_summary or 'Execution Failed'}\n\n"
-                    f"*Failure Reason*\n"
-                    f"{execution_result.error_message or 'Unknown error'}\n\n"
-                    f"*Scenario Link*\n"
-                    f"{scenario.jira_issue_url or 'N/A'}\n\n"
-                    f"*Execution Timestamp*\n"
-                    f"{execution_result.executed_at.isoformat() if hasattr(execution_result.executed_at, 'isoformat') else str(execution_result.executed_at)}"
-                )
-                
-                bug_labels = ["platform_sync", f"scenario_{scenario_id}", "bug"]
-                new_bug = jira_client.create_issue(
-                    summary=bug_summary,
-                    description=bug_desc,
-                    issue_type="Bug",
-                    project_key=project_key,
-                    labels=bug_labels
-                )
-                if new_bug:
-                    bug_key = new_bug["key"]
-                    bug_url = new_bug["url"]
-                    
-                    execution_result.jira_bug_id = bug_key
-                    execution_result.jira_bug_url = bug_url
-
-                    for tc in scenario_tcs:
-                        tc.jira_issue_key = bug_key
-                        tc.jira_issue_url = bug_url
-                        tc.jira_sync_status = "created"
-                        tc.jira_last_synced_at = datetime.now(timezone.utc)
-                        repo.update_test_case(tc)
-
-                    jira_client.link_issues(bug_key, issue_key, "Relates")
-                    log_sync_event(str(scenario_id), bug_key, "CREATE_NEW_BUG", "SUCCESS")
-
-        if project_id:
-            repo.save_execution_result(project_id, execution_result)
-            # Knowledge (spec 0006, AC-14a): the linked bug is indexed from Jira.
-            from backend.services.knowledge_indexer import queue_defect_keys
-
-            queue_defect_keys(project_id, [execution_result.jira_bug_id])
+        # Bugs are not filed here. BugReportingAgent / BugReportService drafts a
+        # report for Product Bug failures and a person submits it to Jira.
 
         now_time = datetime.now(timezone.utc)
         scenario.last_jira_sync_at = now_time

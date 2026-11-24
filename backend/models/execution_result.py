@@ -45,10 +45,20 @@ class ExecutionResult(BaseModel):
     screenshot_findings: str | None = None
     suggest_retry: bool | None = None
     retest_pending_candidate: bool | None = None
+    # Log analyser evidence (populated by LogAnalysisService)
+    failing_step: str | None = None
+    evidence: list[str] | None = None
+    confidence: float | None = None
+    flaky_score: float | None = None
+    frontend_error_detected: bool | None = None
+    frontend_error_details: str | None = None
+    run_history_summary: dict | None = None
 
-    # Jira Bug Link (populated by DefectManagementAgent)
+    # Jira Bug Link (written by BugReportService when a report is submitted)
     jira_bug_id: str | None = None
     jira_bug_url: str | None = None
+    # The bug report drafted for this run (BugReportingAgent / BugReportService)
+    bug_report_id: UUID | None = None
 
     # Spec 0001, AC-4 and AC-8: the project configuration captured when the run was
     # accepted (project_id, target_url, framework, credential_reference). The run uses

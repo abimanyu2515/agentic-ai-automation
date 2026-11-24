@@ -171,6 +171,7 @@ def test_test_data_agent_defaults_to_the_generation_provider(role_settings):
     assert fake.call_args.kwargs["model"] == "gemini/A"
     assert fake.call_args.kwargs["api_key"] == "g-key"
     assert fake.call_args.kwargs["api_base"] is None
+    assert fake.call_args.kwargs["drop_params"] is True
 
 
 def test_playwright_agent_defaults_to_generation(role_settings):
@@ -188,7 +189,7 @@ def test_playwright_agent_defaults_to_generation(role_settings):
     ("evaluation_agent", "EvaluationAgent"),
     ("automation_orchestrator_agent", "QAAutomationOrchestratorAgent"),
     ("execution_analysis_agent", "ExecutionAnalysisAgent"),
-    ("defect_management_agent", "DefectManagementAgent"),
+    ("bug_reporting_agent", "BugReportingAgent"),
 ])
 def test_analysis_agents_default_to_analysis(role_settings, module, name):
     import importlib

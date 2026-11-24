@@ -26,7 +26,7 @@ Workflow Position:
         JiraSyncAgent
         QAStoryAnalyzerAgent
         ExecutionAnalysisAgent
-        DefectManagementAgent
+        BugReportingAgent
         QAAutomationOrchestratorAgent
 
 Design Pattern:

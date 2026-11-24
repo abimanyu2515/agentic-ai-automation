@@ -227,6 +227,63 @@ def token_usage_service(tmp_path):
     set_token_usage_service(None)
 
 
+class OfflineAnalysisLLM:
+    """The default log analyser LLM in tests: fails fast, never touches litellm.
+    LogAnalysisService then takes its documented fallback path."""
+
+    def structured_generate(self, *, user, response_model, **kwargs):
+        raise RuntimeError("No LLM in tests: inject a StubLLMService into LogAnalysisService")
+
+
+@pytest.fixture(autouse=True)
+def offline_log_analysis():
+    """Batch and webhook runs triage failures with LogAnalysisService. Unless a
+    test injects an LLM, its default LLM is OfflineAnalysisLLM, so no test calls
+    a live provider. Restores by hand for the reason given in webhook_secrets."""
+    from backend.services.log_analysis_service import LogAnalysisService
+
+    original = LogAnalysisService.__dict__["llm_service"]
+
+    def offline(self):
+        if self._llm_service is None:
+            self._llm_service = OfflineAnalysisLLM()
+        return self._llm_service
+
+    LogAnalysisService.llm_service = property(offline)
+    yield
+    LogAnalysisService.llm_service = original
+
+
+@pytest.fixture(autouse=True)
+def offline_bug_reports(request):
+    """Every test gets an empty in memory bug report store, and BugReportService's
+    default LLM is OfflineAnalysisLLM, so drafting takes its deterministic fallback
+    unless a test injects an LLM. Yields the store for tests that inspect it.
+    test_llm_roles keeps the real default, since it checks that default's role
+    and never drafts."""
+    from backend.repository.bug_report_repository import (
+        InMemoryBugReportRepository,
+        set_bug_report_repository,
+    )
+    from backend.services.bug_report_service import BugReportService
+
+    store = InMemoryBugReportRepository()
+    set_bug_report_repository(store)
+    original = BugReportService.__dict__["llm_service"]
+    keep_real_llm = request.module.__name__.endswith("test_llm_roles")
+
+    def offline(self):
+        if self._llm_service is None:
+            self._llm_service = OfflineAnalysisLLM()
+        return self._llm_service
+
+    if not keep_real_llm:
+        BugReportService.llm_service = property(offline)
+    yield store
+    BugReportService.llm_service = original
+    set_bug_report_repository(None)
+
+
 # ---------------------------------------------------------------- spec 0009: users, roles, and secrets
 
 TEST_WORKSPACE_SECRET = "test-workspace-secret"

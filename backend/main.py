@@ -64,7 +64,7 @@ Workflow Integration:
     - generate_scenarios: ScenarioAgent → HumanApprovalAgent
     - generate_backlog: BacklogCreationAgent → ScenarioAgent
     - generate_test_cases: TestCaseAgent → EvaluationAgent → HumanApprovalAgent
-    - execute_tests: ExecutionAgent → ExecutionAnalysisAgent → DefectManagementAgent → ReportAgent
+    - execute_tests: ExecutionAgent → ExecutionAnalysisAgent → BugReportingAgent → ReportAgent
 
 Security:
     - Credentials stored in encrypted vault (VaultService)
@@ -179,6 +179,9 @@ from backend.services.llm_context import LLMContextMiddleware
 from backend.services.token_usage_service import get_token_usage_service
 from backend.models.token_usage import TokenUsageFilters
 from backend.schemas.token_usage_dto import ModelPriceRow, TokenUsageCallsPage, TokenUsageSettings
+from backend.schemas.bug_report_dto import BugReportDismiss, BugReportUpdate
+from backend.models.bug_report import BugReport, BugReportStatus
+from backend.services.bug_report_service import BugReportError, BugReportService
 from backend.utils.crypto import encrypt_value
 from backend.database.db_models import UserDB, RoleDB, PermissionDB, RolePermissionDB, ProjectUserDB, RefreshTokenDB, AuditLogDB
 
@@ -191,6 +194,12 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("backend.project_creation")
+
+
+def get_bug_report_service() -> BugReportService:
+    """Route dependency; tests override it with app.dependency_overrides."""
+    return BugReportService()
+
 
 # Windows Python installations may not register the JavaScript MIME type.
 # Register it explicitly so browser module scripts are executed by StaticFiles.
@@ -447,6 +456,8 @@ def resolve_project_response(p, all_projects=None) -> ProjectResponse:
         target_url=getattr(p, "target_url", None),
         target_username=username if username else (getattr(p, "target_username", None) if getattr(p, "target_username", None) != "vault_secured" else None),
         is_safe_test_environment=getattr(p, "is_safe_test_environment", False),
+        bug_auto_submit=getattr(p, "bug_auto_submit", False),
+        bug_auto_submit_min_confidence=getattr(p, "bug_auto_submit_min_confidence", 0.85),
         readiness=readiness_for_project(p, owner_projects),
     )
 
@@ -503,6 +514,9 @@ class ProjectUpdate(BaseModel):
     target_username: str | None = None
     target_password: str | None = None
     is_safe_test_environment: bool | None = None
+    # Bug Reporting Agent: file drafts to Jira without review at or above this triage confidence.
+    bug_auto_submit: bool | None = None
+    bug_auto_submit_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 @app.get("/api/v1/projects", response_model=list[ProjectResponse])
@@ -624,6 +638,10 @@ def update_project_settings(
         p.target_url = data.target_url
     if data.is_safe_test_environment is not None:
         p.is_safe_test_environment = data.is_safe_test_environment
+    if data.bug_auto_submit is not None:
+        p.bug_auto_submit = data.bug_auto_submit
+    if data.bug_auto_submit_min_confidence is not None:
+        p.bug_auto_submit_min_confidence = data.bug_auto_submit_min_confidence
     
     if data.target_username is not None or (data.target_password is not None and data.target_password != "" and data.target_password != "********"):
         from backend.services.vault_service import VaultService
@@ -2331,7 +2349,14 @@ def get_execution_detail(project_id: UUID, execution_id: UUID):
             "screenshot_path": result.screenshot_path,
             "video_path": result.video_path,
             "trace_path": result.trace_path,
-            "executed_at": result.executed_at.isoformat()
+            "executed_at": result.executed_at.isoformat(),
+            # Log analyser triage (ExecutionAnalysisAgent / LogAnalysisService).
+            **result.model_dump(mode="json", include={
+                "failure_category", "root_cause_summary", "trace_analysis", "screenshot_findings",
+                "suggest_retry", "retest_pending_candidate", "failing_step", "evidence", "confidence",
+                "flaky_score", "frontend_error_detected", "frontend_error_details", "run_history_summary",
+                "jira_bug_id", "jira_bug_url", "bug_report_id",
+            }),
         },
         "timeline": timeline,
         "logs": logs,
@@ -2804,6 +2829,7 @@ def save_playwright_script(
 @app.post("/api/v1/projects/{project_id}/executions/webhook")
 def process_execution_webhook(
     project_id: UUID,
+    background_tasks: BackgroundTasks,
     payload: dict = Body(...),
     caller: str = Depends(require_workspace_secret),
 ):
@@ -2843,7 +2869,9 @@ def process_execution_webhook(
     elif event == "completed":
         # Finalize execution in Python service layer
         exec_service = ExecutionService()
-        result = exec_service.finalize_execution(project_id, payload)
+        # Failure triage (log analyser) runs after the response, so the
+        # workspace never waits on the analysis LLM.
+        result = exec_service.finalize_execution(project_id, payload, background_tasks=background_tasks)
         
         events.append({
             "status": "Completed" if result.status.value == "passed" else "Failed",
@@ -3419,6 +3447,7 @@ def jira_webhook(
     payload: dict = Body(...),
     db: Session = Depends(get_db),
     caller: str = Depends(require_jira_secret),
+    bug_reports: BugReportService = Depends(get_bug_report_service),
 ):
     """Receives JIRA webhook events when bugs are updated/resolved."""
     issue = payload.get("issue", {})
@@ -3462,8 +3491,14 @@ def jira_webhook(
                     
     if updated_count > 0 and provider in ["sql", "postgres"] and db:
         db.commit()
-        
-    return {"status": "success", "updated_count": updated_count}
+
+    try:
+        resolved_reports = bug_reports.mark_resolved_by_jira_key(key)
+    except Exception:
+        logger.exception("Could not mark bug reports resolved: jira_key=%s", key)
+        resolved_reports = 0
+
+    return {"status": "success", "updated_count": updated_count, "resolved_bug_reports": resolved_reports}
 
 
 @app.post("/api/v1/projects/{project_id}/requirements/{requirement_id}/sync-jira")
@@ -3539,6 +3574,92 @@ def sync_execution_bug(
     queue_defect_keys(project_id, [getattr(saved_ex, "jira_bug_id", None), getattr(saved_tc, "jira_issue_key", None)])
     
     return {"status": "success", "logs": final_state.logs}
+
+
+# ---------------------------------------------------------------- bug reports (BugReportingAgent)
+
+
+def _bug_report_or_404(service: BugReportService, project_id: UUID, report_id: UUID) -> BugReport:
+    report = service.get(project_id, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Bug report not found")
+    return report
+
+
+def _run_bug_report_action(call):
+    try:
+        return call()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except BugReportError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.get("/api/v1/projects/{project_id}/bug-reports", response_model=list[BugReport])
+def list_bug_reports(
+    project_id: UUID,
+    status: BugReportStatus | None = None,
+    user: UserDB = Depends(require_project_permission("Executions", "view")),
+    service: BugReportService = Depends(get_bug_report_service),
+):
+    return service.list_reports(project_id, status)
+
+
+@app.get("/api/v1/projects/{project_id}/bug-reports/{report_id}", response_model=BugReport)
+def get_bug_report(
+    project_id: UUID,
+    report_id: UUID,
+    user: UserDB = Depends(require_project_permission("Executions", "view")),
+    service: BugReportService = Depends(get_bug_report_service),
+):
+    return _bug_report_or_404(service, project_id, report_id)
+
+
+@app.post("/api/v1/projects/{project_id}/executions/{execution_id}/bug-report", response_model=BugReport)
+def create_bug_report_from_execution(
+    project_id: UUID,
+    execution_id: UUID,
+    user: UserDB = Depends(require_project_permission("Executions", "edit")),
+    service: BugReportService = Depends(get_bug_report_service),
+):
+    """Draft a bug report for a failed run on request, whatever its triage category.
+    Returns the run's existing report when it already has one."""
+    _require_execution_in_project(project_id, execution_id)
+    return _run_bug_report_action(lambda: service.report_for_execution(project_id, execution_id, actor=str(user.id)))
+
+
+@app.patch("/api/v1/projects/{project_id}/bug-reports/{report_id}", response_model=BugReport)
+def update_bug_report(
+    project_id: UUID,
+    report_id: UUID,
+    data: BugReportUpdate,
+    user: UserDB = Depends(require_project_permission("Executions", "edit")),
+    service: BugReportService = Depends(get_bug_report_service),
+):
+    patch = data.model_dump(exclude_unset=True)
+    return _run_bug_report_action(lambda: service.update(project_id, report_id, patch, actor=str(user.id)))
+
+
+@app.post("/api/v1/projects/{project_id}/bug-reports/{report_id}/submit", response_model=BugReport)
+def submit_bug_report(
+    project_id: UUID,
+    report_id: UUID,
+    user: UserDB = Depends(require_project_permission("Executions", "edit")),
+    service: BugReportService = Depends(get_bug_report_service),
+):
+    """File the report in Jira. A Jira failure returns the report with status submit_failed."""
+    return _run_bug_report_action(lambda: service.submit(project_id, report_id, actor=str(user.id)))
+
+
+@app.post("/api/v1/projects/{project_id}/bug-reports/{report_id}/dismiss", response_model=BugReport)
+def dismiss_bug_report(
+    project_id: UUID,
+    report_id: UUID,
+    data: BugReportDismiss,
+    user: UserDB = Depends(require_project_permission("Executions", "edit")),
+    service: BugReportService = Depends(get_bug_report_service),
+):
+    return _run_bug_report_action(lambda: service.dismiss(project_id, report_id, data.reason, actor=str(user.id)))
 
 
 @app.post("/api/v1/admin/reset-demo-data")

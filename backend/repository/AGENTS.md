@@ -14,6 +14,7 @@ This area provides the common persistence interface and its JSON and PostgreSQL 
 | `backend/repository/postgres_chat_repository.py` | SQL implementation of the chat repository |
 | `backend/repository/token_usage_store.py` / `postgres_token_usage_store.py` | Token usage records, JSON and SQL |
 | `backend/repository/object_repository_store.py` / `postgres_object_repository_store.py` | Object repository locators, JSON and SQL |
+| `backend/repository/bug_report_repository.py` / `postgres_bug_report_repository.py` | Bug reports (`backend/database/bug_report_store.json` or the `bug_reports` table) |
 
 ## Conventions
 
