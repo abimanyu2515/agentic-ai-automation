@@ -478,7 +478,7 @@ def test_no_operation_fallback_goes_through_retrieval(retrieval_flag):
         playwright_agent=Recorder("playwright_agent"),
         execution_agent=Recorder("execution_agent"),
         execution_analysis_agent=Recorder("execution_analysis_agent"),
-        defect_management_agent=Recorder("defect_management_agent"),
+        bug_reporting_agent=Recorder("bug_reporting_agent"),
         report_agent=Recorder("report_agent"),
         knowledge_retrieval_agents={stage: Recorder(node) for stage, node in STAGE_NODES.items()},
     )
@@ -487,7 +487,7 @@ def test_no_operation_fallback_goes_through_retrieval(retrieval_flag):
         "retrieval_scenarios", "scenario_agent", "human_approval_agent",
         "retrieval_test_cases", "test_case_agent", "evaluation_agent", "human_approval_agent",
         "playwright_agent", "execution_agent",
-        "retrieval_analysis", "execution_analysis_agent", "defect_management_agent", "report_agent",
+        "retrieval_analysis", "execution_analysis_agent", "bug_reporting_agent", "report_agent",
     ]
 
 
@@ -689,18 +689,26 @@ def _run_execution_analysis(llm, **extra):
     ExecutionAnalysisAgent(llm_service=llm).run(_failed_run_state(**extra))
 
 
-def _run_defect_agent(llm, **extra):
-    from backend.agents.defect_management_agent import DefectManagementAgent
+def _run_bug_reporting_agent(llm, **extra):
+    from backend.agents.bug_reporting_agent import BugReportingAgent
+    from backend.repository.bug_report_repository import InMemoryBugReportRepository
+    from backend.services.bug_report_service import BugReportService
 
-    jira = SimpleNamespace(config=SimpleNamespace(base_url="https://jira.example.com"))
-    DefectManagementAgent(llm_service=llm, jira_service=jira).run(_failed_run_state(**extra))
+    service = BugReportService(
+        llm_service=llm,
+        bug_repo=InMemoryBugReportRepository(),
+        project_repo=SimpleNamespace(get_scenario=lambda _id: None, get_project=lambda _id: None),
+        jira_service=SimpleNamespace(config=SimpleNamespace(base_url="https://jira.example.com", project_key="QA")),
+        vault=SimpleNamespace(get_credentials=lambda _pid: []),
+    )
+    BugReportingAgent(bug_report_service=service).run(_failed_run_state(**extra))
 
 
 AGENT_RUNNERS = [
     pytest.param(_run_test_case_agent, id="test_case_agent"),
     pytest.param(_run_requirement_analyst, id="requirement_analyst_agent"),
     pytest.param(_run_execution_analysis, id="execution_analysis_agent"),
-    pytest.param(_run_defect_agent, id="defect_management_agent"),
+    pytest.param(_run_bug_reporting_agent, id="bug_reporting_agent"),
 ]
 
 

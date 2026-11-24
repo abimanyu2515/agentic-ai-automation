@@ -204,6 +204,18 @@ class EmptyParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ReportBugParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    execution_id: UUID
+
+
+class SubmitBugReportParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    bug_report_id: UUID
+
+
 # ---------------------------------------------------------------------- catalog
 
 
@@ -312,6 +324,18 @@ ACTION_CATALOG: dict[str, ActionSpec] = {
             DeleteFailedExecutionsParams, "Executions", "delete", ("executions", "reports"),
             server_fields=frozenset({"execution_ids"}),
         ),
+        ActionSpec(
+            "report_bug",
+            "Propose drafting a bug report for one failed or errored execution. The draft stays in the "
+            "Bug Reports view for review; nothing is sent to Jira.",
+            ReportBugParams, "Executions", "edit", ("executions", "bugs"),
+        ),
+        ActionSpec(
+            "submit_bug_report",
+            "Propose submitting one draft bug report to Jira. Jira is searched for a duplicate first; "
+            "a duplicate gets a comment, otherwise a new Bug is created.",
+            SubmitBugReportParams, "Executions", "edit", ("bugs", "executions"),
+        ),
     )
 }
 
@@ -398,6 +422,7 @@ class ChatActionExecutor:
         batch_events: dict | None = None,
         execution_events: dict | None = None,
         scenario_sync: Callable[[UUID, bool], None] | None = None,
+        bug_report_service=None,
     ):
         self._repo = project_repository
         # A service or a zero argument callable returning one, so the app can
@@ -415,6 +440,8 @@ class ChatActionExecutor:
         # Jira sync after a scenario review, as the Scenarios screen does.
         # Tests pass a stub so no Jira call is made.
         self._scenario_sync = scenario_sync or _sync_scenario_to_jira
+        # BugReportService, or a zero argument callable returning one. Tests pass a fake.
+        self._bug_report_service = bug_report_service
 
     @property
     def repo(self):
@@ -992,6 +1019,76 @@ class ChatActionExecutor:
         proposed_test_case_ids = sorted(action["params"].get("test_case_ids") or [])
         if current_ids != proposed_ids or current_test_case_ids != proposed_test_case_ids:
             raise ActionInvalid(CHANGED_MESSAGE)
+
+    # ------------------------------------------------------------ bug reports
+
+    @property
+    def bug_reports(self):
+        def default():
+            from backend.services.bug_report_service import BugReportService
+
+            return BugReportService(project_repo=self.repo)
+
+        return self._resolve_dependency(self._bug_report_service, default)
+
+    def _bug_report(self, project, report_id: UUID):
+        report = self.bug_reports.get(project.id, report_id)
+        if report is None:
+            raise ActionInvalid("bug report not found in this project")
+        return report
+
+    def _resolve_report_bug(self, project, params: ReportBugParams) -> dict:
+        execution = self._execution(project, params.execution_id)
+        if _status_value(execution.status) not in FAILED_EXECUTION_STATUSES:
+            raise ActionInvalid("only a failed or errored execution can be reported as a bug")
+        return {
+            "params": params.model_dump(mode="json"),
+            "targets": [self._execution_target(execution)],
+            "danger": "change",
+        }
+
+    def _run_report_bug(self, project, action: dict, user_id) -> dict:
+        from backend.services.bug_report_service import BugReportError
+
+        execution_id = UUID(action["params"]["execution_id"])
+        try:
+            report = self.bug_reports.report_for_execution(project.id, execution_id, actor=str(user_id))
+        except (LookupError, BugReportError) as exc:
+            raise ActionInvalid(str(exc)) from None
+        return {
+            "summary": f"Drafted bug report '{report.title}'",
+            "link_view": "bugs",
+            "link_id": str(report.id),
+        }
+
+    def _resolve_submit_bug_report(self, project, params: SubmitBugReportParams) -> dict:
+        from backend.models.bug_report import EDITABLE_STATUSES
+
+        report = self._bug_report(project, params.bug_report_id)
+        if report.status not in EDITABLE_STATUSES:
+            raise ActionInvalid(f"this bug report is already {report.status.value}")
+        return {
+            "params": params.model_dump(mode="json"),
+            "targets": [{"type": "bug_report", "id": str(report.id), "name": report.title}],
+            "danger": "change",
+        }
+
+    def _run_submit_bug_report(self, project, action: dict, user_id) -> dict:
+        from backend.models.bug_report import BugReportStatus
+        from backend.services.bug_report_service import BugReportError
+
+        report_id = UUID(action["params"]["bug_report_id"])
+        try:
+            report = self.bug_reports.submit(project.id, report_id, actor=str(user_id))
+        except (LookupError, BugReportError) as exc:
+            raise ActionInvalid(str(exc)) from None
+        if report.status == BugReportStatus.SUBMIT_FAILED:
+            raise RuntimeError(f"Jira submit failed: {report.submit_error or 'unknown error'}")
+        if report.status == BugReportStatus.LINKED_DUPLICATE:
+            summary = f"Linked to existing Jira bug {report.duplicate_of_jira_key}"
+        else:
+            summary = f"Filed in Jira as {report.jira_key}"
+        return {"summary": summary, "link_view": "bugs", "link_id": str(report.id)}
 
     # ------------------------------------------------------------------ confirm
 

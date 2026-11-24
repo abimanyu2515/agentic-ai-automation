@@ -32,9 +32,47 @@ def emit_execution_completed(project_id: UUID, execution_result: ExecutionResult
 
 
 class ExecutionService:
+    def __init__(self, analysis_service=None, bug_report_service=None):
+        self._analysis_service = analysis_service
+        self._bug_report_service = bug_report_service
+
     @property
     def repo(self):
         return get_project_repository()
+
+    @property
+    def analysis_service(self):
+        """The log analyser shared with ExecutionAnalysisAgent. Inject a stub in tests."""
+        if self._analysis_service is None:
+            from backend.services.log_analysis_service import LogAnalysisService
+
+            self._analysis_service = LogAnalysisService(repo=self.repo)
+        return self._analysis_service
+
+    @property
+    def bug_report_service(self):
+        """Drafts bug reports for Product Bug failures, as BugReportingAgent does in graph runs."""
+        if self._bug_report_service is None:
+            from backend.services.bug_report_service import BugReportService
+
+            self._bug_report_service = BugReportService(project_repo=self.repo)
+        return self._bug_report_service
+
+    def _triage(self, project_id: UUID, result: ExecutionResult, test_case=None) -> None:
+        """Run the log analyser on a failed result before it is saved, then draft a
+        bug report for a Product Bug. Never raises, so a triage problem can't change
+        a run's outcome or fail a batch or webhook."""
+        if getattr(result.status, "value", result.status) in (
+            ExecutionStatus.PASSED.value, ExecutionStatus.SKIPPED.value,
+        ):
+            return
+        try:
+            self.analysis_service.analyze(project_id, result, test_case)
+        except Exception:
+            logger.exception("Log analysis failed: execution_id=%s", result.id)
+            return
+        # draft_from_execution never raises and skips anything but a Product Bug.
+        self.bug_report_service.draft_from_execution(project_id, result, test_case)
 
     def _capture_snapshot(self, project_id: UUID) -> dict[str, str]:
         """The project's configuration at accept time (spec 0001). Raises
@@ -221,6 +259,14 @@ class ExecutionService:
                         "logs": artifacts.get("logs", []),
                         "console": artifacts.get("console", []),
                     }
+                    if result.status not in (ExecutionStatus.PASSED, ExecutionStatus.SKIPPED):
+                        append_event("Running", f"Analysing failure logs for {case.title}...", item)
+                        self._triage(project_id, result, case)
+                        append_event(
+                            "Running",
+                            f"Triage complete for {case.title}: {result.failure_category or 'unknown'}",
+                            item,
+                        )
                     self.repo.save_execution_result(project_id, result)
                     self._queue_failure_knowledge(project_id, result)
                     self.apply_object_repository_markers(
@@ -334,10 +380,33 @@ class ExecutionService:
             logging.exception("Object repository harvest failed: execution_id=%s", execution_id)
         return totals
 
-    def finalize_execution(self, project_id: UUID, payload: dict) -> ExecutionResult:
+    def triage_saved_execution(self, project_id: UUID, execution_id: UUID) -> None:
+        """Triage an already saved failed run and save the triage fields.
+
+        The webhook route runs this as a background task, so the workspace gets
+        its response without waiting for the analysis LLM. It re-reads the
+        result first, so it only adds triage to what other listeners saved."""
+        try:
+            result = self.repo.get_execution_result(project_id, execution_id)
+            if result is None:
+                return
+            try:
+                case = self.repo.get_test_case(result.test_case_id)
+            except Exception:
+                case = None
+            self._triage(project_id, result, case)
+            self.repo.save_execution_result(project_id, result)
+        except Exception:
+            logger.exception("Background log analysis failed: execution_id=%s", execution_id)
+
+    def finalize_execution(self, project_id: UUID, payload: dict, background_tasks=None) -> ExecutionResult:
         """
         Processes the completed execution result, updates at-a-glance testcase statuses,
         persists the result record to repository storage, and dispatches the completed event.
+
+        A failed run is triaged by the log analyser. With `background_tasks` the
+        triage runs after the response (see triage_saved_execution); without
+        it, triage runs inline before the result is saved.
         """
         import uuid
         
@@ -387,6 +456,18 @@ class ExecutionService:
 
         # Attach raw webhook payload so report listener can access timeline/screenshots
         result._raw_payload = payload
+
+        # 0. Triage a failed run with the log analyser: inline before saving, or
+        #    after the response when the caller passes background tasks.
+        failed = status not in (ExecutionStatus.PASSED, ExecutionStatus.SKIPPED)
+        if failed and background_tasks is not None:
+            background_tasks.add_task(self.triage_saved_execution, project_id, exec_id)
+        elif failed:
+            try:
+                case = self.repo.get_test_case(test_case_id)
+            except Exception:
+                case = None
+            self._triage(project_id, result, case)
 
         # 1. Persist result
         self.repo.save_execution_result(project_id, result)

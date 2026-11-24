@@ -27,4 +27,6 @@ class ProjectResponse(BaseModel):
     target_url: str | None = None
     target_username: str | None = None
     is_safe_test_environment: bool = False
+    bug_auto_submit: bool = False
+    bug_auto_submit_min_confidence: float = 0.85
     readiness: dict[str, Any]

@@ -27,6 +27,7 @@ The platform turns requirements into automated tests. The usual flow for a proje
 - **Playwright**: view and generate scripts for a test case, and open the execution workspace.
 - **Executions**: every test run with its status (passed, failed, error), duration, error message, and report. Failed runs can be deleted one by one or all at once.
 - **Reports**: execution reports and summaries.
+- **Bug Reports**: bug report drafts written by the Bug Reporting Agent for runs triaged as a product bug. A repeat of the same failure adds an occurrence to the open report. Review and edit a draft, then Submit to Jira (Jira is searched for a duplicate first) or Dismiss it. A failed run's Triage details have a Report bug button. The assistant can propose drafting a bug report for a failed execution and submitting a draft to Jira.
 - **LangSmith**: LLM call traces and cost estimates when tracing is on.
 - **Settings**: LLM settings (read only role settings come from the server `.env`), users, roles and permissions, audit logs, and external tools such as Jira.
 

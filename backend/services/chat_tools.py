@@ -153,6 +153,21 @@ TOOL_DEFINITIONS = [
         ["query"],
     ),
     _schema("list_object_repository_pages", "List the project's object repository pages, their element counts, and each page's locator detection score (percent of run lookups that found the element; null before any run).", {"limit": _LIMIT}),
+    _schema(
+        "list_bug_reports",
+        "List the project's bug reports (drafted from product bug failures), newest first: id, title, status, "
+        "severity, Jira key, and how many runs hit the same failure.",
+        {
+            "status": {"type": "string", "enum": ["draft", "submit_failed", "submitted", "linked_duplicate", "resolved", "dismissed"]},
+            "limit": _LIMIT,
+        },
+    ),
+    _schema(
+        "get_bug_report",
+        "One bug report: title, summary, steps to reproduce, expected and actual result, severity, triage evidence, and Jira link.",
+        {"bug_report_id": _UUID},
+        ["bug_report_id"],
+    ),
 ]
 
 READ_TOOL_NAMES = frozenset(tool["function"]["name"] for tool in TOOL_DEFINITIONS)
@@ -216,10 +231,18 @@ class ChatToolbox:
     """Runs the read tools against the project repository. Tests pass a fake
     repository and object repository store."""
 
-    def __init__(self, project_repository=None, object_repository_store=None, result_chars: int = 4000, knowledge_service=None):
+    def __init__(
+        self,
+        project_repository=None,
+        object_repository_store=None,
+        result_chars: int = 4000,
+        knowledge_service=None,
+        bug_report_repository=None,
+    ):
         self._repo = project_repository
         self._object_store = object_repository_store
         self._knowledge = knowledge_service
+        self._bug_reports = bug_report_repository
         self.result_chars = result_chars
         self._tools: dict[str, Callable] = {name: getattr(self, f"_{name}") for name in READ_TOOL_NAMES}
 
@@ -460,13 +483,17 @@ class ChatToolbox:
             "started": execution.executed_at.isoformat() if execution.executed_at else None,
             "duration_seconds": execution.duration_seconds,
             "error_message": execution.error_message,
-            "failed_step": failed_step,
+            "failed_step": execution.failing_step or failed_step,
             "analysis": {
                 "failure_category": execution.failure_category,
                 "root_cause_summary": execution.root_cause_summary,
                 "suggest_retry": execution.suggest_retry,
+                "confidence": execution.confidence,
+                "flaky_score": execution.flaky_score,
+                "evidence": execution.evidence or [],
             },
             "jira_bug_id": execution.jira_bug_id,
+            "bug_report_id": str(execution.bug_report_id) if getattr(execution, "bug_report_id", None) else None,
             "artifacts": {
                 "screenshot": bool(execution.screenshot_path or execution.screenshots),
                 "video": bool(execution.video_path),
@@ -497,6 +524,69 @@ class ChatToolbox:
             for p in pages
         ]
         return {"items": rows[: _limit(arguments)], "total": len(rows)}
+
+    # ------------------------------------------------------------ bug reports
+
+    @property
+    def bug_reports(self):
+        if self._bug_reports is None:
+            from backend.repository.bug_report_repository import get_bug_report_repository
+
+            return get_bug_report_repository()
+        return self._bug_reports
+
+    def _list_bug_reports(self, project, arguments: dict) -> dict:
+        from backend.models.bug_report import BugReportStatus
+
+        status = arguments.get("status") or None
+        if status is not None:
+            try:
+                status = BugReportStatus(str(status).lower())
+            except ValueError:
+                raise ValueError(f"unknown status {status}") from None
+        reports = self.bug_reports.list_reports(project.id, status)
+        rows = [
+            {
+                "id": str(r.id),
+                "title": r.title,
+                "status": r.status.value,
+                "severity": r.severity,
+                "jira_key": r.jira_key or r.duplicate_of_jira_key,
+                "execution_id": str(r.execution_id),
+                "occurrences": len(r.occurrences),
+                "updated": r.updated_at.isoformat(),
+            }
+            for r in reports
+        ]
+        return {"items": rows[: _limit(arguments)], "total": len(rows)}
+
+    def _get_bug_report(self, project, arguments: dict) -> dict:
+        report_id = _id(arguments, "bug_report_id")
+        report = self.bug_reports.get(report_id)
+        if report is None or report.project_id != project.id:
+            raise ToolNotFound(str(report_id))
+        return {
+            "id": str(report.id),
+            "title": report.title,
+            "status": report.status.value,
+            "summary": report.summary,
+            "steps_to_reproduce": report.steps_to_reproduce,
+            "expected_result": report.expected_result,
+            "actual_result": report.actual_result,
+            "severity": report.severity,
+            "priority": report.priority,
+            "failure_category": report.failure_category,
+            "failing_step": report.failing_step,
+            "root_cause": report.root_cause,
+            "evidence": report.evidence,
+            "confidence": report.confidence,
+            "execution_id": str(report.execution_id),
+            "test_case_id": str(report.test_case_id),
+            "occurrences": len(report.occurrences),
+            "jira_key": report.jira_key or report.duplicate_of_jira_key,
+            "jira_url": report.jira_url,
+            "submit_error": report.submit_error,
+        }
 
     # ------------------------------------------------------------ knowledge (spec 0006)
 

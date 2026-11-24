@@ -86,7 +86,7 @@ The graded, self correcting retrieval stage (spec 0006). Four graph nodes, one p
 | `retrieval_requirements` | RequirementAnalystAgent | `document`, `jira_story` | requirement title, description, acceptance criteria |
 | `retrieval_scenarios` | ScenarioAgent | `document`, `jira_story` | same |
 | `retrieval_test_cases` | TestCaseAgent | `document`, `jira_story`, `test_case`, `locator` | same |
-| `retrieval_analysis` | ExecutionAnalysisAgent (DefectManagementAgent reuses it) | `execution_failure`, `defect`, `test_case`, `locator` | up to 5 failed runs (test case title and error), plus the requirement title when present |
+| `retrieval_analysis` | ExecutionAnalysisAgent (BugReportingAgent reuses it) | `execution_failure`, `defect`, `test_case`, `locator` | up to 5 failed runs (test case title and error), plus the requirement title when present |
 
 Each attempt searches with `RAG_TOP_K`, grades every new chunk in one batched call on the `retrieval` LLM role (`{"relevant": [ids]}`), and keeps the relevant ones. With fewer than `RAG_MIN_RELEVANT_CHUNKS` and attempts left (`RAG_MAX_RETRIEVAL_ATTEMPTS`), it asks the LLM to rewrite the query and searches again. Chunks are deduplicated by chunk ID, then sorted by score and capped at `RAG_TOP_K`. Unparseable grades keep the top `RAG_MIN_RELEVANT_CHUNKS` by score, marked `graded: false`.
 
@@ -98,7 +98,7 @@ It never fails the workflow: RAG disabled, no `project_id`, no dataset, an empty
 
 **Measuring it** (AC-25): `RetrievalEvalService` (`backend/services/retrieval_eval_service.py`) returns recall@k and MRR for labelled cases; `python -m backend.scripts.eval_retrieval` runs it live.
 
-**Consumers**: ScenarioAgent, TestCaseAgent, RequirementAnalystAgent, ExecutionAnalysisAgent, and DefectManagementAgent append a delimited "Project knowledge" block (`backend/agents/knowledge_context.py`) to their prompt when `retrieved_context` is not empty. With no context their prompts are unchanged.
+**Consumers**: ScenarioAgent, TestCaseAgent, RequirementAnalystAgent, ExecutionAnalysisAgent, and BugReportingAgent append a delimited "Project knowledge" block (`backend/agents/knowledge_context.py`) to their prompt when `retrieved_context` is not empty. With no context their prompts are unchanged.
 
 ---
 
@@ -265,32 +265,67 @@ Executes Playwright TypeScript tests against the target application. Features:
 **File**: `backend/agents/execution_analysis_agent.py`
 **Prompt**: `backend/prompts/agents/execution_analysis/`
 
-Analyzes failed test executions to determine:
-- **Root cause** — Summary of why the test failed
-- **Failure category** — Functional, UI, Data, Environment, Flaky, Timeout
-- **Flakiness detection** — Identifies tests that pass intermittently
-- **JIRA bug candidate** — Flags failures suitable for automated bug creation
+The log analyser. It triages **every** non-passed result in `state.execution_results`. The analysis lives in `backend/services/log_analysis_service.py` (`LogAnalysisService`), which the batch run (`ExecutionService.start_batch_run`) and the webhook path (`ExecutionService.finalize_execution`) also call before saving. So every failed run is triaged, whichever way it ran.
 
-**State writes**: Sets `result.failure_category`, `result.root_cause_summary`, `result.jira_bug_id`
+**Evidence** (`backend/services/log_evidence_collector.py`, text only, no images). It is read from the run folder under `backend/playwrightt/artifacts/`:
+- `report.json`: error message, stack, snippet and location, all errors, and the test's stdout and stderr
+- `trace.zip`: test steps up to the failing step, console errors and warnings, and failed network requests (method, URL without query string, status; never headers or bodies)
+- `error-context.md`: the page snapshot (aria tree) at failure
+- `result.timeline`: entries of type `error`
+
+Each section is size-capped. Vault credentials and the test case's test data values are redacted. Artifacts are overwritten when the same test case runs again, so evidence is read right after the run.
+
+**Run history** (`backend/services/run_history.py`). It reads the last 10 earlier runs of the same test case and computes:
+- pass/fail counts and outcome flips
+- how often the same normalized error signature repeats
+- a deterministic `flaky_score` from 0 to 1
+
+**Decides**:
+- **Failure category**: exactly one of `Product Bug`, `Test Environment Issue`, `Flaky Test / Automation Issue`. An unrecognized value falls back to `Test Environment Issue`.
+- **Flaky override**: a `Product Bug` with confidence below 0.7 on a history with `flaky_score` ≥ 0.5 is reclassified as `Flaky Test / Automation Issue`.
+- **Retry and bug candidate**: `suggest_retry`, and `retest_pending_candidate` (only for a Product Bug).
+- **LLM failure**: the category falls back to `Test Environment Issue` with `suggest_retry=true`. Evidence and the flaky score are still saved.
+
+**State writes** (per non-passed result):
+- `failure_category`, `root_cause_summary`, `trace_analysis`, `screenshot_findings`
+- `suggest_retry`, `retest_pending_candidate`
+- `failing_step`, `evidence` (quoted log lines), `confidence`, `flaky_score`
+- `frontend_error_detected`, `frontend_error_details`, `run_history_summary`
 
 **Operation**: `EXECUTE` (sub-step)
 
 ---
 
-### 13. DefectManagementAgent
+### 13. BugReportingAgent
 
-**File**: `backend/agents/defect_management_agent.py`
-**Prompt**: `backend/prompts/agents/defect_agent/`
+**File**: `backend/agents/bug_reporting_agent.py`
+**Service**: `backend/services/bug_report_service.py` (`BugReportService`)
+**Prompts**: `backend/prompts/agents/bug_reporting/roles_and_responsibilities.md` (draft), `duplicate_search.md` (Jira search terms)
 
-Manages the defect lifecycle:
-- Checks for duplicate bugs in JIRA
-- Creates new JIRA bug tickets for confirmed failures
-- Updates existing bugs with retest results
-- Syncs defect status back to the platform
+Replaces DefectManagementAgent. For every failed result triaged as **Product Bug**, it writes a structured bug report **draft**. A person reviews the draft in the Bugs view and submits it to Jira. Nothing reaches Jira without that review unless the project turns on auto-submit.
 
-**State writes**: Sets `result.jira_bug_id`, `result.jira_bug_url`, `result.retest_pending_candidate`
+How a draft is built:
+- **Content.** Title, summary, steps to reproduce, expected and actual result, severity and priority come from the `analysis` LLM role. The prompt gets the test case and every triage field: failing step, root cause, evidence, confidence, frontend errors and run history.
+- **Fallback.** If the LLM fails, the draft is built deterministically from the test case and the error.
+- **Redaction.** Vault credentials and test data values are replaced with `[redacted]`.
+- **Dedupe.** One open report covers one error signature (`run_history.error_signature`) per test case. A repeat failure is added to `occurrences`; if that report is already in Jira, the Jira issue also gets a comment.
 
-**Operation**: `EXECUTE` (sub-step)
+What happens on submit (`POST .../bug-reports/{id}/submit`):
+1. **Duplicate search** in the project's Jira key, among open bugs. It looks first for the label `bugsig_<signature>`, then for LLM-chosen search terms. The JQL is built by the service, never by the LLM.
+2. **If a duplicate is found**, the existing issue gets a comment and the report becomes `linked_duplicate`.
+3. **Otherwise a Bug is created.** It is labelled `platform_sync`, `bug`, `test_<id>`, `scenario_<id>` and `bugsig_<signature>`. The screenshot and trace are attached, and the bug is linked to the scenario's Story.
+4. **Run and test case updated.** The execution gets `jira_bug_id` and `jira_bug_url`; the test case gets `jira_issue_key`, `jira_issue_url` and `jira_sync_status`.
+5. **Jira errors** set `submit_failed` with `submit_error`. The report stays editable and can be submitted again.
+
+Report statuses: `draft`, `submit_failed`, `submitted`, `linked_duplicate`, `resolved` (set by the Jira webhook) and `dismissed`.
+
+**Auto-submit**: when the project sets `bug_auto_submit` and the triage confidence is at least `bug_auto_submit_min_confidence` (default 0.85), the draft is submitted at once.
+
+**Other entry points**: `ExecutionService._triage` drafts for batch and webhook runs. `POST .../executions/{id}/bug-report` drafts on request for any failed run. The `sync_bug` operation (JiraSyncAgent) drafts, then submits.
+
+**State writes**: `state.bug_report_ids`, `result.bug_report_id`. It writes `result.jira_bug_id` and `result.jira_bug_url` only when auto-submit runs or the report was already filed.
+
+**Operation**: `EXECUTE` (sub-step, between ExecutionAnalysisAgent and ReportAgent)
 
 ---
 
@@ -357,7 +392,7 @@ Also supports framework selection: Playwright, Selenium, or Cucumber.
                     │  └─ playwright_script    │ ◄── PlaywrightAgent
                     │  execution_results       │ ◄── ExecutionAgent
                     │  └─ failure_category     │ ◄── ExecutionAnalysisAgent
-                    │  └─ jira_bug_id          │ ◄── DefectManagementAgent
+                    │  └─ jira_bug_id          │ ◄── BugReportService (on submit)
                     │  execution_report        │ ◄── ReportAgent
                     │  logs                    │ ◄── (all agents append)
                     └─────────────────────────┘

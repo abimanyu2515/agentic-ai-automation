@@ -671,7 +671,7 @@ POST /api/v1/projects/{project_id}/executions
 }
 ```
 
-Runs ExecutionAgent → ExecutionAnalysisAgent → DefectManagementAgent → ReportAgent pipeline.
+Runs ExecutionAgent → ExecutionAnalysisAgent → BugReportingAgent → ReportAgent pipeline.
 
 **Response**: `200` — `ExecutionResult`
 
@@ -687,11 +687,23 @@ Runs ExecutionAgent → ExecutionAnalysisAgent → DefectManagementAgent → Rep
   "screenshot_path": "string|null",
   "video_path": "string|null",
   "trace_path": "string|null",
-  "failure_category": "string|null",
+  "timeline": "array|null",
+  "screenshots": "array|null",
+  "failure_category": "Product Bug|Test Environment Issue|Flaky Test / Automation Issue|None|null",
   "root_cause_summary": "string|null",
+  "trace_analysis": "string|null",
+  "screenshot_findings": "string|null",
+  "suggest_retry": "boolean|null",
+  "retest_pending_candidate": false,
+  "failing_step": "string|null",
+  "evidence": ["log line quoted by the log analyser"],
+  "confidence": "number 0-1|null",
+  "flaky_score": "number 0-1|null",
+  "frontend_error_detected": "boolean|null",
+  "frontend_error_details": "string|null",
+  "run_history_summary": {"runs": 5, "passes": 3, "fails": 2, "flips": 4, "same_error_count": 1, "outcomes": ["P", "F", "P", "F", "P"], "flaky_score": 0.9},
   "jira_bug_id": "string|null",
   "jira_bug_url": "string|null",
-  "retest_pending_candidate": false,
   "test_cycle_id": "uuid|null",
   "executed_by": "uuid|null",
   "project_config_snapshot": {
@@ -720,6 +732,39 @@ Runs ExecutionAgent → ExecutionAnalysisAgent → DefectManagementAgent → Rep
 A ready project's configuration is captured at that moment as `project_config_snapshot`. The runner sets `TARGET_URL` from it (never from the server's own environment), every result of the run stores it, and it is never changed after it is saved. It holds no secret: credentials are read from the vault by `credential_reference`. Runs saved before this change have `null`.
 
 ---
+
+## Bug Reports
+
+Drafts written by the Bug Reporting Agent for Product Bug failures, reviewed before they are filed in Jira. GET routes need `Executions.view`; the others need `Executions.edit`. Every route is scoped to the project in the path. A report from another project returns `404`.
+
+| Method | Path | Behavior |
+|---|---|---|
+| GET | `/api/v1/projects/{project_id}/bug-reports?status=` | Newest first. `status` is one of `draft`, `submit_failed`, `submitted`, `linked_duplicate`, `resolved`, `dismissed`. |
+| GET | `/api/v1/projects/{project_id}/bug-reports/{report_id}` | One report. |
+| POST | `/api/v1/projects/{project_id}/executions/{execution_id}/bug-report` | Drafts a report for a failed or errored run, whatever its triage category, and saves `bug_report_id` on the run. It returns the run's existing report if it has one. A passed run returns `409`. |
+| PATCH | `/api/v1/projects/{project_id}/bug-reports/{report_id}` | Edits `title`, `summary`, `steps_to_reproduce`, `expected_result`, `actual_result`, `severity`, `priority`. Only a `draft` or `submit_failed` report can be edited (else `409`). Text is redacted against project credentials. |
+| POST | `/api/v1/projects/{project_id}/bug-reports/{report_id}/submit` | Searches Jira for a duplicate, then comments on it (`linked_duplicate`) or creates a Bug (`submitted`). A Jira error returns `200` with `status: submit_failed` and `submit_error`. |
+| POST | `/api/v1/projects/{project_id}/bug-reports/{report_id}/dismiss` | Body `{"reason": "..."}`. Draft or `submit_failed` only. |
+
+`BugReport` fields:
+- **Links:** `id`, `project_id`, `execution_id`, `test_case_id`, `scenario_id`, `requirement_id`
+- **Content:** `title`, `summary`, `steps_to_reproduce`, `expected_result`, `actual_result`, `severity`, `priority`, `environment`
+- **From triage:** `failing_step`, `root_cause`, `evidence`, `confidence`, `flaky_score`, `failure_category`
+- **Artifacts and dedupe:** `attachments`, `error_signature`, `occurrences` (`[{execution_id, executed_at}]`)
+- **Status and Jira:** `status`, `jira_key`, `jira_url`, `duplicate_of_jira_key`, `submit_error`, `dismiss_reason`
+- **Audit:** `created_by`, `submitted_by`, `created_at`, `updated_at`
+
+The execution detail (`GET .../executions/{id}`) includes `bug_report_id`.
+
+Project settings (`PUT /api/v1/projects/{project_id}`) accept `bug_auto_submit` (boolean, default `false`) and `bug_auto_submit_min_confidence` (0 to 1, default `0.85`; anything else is `422`). Both are returned on the project. With auto-submit on, a draft whose triage confidence reaches the threshold is submitted as soon as it is drafted.
+
+### Sync a failed run as a Jira bug
+
+`POST /api/v1/projects/{project_id}/executions/{execution_id}/sync-bug` (`Executions.edit`) drafts a bug report if the run has none, then submits it straight away. Returns `{"status": "success", "logs": [...]}`.
+
+### Jira webhook
+
+`POST /api/v1/webhooks/jira` (header secret `JIRA_WEBHOOK_SECRET`). When the issue moves to a status in `jira.resolved_statuses`, linked test cases become `retest_pending` and matching bug reports become `resolved`. The response includes `updated_count` and `resolved_bug_reports`.
 
 ## Dashboard
 
@@ -981,7 +1026,7 @@ POST /api/v1/projects/{project_id}/chat/messages
 | `done` | `{assistant_message_id}` | the full reply is saved |
 | `error` | `{code, message, retryable}` | the reply stopped; the partial text is saved with `interrupted: true` |
 
-The assistant answers over the project's data with read tools: `get_project_overview`, `list_requirements`, `get_requirement`, `list_scenarios`, `list_test_cases`, `get_test_case`, `list_executions`, `get_execution`, `get_dashboard_metrics`, and `list_object_repository_pages`. Every ID a tool is given must belong to the path's project, otherwise the tool answers "not found in this project". No tool returns credentials, and test data values under keys that look like secrets (`password`, `token`, `secret`, `key`) are sent as `"[redacted]"`. Each call is saved as a hidden `tool` row (never returned by the messages route), with its result cut to `CHAT_TOOL_RESULT_CHARS` (default 4000) by dropping list rows from the end (`"truncated": true`, `"total": N`). A message makes at most `CHAT_MAX_TOOL_STEPS` (default 6) tool calls; past that, the reply ends with a note that the answer may be incomplete.
+The assistant answers over the project's data with read tools: `get_project_overview`, `list_requirements`, `get_requirement`, `list_scenarios`, `list_test_cases`, `get_test_case`, `list_executions`, `get_execution`, `get_dashboard_metrics`, `list_object_repository_pages`, `list_bug_reports`, and `get_bug_report`. Every ID a tool is given must belong to the path's project, otherwise the tool answers "not found in this project". No tool returns credentials, and test data values under keys that look like secrets (`password`, `token`, `secret`, `key`) are sent as `"[redacted]"`. Each call is saved as a hidden `tool` row (never returned by the messages route), with its result cut to `CHAT_TOOL_RESULT_CHARS` (default 4000) by dropping list rows from the end (`"truncated": true`, `"total": N`). A message makes at most `CHAT_MAX_TOOL_STEPS` (default 6) tool calls; past that, the reply ends with a note that the answer may be incomplete.
 
 `code` is `llm_busy` (the chat pool's max wait ran out; message "The assistant is busy, try again in a moment"), `llm_error`, or `internal`. A client that disconnects mid reply also leaves the partial text saved as interrupted.
 
@@ -1061,6 +1106,8 @@ Supported action types:
 | `delete_test_case` | `test_case_id` | TestCases / delete | `delete` | `testcases` |
 | `delete_execution` | `execution_id` | Executions / delete | `delete` | `executions` |
 | `delete_failed_executions` | server-selected currently failed execution IDs | Executions / delete | `delete` | `executions` |
+| `report_bug` | `execution_id` of a failed or errored run; drafts a bug report, nothing goes to Jira | Executions / edit | `change` | `executions`, `bugs` |
+| `submit_bug_report` | `bug_report_id` of a `draft` or `submit_failed` report; searches Jira for a duplicate, then comments or creates a Bug | Executions / edit | `change` | `bugs`, `executions` |
 
 `replace` generates first and deletes the old scenarios only after generation succeeds, so a failed run leaves them in place. Delete actions require typing exactly `DELETE`. Edit cards show the previous and proposed values; requirement deletion also lists its dependent scenarios and test cases. The batch action uses the existing sequential queue manager, shared browser state, recovery, execution records, artifacts, and reports.
 

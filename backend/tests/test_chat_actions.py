@@ -207,6 +207,7 @@ def test_action_catalog_exposes_only_the_specified_action_tools():
         "duplicate_scenario", "delete_scenario", "update_test_case", "review_test_case", "generate_test_data",
         "delete_test_case",
         "delete_execution", "delete_failed_executions",
+        "report_bug", "submit_bug_report",
     }
 
 

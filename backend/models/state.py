@@ -62,6 +62,8 @@ class WorkflowState(BaseModel):
     retrieval_attempts: int = 0
     retrieval_sources: list[str] = Field(default_factory=list)
     retrieved_context: list[dict] = Field(default_factory=list)
+    # Bug reports drafted or reused for this run's failures. Written only by BugReportingAgent.
+    bug_report_ids: list[UUID] = Field(default_factory=list)
 
     def add_log(self, message: str) -> None:
         self.logs.append(f"[{datetime.now(timezone.utc).isoformat()}] {message}")

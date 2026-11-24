@@ -364,7 +364,8 @@ def test_jira_sync_service_sync_execution_finished():
     updated_sc = repo.get_scenario(scenario.id)
     assert updated_sc.last_jira_sync_status == "SUCCESS"
     
-    # Test failed execution path (creates linked bug)
+    # Failed execution path: the Story is updated, but no bug is filed here.
+    # Bugs come from BugReportingAgent drafts that a person submits.
     res_fail = ExecutionResult(
         test_case_id=tc.id,
         status="failed",
@@ -375,7 +376,7 @@ def test_jira_sync_service_sync_execution_finished():
     
     asyncio.run(sync_execution_finished(scenario.id, res_fail.id))
     
-    # Verify bug key is linked on execution result
     updated_res = repo.get_execution_result(project.id, res_fail.id)
-    assert updated_res.jira_bug_id is not None
-    assert updated_res.jira_bug_url is not None
+    assert updated_res.jira_bug_id is None
+    assert updated_res.jira_bug_url is None
+    assert repo.get_scenario(scenario.id).last_jira_sync_status == "SUCCESS"

@@ -1,4 +1,4 @@
-import { showToast } from './components.js?v=6';
+import { showToast } from './components.js?v=8';
 
 const API_BASE = '/api/v1';
 const TEST_CASE_GENERATION_TIMEOUT_MS = 20 * 60 * 1000;
@@ -312,7 +312,7 @@ export const API = {
     });
   },
 
-  async updateProject(id, name, description, lineOfBusiness, framework = 'playwright', jiraProjectKey = null, targetUrl = null, targetUsername = null, targetPassword = null, isSafeTestEnvironment = undefined) {
+  async updateProject(id, name, description, lineOfBusiness, framework = 'playwright', jiraProjectKey = null, targetUrl = null, targetUsername = null, targetPassword = null, isSafeTestEnvironment = undefined, bugAutoSubmit = undefined) {
     const body = {
       name,
       description,
@@ -325,6 +325,13 @@ export const API = {
     };
     if (typeof isSafeTestEnvironment === 'boolean') {
       body.is_safe_test_environment = isSafeTestEnvironment;
+    }
+    // { enabled: boolean, minConfidence: number 0..1 } for the Bug Reporting Agent.
+    if (bugAutoSubmit && typeof bugAutoSubmit.enabled === 'boolean') {
+      body.bug_auto_submit = bugAutoSubmit.enabled;
+      if (typeof bugAutoSubmit.minConfidence === 'number') {
+        body.bug_auto_submit_min_confidence = bugAutoSubmit.minConfidence;
+      }
     }
     return request(`/projects/${id}`, {
       method: 'PUT',
@@ -365,6 +372,38 @@ export const API = {
   async syncExecutionBug(projectId, executionId) {
     return request(`/projects/${projectId}/executions/${executionId}/sync-bug`, {
       method: 'POST'
+    });
+  },
+
+  // Bug reports (Bug Reporting Agent drafts, reviewed before Jira)
+  async listBugReports(projectId, status = '') {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    return request(`/projects/${projectId}/bug-reports${query}`);
+  },
+
+  async getBugReport(projectId, reportId) {
+    return request(`/projects/${projectId}/bug-reports/${reportId}`);
+  },
+
+  async createBugReportFromExecution(projectId, executionId) {
+    return request(`/projects/${projectId}/executions/${executionId}/bug-report`, { method: 'POST' });
+  },
+
+  async updateBugReport(projectId, reportId, patch) {
+    return request(`/projects/${projectId}/bug-reports/${reportId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch)
+    });
+  },
+
+  async submitBugReport(projectId, reportId) {
+    return request(`/projects/${projectId}/bug-reports/${reportId}/submit`, { method: 'POST' });
+  },
+
+  async dismissBugReport(projectId, reportId, reason = '') {
+    return request(`/projects/${projectId}/bug-reports/${reportId}/dismiss`, {
+      method: 'POST',
+      body: JSON.stringify({ reason })
     });
   },
 

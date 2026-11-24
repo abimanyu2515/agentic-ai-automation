@@ -17,7 +17,7 @@ from backend.agents.execution_agent import ExecutionAgent
 from backend.models.execution_result import ExecutionResult
 from backend.models.requirement import Requirement
 from backend.agents.execution_analysis_agent import ExecutionAnalysisAgent
-from backend.agents.defect_management_agent import DefectManagementAgent
+from backend.agents.bug_reporting_agent import BugReportingAgent
 from backend.repository.project_repository import get_project_repository
 from backend.services.knowledge_indexer import queue_defect_keys, queue_knowledge_source
 from backend.services.llm_context import llm_operation
@@ -1080,9 +1080,9 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
                 log_event("Execution Analysis", "Analyzing execution failure", "Identifying root cause and flakiness...")
                 return super().run(state)
 
-        class LoggingDefectManagementAgent(DefectManagementAgent):
+        class LoggingBugReportingAgent(BugReportingAgent):
             def run(self, state: WorkflowState) -> WorkflowState:
-                log_event("Jira Sync", "Checking Jira duplicates", "Searching or raising defect tickets...")
+                log_event("Bug Report", "Drafting bug report", "Writing a bug report draft for product defects...")
                 return super().run(state)
 
         # New LangGraph-based Orchestration:
@@ -1092,10 +1092,11 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
         exec_agent = ExecutionAgent(
             on_log=on_log_callback, project_id=project_id, repo=workflow_service.repo, project_config=project_config,
         )
+        bug_reporting_agent = LoggingBugReportingAgent()
         local_graph = build_graph(
             execution_agent=exec_agent,
             execution_analysis_agent=LoggingExecutionAnalysisAgent(),
-            defect_management_agent=LoggingDefectManagementAgent()
+            bug_reporting_agent=bug_reporting_agent,
         )
         
         config = {"configurable": {"operation": WorkflowOperation.EXECUTE}}
@@ -1104,6 +1105,8 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
         
         result = final_state.execution_results[0]
         if execution_id:
+            if result.bug_report_id and result.id != execution_id:
+                bug_reporting_agent.bug_report_service.relink_execution(result.bug_report_id, result.id, execution_id)
             result.id = execution_id
         
         # Save updated test case status and execution result in repo
@@ -1152,7 +1155,8 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
                 "failure_category": result.failure_category,
                 "root_cause_summary": result.root_cause_summary,
                 "jira_bug_id": result.jira_bug_id,
-                "jira_bug_url": result.jira_bug_url
+                "jira_bug_url": result.jira_bug_url,
+                "bug_report_id": str(result.bug_report_id) if result.bug_report_id else None
             }
         )
     except Exception as exc:

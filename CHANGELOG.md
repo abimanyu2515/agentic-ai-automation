@@ -5,6 +5,38 @@ All notable changes to the Agentic AI Automation Platform are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Bug Reporting Agent**: replaces DefectManagementAgent. Every Product Bug failure gets a structured bug report draft, which a person reviews before it goes to Jira.
+  - New `BugReportService` drafts the report from all triage evidence: steps, expected and actual results, severity, priority, evidence and environment. Text is redacted against vault credentials and test data, and drafting falls back to a deterministic draft when the LLM fails.
+  - A repeat failure with the same error signature adds an occurrence instead of a new draft.
+  - On submit, the service searches Jira for a duplicate by signature label and by LLM-chosen search terms, using JQL it builds itself. It then comments on the duplicate, or creates a Bug, attaches the screenshot and trace, and links the bug to the Story.
+  - Optional per-project auto-submit above a confidence threshold (`bug_auto_submit`, `bug_auto_submit_min_confidence`).
+  - Batch and webhook runs draft reports too (`ExecutionService._triage`).
+  - New routes under `/api/v1/projects/{id}/bug-reports` and `POST .../executions/{id}/bug-report`. The Jira webhook marks resolved reports.
+  - New **Bug Reports** view, and a **Report bug** / **View bug report** button in the triage modal.
+  - Alembic migration `c3f8a1d7e925`: the `bug_reports` table, `executions.bug_report_id`, and the project auto-submit columns.
+- **Log analyser upgrade (ExecutionAnalysisAgent)**: failure triage now reads real run evidence instead of only the error message.
+  - New `LogEvidenceCollector` reads these from the run's artifacts, redacted and size-capped:
+    - `report.json`: full error, stack, snippet, stdout/stderr
+    - `trace.zip`: test steps, failing step, console errors, failed network calls
+    - `error-context.md`: page snapshot
+  - New `run_history`: flaky detection from the test's last 10 runs (outcome flips, repeated error signatures, `flaky_score`).
+  - New `LogAnalysisService` shared by the agent, batch runs and workspace webhook runs, so every failed run is triaged.
+  - New `ExecutionResult` fields: `failing_step`, `evidence`, `confidence`, `flaky_score`, `frontend_error_detected`, `frontend_error_details`, `run_history_summary`.
+  - Triage modal and execution report show failing step, confidence, flaky score and quoted evidence. The execution table shows a "flaky" chip.
+  - Alembic migration `b7e2c4f91a30`.
+
+### Changed
+- `sync_execution_finished` no longer creates a Jira bug for every failed run, including flaky and environment failures. Bugs are filed only from reviewed bug reports.
+- The `sync_bug` operation goes through `BugReportService`.
+
+### Fixed
+- PostgreSQL now stores `trace_analysis` and `screenshot_findings`, and the execution list returns `timeline` and `screenshots`.
+- The execution detail endpoint returns triage fields, so the report's "AI Execution Triaging Findings" panel is no longer always empty.
+- The analysis LLM response no longer drops `frontend_error_detected` / `frontend_error_details`.
+
 ## [1.3.0] - 2026-07-30
 
 ### Added

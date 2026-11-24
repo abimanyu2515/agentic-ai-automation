@@ -119,14 +119,14 @@ SupervisorAgent ──(reads operation)──►
       │  - Stream real-time logs via SSE                     │ │
       │  - Capture screenshots, video, traces               │ │
       ▼                                                      │ │
-    ExecutionAnalysisAgent                                  │ │
-      │  - Analyze failure root cause                       │ │
-      │  - Classify failure type                            │ │
-      │  - Detect flakiness                                 │ │
+    ExecutionAnalysisAgent (log analyser)                   │ │
+      │  - Read report.json, trace.zip, page snapshot       │ │
+      │  - Classify failure type with quoted evidence       │ │
+      │  - Detect flakiness from the test's run history     │ │
       ▼                                                      │ │
-    DefectManagementAgent                                   │ │
-      │  - Check JIRA for duplicates                        │ │
-      │  - Create/update bug tickets                        │ │
+    BugReportingAgent                                       │ │
+      │  - Draft a bug report per Product Bug failure       │ │
+      │  - Reuse the open report for a repeat failure       │ │
       ▼                                                      │ │
     ReportAgent                                             │ │
       │  - Compile JUnit XML report                         │ │
@@ -171,6 +171,25 @@ The object repository (spec 0004, guide: [features/object-repository.md](feature
 3. **Read and dispatch**: stored scripts hold keys only. The helper and the current locators are injected when a script is returned by the API, sent to the workspace, built into a `QueueItem` by `ExecutionAgent` or the batch route, or validated and run by grounded validation.
 4. **Run feedback**: `orx` logs one `[OBJREPO]` marker per lookup. Both execution paths hand the markers to `ExecutionService.apply_object_repository_markers`, which updates element health once per execution.
 5. **Harvest**: while a test runs, each distinct path the page settles on is snapshotted once with the shared extractor. The workspace engine sends the snapshots as `harvest` on its `completed` webhook; the Python runner writes them to `harvest.json`, which `run_execution_and_stream` and the batch route read per run directory after the result is saved. Both go to `ExecutionService.apply_object_repository_harvest`, which redacts and ingests with the reconnaissance rules minus marking missing. Harvesting never changes a run's result.
+
+## Failure Triage (Log Analyser)
+
+Every failed or errored run is triaged by `LogAnalysisService`, on all three execution paths:
+
+| Path | Where triage runs | Then |
+|---|---|---|
+| Single run (LangGraph) | `ExecutionAnalysisAgent` node | BugReportingAgent, ReportAgent |
+| Batch run | `ExecutionService.start_batch_run`, per failed item, before saving | Bug report draft for a Product Bug; saved; Story sync |
+| Workspace webhook | `ExecutionService.triage_saved_execution`, as a background task after the result is saved, so the webhook responds without waiting for the LLM | Triage fields saved onto the stored result |
+
+How it works:
+- **Inputs.** It reads `report.json`, `trace.zip` and `error-context.md` from the run folder (text only, redacted, size-capped), plus the test's last 10 runs.
+- **Output.** It stores the category, root cause, failing step, quoted evidence, confidence and flaky score on the `ExecutionResult`.
+- **Batch events.** A batch shows `Analysing failure logs for <test>...` and `Triage complete for <test>: <category>` events.
+- **Never blocks a run.** A triage error never fails a run, a batch, or a webhook. An LLM failure saves the fallback category `Test Environment Issue`.
+- **Bug reports.** After triage, a `Product Bug` gets a bug report draft (`BugReportService`) on every path. Jira bugs are filed only when a person submits the draft, or by project auto-submit. `sync_execution_finished` updates the Story but no longer creates bugs.
+
+See [agents.md](agents.md#12-executionanalysisagent) for the rules.
 
 ---
 
@@ -279,7 +298,7 @@ def build_graph(
     report_agent=None, requirement_analyst_agent=None,
     feature_inventory_agent=None, backlog_creation_agent=None,
     jira_sync_agent=None, qa_story_analyzer_agent=None,
-    execution_analysis_agent=None, defect_management_agent=None,
+    execution_analysis_agent=None, bug_reporting_agent=None,
     knowledge_retrieval_agents=None,  # {"requirements" | "scenarios" | "test_cases" | "analysis": agent}
 ):
 ```
@@ -316,7 +335,7 @@ SupervisorAgent routing_map:
 "qa_story_analyzer"       → qa_story_analyzer_agent
 "jira_sync_agent"         → jira_sync_agent
 "execution_analysis"      → execution_analysis_agent
-"defect_management"       → defect_management_agent
+"bug_reporting_agent"     → bug_reporting_agent
 "retrieval_requirements"  → retrieval_requirements
 "retrieval_scenarios"     → retrieval_scenarios
 "retrieval_test_cases"    → retrieval_test_cases
@@ -327,7 +346,7 @@ SupervisorAgent routing_map:
 Fixed edges (always execute in sequence):
 - `scenario_agent → human_approval_agent_1`
 - `test_case_agent → evaluation_agent → human_approval_agent_2`
-- `execution_analysis_agent → defect_management_agent → report_agent → END`
+- `execution_analysis_agent → bug_reporting_agent → report_agent → END`
 - each retrieval node to its consumer: `retrieval_requirements → requirement_analyst_agent`, `retrieval_scenarios → scenario_agent`, `retrieval_test_cases → test_case_agent`, `retrieval_analysis → execution_analysis_agent`
 
 ### Retrieval stage (spec 0006)

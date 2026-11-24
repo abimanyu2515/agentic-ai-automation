@@ -28,7 +28,7 @@ Routing Logic:
     - GENERATE_SCENARIOS → ScenarioAgent → HumanApprovalAgent → END
     - GENERATE_TESTCASES → TestCaseAgent → EvaluationAgent → HumanApprovalAgent → END
     - GENERATE_PLAYWRIGHT → PlaywrightAgent → END
-    - EXECUTE → ExecutionAgent → ExecutionAnalysisAgent → DefectManagementAgent → ReportAgent → END
+    - EXECUTE → ExecutionAgent → ExecutionAnalysisAgent → BugReportingAgent → ReportAgent → END
     - SYNC_USER_STORY → JiraSyncAgent → END
     - SYNC_BUG → JiraSyncAgent → END
 

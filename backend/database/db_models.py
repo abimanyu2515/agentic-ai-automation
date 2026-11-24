@@ -37,6 +37,9 @@ class ProjectDB(Base):
     target_password_enc = Column(String(500), nullable=True)
     is_safe_test_environment = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     rag_dataset_id = Column(String(100), nullable=True)
+    # Bug Reporting Agent: file drafts to Jira without review above this confidence.
+    bug_auto_submit = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    bug_auto_submit_min_confidence = Column(Float, nullable=False, default=0.85, server_default=text("0.85"))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     
@@ -235,8 +238,21 @@ class ExecutionDB(Base):
     root_cause_summary = Column(Text, nullable=True)
     suggest_retry = Column(Boolean, default=False, nullable=True)
     retest_pending_candidate = Column(Boolean, default=False, nullable=True)
+    trace_analysis = Column(Text, nullable=True)
+    screenshot_findings = Column(Text, nullable=True)
+    # Log analyser evidence (LogAnalysisService).
+    failing_step = Column(Text, nullable=True)
+    evidence = Column(JSON, nullable=True)
+    confidence = Column(Float, nullable=True)
+    flaky_score = Column(Float, nullable=True)
+    frontend_error_detected = Column(Boolean, nullable=True)
+    frontend_error_details = Column(Text, nullable=True)
+    run_history_summary = Column(JSON, nullable=True)
     jira_bug_id = Column(String(100), nullable=True)
     jira_bug_url = Column(String(500), nullable=True)
+    # The bug report drafted for this run (BugReportingAgent). No FK: reports live
+    # in their own store, which may be JSON while executions are in PostgreSQL.
+    bug_report_id = Column(UUID(as_uuid=True), nullable=True)
     # Spec 0001: project configuration captured when the run was accepted.
     project_config_snapshot = Column(JSON, nullable=True)
 
@@ -612,4 +628,30 @@ class TokenUsageDB(Base):
 
     __table_args__ = (
         Index("ix_token_usage_project_created", "project_id", "created_at"),
+    )
+
+
+class BugReportDB(Base):
+    """A bug report drafted by the Bug Reporting Agent. The indexed columns are the
+    lookup keys; the full report is stored in `payload`."""
+    __tablename__ = "bug_reports"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    execution_id = Column(UUID(as_uuid=True), nullable=False)
+    test_case_id = Column(UUID(as_uuid=True), nullable=False)
+    status = Column(String(30), nullable=False, default="draft")
+    error_signature = Column(String(64), nullable=False, default="")
+    jira_key = Column(String(100), nullable=True)
+    duplicate_of_jira_key = Column(String(100), nullable=True)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_bug_reports_project_created", "project_id", text("created_at DESC")),
+        Index("ix_bug_reports_signature", "project_id", "test_case_id", "error_signature"),
+        Index("ix_bug_reports_execution_id", "execution_id"),
+        Index("ix_bug_reports_jira_key", "jira_key"),
     )

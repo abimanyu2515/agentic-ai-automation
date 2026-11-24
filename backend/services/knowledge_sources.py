@@ -119,6 +119,8 @@ def read_execution_failure(repo, project, ref: str) -> SourceText | None:
         parts.append(f"Failure category: {result.failure_category}")
     if result.root_cause_summary:
         parts.append(f"Analysis summary: {result.root_cause_summary.strip()}")
+    if result.failing_step:
+        parts.append(f"Failing step: {result.failing_step.strip()}")
     return SourceText(title=title, text="\n".join(parts))
 
 

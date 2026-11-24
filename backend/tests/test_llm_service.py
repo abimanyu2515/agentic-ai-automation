@@ -45,6 +45,7 @@ def test_llm_service_generate_uses_the_default_timeout():
         # Check timeout was passed to completion
         call_kwargs = mock_completion.call_args.kwargs
         assert call_kwargs["timeout"] == 30
+        assert call_kwargs["drop_params"] is True
 
 
 def test_llm_service_generate_overrides_timeout():

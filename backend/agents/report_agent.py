@@ -22,7 +22,7 @@ Workflow Position:
         ↓
     ExecutionAnalysisAgent
         ↓
-    DefectManagementAgent
+    BugReportingAgent
         ↓
     ReportAgent (ENHANCED with AI)
         ↓

@@ -1,203 +1,92 @@
 """
-ExecutionAnalysisAgent
+ExecutionAnalysisAgent (the log analyser)
 
 Purpose:
-    Triages test execution failures using LLM-powered root cause analysis.
-    Categorizes failures as Product Bugs, Test Environment Issues, or Flaky Test/Automation Issues.
-    Determines which failures warrant bug tickets versus retries.
-
-Responsibilities:
-    - Skip analysis for passed executions
-    - Analyze failure logs and screenshots via LLM
-    - Categorize failure into one of three categories
-    - Extract root cause summary from error traces
-    - Determine if test should be retried (flaky/environmental) or filed as bug
-    - Populate execution result with triage metadata
+    Triages failed test executions. Each failure is categorized as a Product Bug,
+    a Test Environment Issue, or a Flaky Test / Automation Issue, so only real
+    defects flow on to BugReportingAgent.
 
 Workflow Position:
     ExecutionAgent
         ↓
+    (retrieval_analysis, when RAG workflow retrieval is on)
+        ↓
     ExecutionAnalysisAgent
         ↓
-    DefectManagementAgent (only processes Product Bugs)
+    BugReportingAgent (only processes Product Bugs)
         ↓
     ReportAgent
 
 Inputs:
-    - state.execution_results: Latest execution result from ExecutionAgent
-    - state.generated_test_cases: Test case context (steps, expected result)
+    - state.execution_results: results produced by ExecutionAgent
+    - state.generated_test_cases: test case context (title, steps, expected result)
+    - state.project_id: used for run history and credential redaction
+    - state.retrieved_context: optional project knowledge
 
-Outputs:
-    - execution_result.failure_category: "Product Bug" | "Test Environment Issue" | "Flaky Test / Automation Issue"
-    - execution_result.root_cause_summary: Human-readable root cause explanation
-    - execution_result.trace_analysis: Detailed trace log analysis
-    - execution_result.screenshot_findings: Analysis of failure screenshot
-    - execution_result.suggest_retry: Boolean indicating retry recommendation
-    - execution_result.retest_pending_candidate: Boolean marking as bug candidate
+Outputs (on each non-passed ExecutionResult):
+    - failure_category, root_cause_summary, trace_analysis, screenshot_findings
+    - suggest_retry, retest_pending_candidate
+    - failing_step, evidence, confidence, flaky_score, frontend_error_detected,
+      frontend_error_details, run_history_summary
 
-Failure Categories:
-    1. Product Bug:
-        - Actual application defect
-        - Incorrect business logic, validation failure, unexpected behavior
-        - Warrants JIRA bug ticket creation
-        - retest_pending_candidate = True
-        
-    2. Test Environment Issue:
-        - Infrastructure problem (database down, network timeout, service unavailable)
-        - Missing test data or configuration
-        - suggest_retry = True
-        
-    3. Flaky Test / Automation Issue:
-        - Selector instability, timing issues, race conditions
-        - Automation script defect (incorrect locator, logic error)
-        - suggest_retry = True
-
-LLM Prompt:
-    Inputs:
-    - Test steps
-    - Expected result
-    - Error logs (trace analysis)
-    - Screenshot description
-    
-    Output Schema: _ExecutionAnalysisResponse
-
-Error Handling:
-    If LLM analysis fails:
-    - Default to "Test Environment Issue"
-    - root_cause_summary includes LLM error message
-    - suggest_retry = True
-    - retest_pending_candidate = False
-
-Design Philosophy:
-    Automated triage reduces manual defect analysis workload.
-    Only "Product Bug" category flows to DefectManagementAgent.
-    Environment/flaky issues are logged but don't create JIRA tickets.
+The analysis itself lives in LogAnalysisService, which the batch and webhook
+execution paths also use. It reads the run's report.json, error-context.md and
+trace.zip (text only), plus earlier runs of the same test case. It falls back to
+"Test Environment Issue" with suggest_retry=True when the LLM call fails.
 """
 
-from pydantic import BaseModel, Field
 from backend.agents.base import BaseAgent
-from backend.models.state import WorkflowState
 from backend.models.execution_result import ExecutionStatus
+from backend.models.state import WorkflowState
 from backend.services.llm import LLMService
-from backend.utils.prompts import load_prompt
-from backend.agents.knowledge_context import with_project_knowledge
-
-
-# ==========================================================
-# LLM Output Schema
-# ==========================================================
-
-class _ExecutionAnalysisResponse(BaseModel):
-    """Execution failure triage analysis from LLM."""
-    failure_category: str = Field(description="One of: Product Bug, Test Environment Issue, Flaky Test / Automation Issue")
-    root_cause_summary: str = Field(description="Summary of the root cause of this failure")
-    trace_analysis: str = Field(description="Detailed analysis of trace log errors")
-    screenshot_findings: str = Field(description="Findings from checking the screenshot")
-    suggest_retry: bool = Field(description="True if test should be retried, False otherwise")
-    retest_pending_candidate: bool = Field(description="True if it represents a bug candidate")
+from backend.services.log_analysis_service import LogAnalysisService
 
 
 class ExecutionAnalysisAgent(BaseAgent):
-    """
-    Execution failure triage agent using LLM-powered root cause analysis.
-    
-    Categorizes failures to route Product Bugs to defect management
-    while filtering out environmental and automation issues.
-    """
-    
+    """Log analyser: triages every failed execution result in the state."""
+
     name = "Execution Analysis Agent"
 
-    def __init__(self, llm_service: LLMService | None = None):
+    def __init__(
+        self,
+        llm_service: LLMService | None = None,
+        analysis_service: LogAnalysisService | None = None,
+    ):
         """
-        Initialize execution analysis agent.
-        
         Args:
             llm_service: LLM service instance (injected for testing)
+            analysis_service: LogAnalysisService instance (injected for testing)
         """
         self.llm_service = llm_service or LLMService(role="analysis", agent="execution_analysis_agent")
+        self.analysis_service = analysis_service or LogAnalysisService(llm_service=self.llm_service)
 
     def run(self, state: WorkflowState) -> WorkflowState:
-        """
-        Analyze test execution failure and determine root cause category.
-        
-        Args:
-            state: Workflow state with execution_results and generated_test_cases
-            
-        Returns:
-            Updated state with execution result triage metadata populated
-            
-        Process:
-            1. Skip if no execution results exist
-            2. Get latest execution result
-            3. Skip analysis if execution passed
-            4. Find corresponding test case for context
-            5. Load execution analysis prompt with test details and error logs
-            6. Call LLM for triage analysis
-            7. Populate execution result with failure_category, root_cause, triage metadata
-            8. On LLM failure, fall back to "Test Environment Issue" defaults
-        """
         if not state.execution_results:
             state.add_log(f"{self.name}: no execution results found to analyze.")
             return state
 
-        result = state.execution_results[-1]
-        
-        # If execution succeeded, skip failure analysis
-        if result.status == ExecutionStatus.PASSED:
-            result.failure_category = "None"
-            result.root_cause_summary = "Execution passed successfully."
-            result.trace_analysis = "N/A"
-            result.screenshot_findings = "N/A"
-            result.suggest_retry = False
-            result.retest_pending_candidate = False
+        failed = [r for r in state.execution_results if r.status != ExecutionStatus.PASSED]
+        if not failed:
+            for result in state.execution_results:
+                self.analysis_service.analyze(state.project_id, result)
             state.add_log(f"{self.name}: skipped analysis as execution passed.")
             return state
 
-        state.add_log(f"{self.name} started analysis for execution {result.id}")
-
-        # Find the test case in state or construct dummy placeholder
-        tc = next((t for t in state.generated_test_cases if t.id == result.test_case_id), None)
-        tc_title = tc.title if tc else "Unknown Test Case"
-        tc_steps = "\n".join(f"- {s}" for s in tc.steps) if tc else "N/A"
-        tc_expected = tc.expected_result if tc else "N/A"
-
-        failure_msg = result.error_message or "Unknown failure"
-        screenshot_desc = "Screenshot captured during failure" if result.screenshot_path else "No screenshot captured"
-
-        prompt = load_prompt(
-            "execution_analysis_prompt.txt",
-            steps=tc_steps,
-            expected_result=tc_expected,
-            logs=failure_msg,
-            screenshot_desc=screenshot_desc
-        )
-        prompt = with_project_knowledge(prompt, state.retrieved_context)
-
-        try:
-            analysis = self.llm_service.structured_generate(
-                user=prompt,
-                response_model=_ExecutionAnalysisResponse
+        state.add_log(f"{self.name} started analysis of {len(failed)} failed execution(s)")
+        cases = {tc.id: tc for tc in state.generated_test_cases}
+        for result in state.execution_results:
+            self.analysis_service.analyze(
+                state.project_id,
+                result,
+                cases.get(result.test_case_id),
+                state.retrieved_context,
             )
-
-            result.failure_category = analysis.failure_category
-            result.root_cause_summary = analysis.root_cause_summary
-            result.trace_analysis = analysis.trace_analysis
-            result.screenshot_findings = analysis.screenshot_findings
-            result.suggest_retry = analysis.suggest_retry
-            result.retest_pending_candidate = analysis.retest_pending_candidate
-
+            if result.status == ExecutionStatus.PASSED:
+                continue
             state.add_log(
-                f"{self.name} triaged failure: Category={analysis.failure_category}, "
-                f"Root Cause={analysis.root_cause_summary}"
+                f"{self.name} triaged execution {result.id}: Category={result.failure_category}, "
+                f"Confidence={result.confidence}, Flaky score={result.flaky_score}, "
+                f"Root Cause={result.root_cause_summary}"
             )
-        except Exception as exc:
-            state.add_log(f"{self.name} analysis failed: {exc}")
-            # Populate fallback defaults
-            result.failure_category = "Test Environment Issue"
-            result.root_cause_summary = f"Analysis agent failed: {exc}. Execution error: {failure_msg}"
-            result.trace_analysis = failure_msg
-            result.screenshot_findings = "Unknown"
-            result.suggest_retry = True
-            result.retest_pending_candidate = False
-
+        state.add_log(f"{self.name} completed analysis")
         return state

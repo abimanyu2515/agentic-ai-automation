@@ -23,7 +23,7 @@ Workflow Position:
     SupervisorAgent → JiraSyncAgent → END
     
     Operation: SYNC_BUG
-    ExecutionAgent → ExecutionAnalysisAgent → DefectManagementAgent → ReportAgent → END
+    ExecutionAgent → ExecutionAnalysisAgent → BugReportingAgent → ReportAgent → END
     (Alternate path: SupervisorAgent → JiraSyncAgent for manual sync)
     
     Operation: RETEST_BUG
@@ -87,7 +87,6 @@ Design Decision:
 """
 
 import logging
-import os
 from datetime import datetime, timezone
 from uuid import UUID
 from backend.agents.base import BaseAgent
@@ -110,14 +109,16 @@ class JiraSyncAgent(BaseAgent):
     
     name = "Jira Sync Agent"
 
-    def __init__(self, jira_service: JiraService | None = None):
+    def __init__(self, jira_service: JiraService | None = None, bug_report_service=None):
         """
         Initialize JIRA sync agent.
         
         Args:
             jira_service: JIRA service instance (injected for testing)
+            bug_report_service: BugReportService used by sync_bug (injected for testing)
         """
         self.jira_service = jira_service or JiraService()
+        self.bug_report_service = bug_report_service
 
     def run(self, state: WorkflowState, config: dict | None = None) -> WorkflowState:
         """
@@ -238,103 +239,47 @@ class JiraSyncAgent(BaseAgent):
                 logger.error(f"Failed to create Jira Story for scenario {s.id}")
 
     def _sync_failures_as_bugs(self, state: WorkflowState, repo, project_id, jira_project_key, user_id, db_session):
-        """Processes failed test cases and raises Bugs in Jira."""
-        failed_results = [r for r in state.execution_results if r.status.value.lower() == "failed"]
-        
+        """Manual "sync bug": draft a bug report for each failed run if it has none,
+        then submit it. All bug rules live in BugReportService."""
+        from backend.models.bug_report import EDITABLE_STATUSES
+        from backend.services.bug_report_service import BugReportService
+
+        project_id = state.project_id or project_id
+        if project_id is None:
+            state.add_log(f"{self.name}: cannot sync bugs without a project")
+            return
+        service = self.bug_report_service or BugReportService(project_repo=repo, jira_service=self.jira_service)
+        actor = str(user_id) if user_id else "system"
+        failed_results = [r for r in state.execution_results if r.status.value.lower() in ("failed", "error")]
+
         for res in failed_results:
+            report = service.draft_from_execution(project_id, res, force=True, actor=actor)
+            if report is None:
+                state.add_log(f"{self.name}: could not draft a bug report for {res.id}")
+                continue
+            repo.save_execution_result(project_id, res)
+            if report.status in EDITABLE_STATUSES:
+                report = service.submit(project_id, report.id, actor=actor)
+            key = report.jira_key or report.duplicate_of_jira_key
+            if not key:
+                state.add_log(f"{self.name}: bug report {report.id} not filed: {report.submit_error or report.status.value}")
+                continue
+
             tc = repo.get_test_case(res.test_case_id)
-            if not tc:
-                continue
-                
-            label_tag = f"test_{tc.id}"
-            jql = f"project = '{jira_project_key}' AND labels = '{label_tag}' AND status != 'Closed'"
-            
-            existing = self.jira_service.search_issues(jql)
-            if existing:
-                issue = existing[0]
-                key = issue["key"]
-                logger.info(f"Reusing existing open bug {key} for failed test case {tc.id}")
-                
-                # Link execution via comments
-                comment = (
-                    f"Test execution failed again at {res.executed_at.isoformat() if isinstance(res.executed_at, datetime) else res.executed_at}.\n"
-                    f"Error Message: {res.error_message or 'No specific error log provided.'}"
+            if tc and tc.status != TestCaseStatus.RETEST_PENDING:
+                tc.status = TestCaseStatus.RETEST_PENDING
+                repo.update_test_case(tc)
+            state.add_log(f"{self.name}: bug report {report.id} filed as {key} ({report.status.value})")
+
+            if db_session:
+                log_audit(
+                    db_session,
+                    user_id,
+                    project_id,
+                    action="JIRA_CREATE",
+                    module="TESTCASE",
+                    field_changes={"jira_issue_key": key, "test_case_id": str(res.test_case_id), "bug_report_id": str(report.id)},
                 )
-                self.jira_service.add_comment(key, comment)
-                
-                # Move to Ready for Testing or In Progress
-                self.jira_service.transition_issue(key, "In Progress")
-                
-                tc.jira_issue_key = key
-                tc.jira_issue_url = f"{self.jira_service.config.base_url.rstrip('/')}/browse/{key}"
-                tc.jira_sync_status = "linked"
-                tc.jira_last_synced_at = datetime.now(timezone.utc)
-                tc.status = TestCaseStatus.RETEST_PENDING
-                repo.update_test_case(tc)
-                
-                state.add_log(f"Linked failed run to existing JIRA Bug: {key}")
-                continue
-                
-            # Create a new Bug ticket in Jira
-            summary = f"Bug: Test Case Failure - {tc.title}"
-            desc = (
-                f"Test execution failed.\n\n"
-                f"Test Case Title: {tc.title}\n"
-                f"Expected Result: {tc.expected_result}\n\n"
-                f"Runtime Error log:\n{res.error_message or 'No error message caught.'}"
-            )
-            labels = ["platform_sync", label_tag, "bug"]
-            
-            issue = self.jira_service.create_issue(
-                summary=summary,
-                description=desc,
-                issue_type="Bug",
-                project_key=jira_project_key,
-                labels=labels
-            )
-            
-            if issue:
-                key = issue["key"]
-                tc.jira_issue_key = key
-                tc.jira_issue_url = issue["url"]
-                tc.jira_sync_status = "created"
-                tc.jira_last_synced_at = datetime.now(timezone.utc)
-                tc.status = TestCaseStatus.RETEST_PENDING
-                repo.update_test_case(tc)
-                
-                # Attach runner screenshot if captured
-                if res.screenshot_path and os.path.exists(res.screenshot_path):
-                    try:
-                        with open(res.screenshot_path, "rb") as f:
-                            self.jira_service.upload_attachment(key, "screenshot.png", f.read(), "image/png")
-                    except Exception as e:
-                        logger.error(f"Failed to upload screenshot to Jira: {e}")
-                
-                # Attach HTML execution report if available
-                # Reports are stored in backend/playwrightt/public/artifacts/{execution_id}/report.html
-                from pathlib import Path
-                report_path = Path("backend/playwrightt/public/artifacts") / str(res.id) / "report.html"
-                if report_path.exists():
-                    try:
-                        with open(report_path, "rb") as f:
-                            self.jira_service.upload_attachment(key, f"execution_report_{res.id}.html", f.read(), "text/html")
-                        logger.info(f"Uploaded execution report to Jira {key}")
-                    except Exception as e:
-                        logger.error(f"Failed to upload execution report to Jira: {e}")
-                
-                state.add_log(f"Created JIRA Bug {key} for failing test run.")
-                
-                if db_session:
-                    log_audit(
-                        db_session,
-                        user_id,
-                        project_id,
-                        action="JIRA_CREATE",
-                        module="TESTCASE",
-                        field_changes={"jira_issue_key": key, "test_case_id": str(tc.id)}
-                    )
-            else:
-                logger.error(f"Failed to create Jira Bug for test case {tc.id}")
 
     def _process_bug_retests(self, state: WorkflowState, repo, project_id, user_id, db_session):
         """Scans test cases with open bugs and checks if they are ready for retest in Jira."""

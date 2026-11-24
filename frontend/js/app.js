@@ -1,10 +1,16 @@
-import { API } from './api.js?v=22';
-import { ChatPanel } from './chat.js?v=5';
+import { API } from './api.js?v=25';
+import { ChatPanel } from './chat.js?v=9';
 import { OpenRows, ROW_VIEWS } from './chat-context.js?v=1';
-import { ObjectRepositoryView } from './object-repository.js?v=7';
-import { TokenUtilizationView } from './token-utilization.js?v=1';
-import { Components, escapeHTML } from './components.js?v=6';
+import { ObjectRepositoryView } from './object-repository.js?v=10';
+import { TokenUtilizationView } from './token-utilization.js?v=4';
+import { Components, escapeHTML, showToast } from './components.js?v=8';
 import { initSidebarToggle } from './sidebar-toggle.js?v=1';
+import { BugReportsView } from './bug-reports.js?v=2';
+
+// Log analyser scores (0 to 1) shown as a percentage, or N/A when absent.
+function formatTriagePercent(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : 'N/A';
+}
 
 // Permissions behind buttons that tables render after login (spec 0009, AC-10).
 const PERMISSION_GATED_ACTIONS = [
@@ -1261,6 +1267,10 @@ class App {
     if (viewName === 'token-utilization') {
       this.tokenUtilizationView = this.tokenUtilizationView || new TokenUtilizationView();
       this.tokenUtilizationView.render(this.currentProject);
+    }
+    if (viewName === 'bugs') {
+      this.bugReportsView = this.bugReportsView || new BugReportsView();
+      this.bugReportsView.render(this.currentProject);
     }
 
     const scopeBtns = ['btn-db-scope-project', 'btn-db-scope-release', 'btn-db-scope-cycle'];
@@ -3258,7 +3268,7 @@ class App {
       return;
     }
 
-    if (['dashboard', 'requirements', 'scenarios', 'testcases', 'jira-traceability', 'testdatagent', 'playwright', 'executions', 'reports', 'langsmith', 'settings', 'execution-workspace', 'project-start', 'project', 'object-repository', 'token-utilization', 'documents'].includes(view)) {
+    if (['dashboard', 'requirements', 'scenarios', 'testcases', 'jira-traceability', 'testdatagent', 'playwright', 'executions', 'reports', 'langsmith', 'settings', 'execution-workspace', 'project-start', 'project', 'object-repository', 'token-utilization', 'documents', 'bugs'].includes(view)) {
       if (view !== 'project' && view !== 'token-utilization' && this.currentProject) {
         await this.refreshProjectData().catch(e => console.error("Router refresh error:", e));
       }
@@ -3637,11 +3647,19 @@ class App {
               </span>
             </div>
             <div style="font-size: 0.85rem; margin-bottom: 8px;"><strong>Suggest Retry:</strong> ${ex.suggest_retry ? 'Yes' : 'No'}</div>
-            <div style="font-size: 0.85rem;"><strong>Retest Candidate:</strong> ${ex.retest_pending_candidate ? 'Yes' : 'No'}</div>
+            <div style="font-size: 0.85rem; margin-bottom: 8px;"><strong>Retest Candidate:</strong> ${ex.retest_pending_candidate ? 'Yes' : 'No'}</div>
+            <div style="font-size: 0.85rem; margin-bottom: 8px;"><strong>Confidence:</strong> ${escapeHTML(formatTriagePercent(ex.confidence))}</div>
+            <div style="font-size: 0.85rem;"><strong>Flaky Score:</strong> ${escapeHTML(formatTriagePercent(ex.flaky_score))}</div>
           </div>
           <div>
             <h4 style="font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;">Root Cause Summary</h4>
             <p style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5; margin: 0; background: var(--bg-tertiary); padding: 8px; border-radius: var(--border-radius-md); border: 1px solid var(--border-color);">${escapeHTML(ex.root_cause_summary || 'N/A')}</p>
+            ${ex.failing_step ? `<div style="font-size: 0.85rem; margin-top: 10px;"><strong>Failing Step:</strong> <code>${escapeHTML(ex.failing_step)}</code></div>` : ''}
+            ${Array.isArray(ex.evidence) && ex.evidence.length ? `
+              <h4 style="font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); margin: 12px 0 6px;">Evidence</h4>
+              <ul style="margin: 0; padding-left: 18px; font-size: 0.82rem; font-family: monospace; color: var(--text-secondary); word-break: break-word;">
+                ${ex.evidence.map(line => `<li>${escapeHTML(line)}</li>`).join('')}
+              </ul>` : ''}
           </div>
         </div>
       `;
@@ -4360,6 +4378,7 @@ class App {
     window.deleteExecution = this.deleteExecution.bind(this);
     window.deleteAllFailedExecutions = this.deleteAllFailedExecutions.bind(this);
     window.viewTriageDetails = this.viewTriageDetails.bind(this);
+    window.openBugReport = this.openBugReport.bind(this);
 
     const token = sessionStorage.getItem('access_token');
     const userJson = sessionStorage.getItem('user');
@@ -4573,6 +4592,10 @@ class App {
   // reloaded first, since the action may have run while another view was open.
   async openChatLink(view, id) {
     if (!this.currentProject || !view) return;
+    if (view === 'bugs' && id) {
+      await this.openBugReport(id);
+      return;
+    }
     if (id && ['scenarios', 'testcases'].includes(view) && (this.requirements || []).some(r => r.id === id)) {
       this.selectedRequirementId = id;
     }
@@ -4621,6 +4644,7 @@ class App {
       if (view === 'executions') moduleName = 'Execution';
       if (view === 'jira-traceability') moduleName = 'TestCases';
       if (view === 'object-repository') moduleName = 'ObjectRepository';
+      if (view === 'bugs') moduleName = 'Executions';
       if (view === 'documents') moduleName = 'Knowledge';
       if (view === 'reports') moduleName = 'Reports';
       if (view === 'settings') moduleName = 'Settings';
@@ -4742,6 +4766,9 @@ class App {
     document.getElementById('project-settings-password').value = proj.target_username ? '********' : '';
     document.getElementById('project-settings-safe-test-environment').checked =
       proj.is_safe_test_environment === true;
+    document.getElementById('project-settings-bug-auto-submit').checked = proj.bug_auto_submit === true;
+    const threshold = typeof proj.bug_auto_submit_min_confidence === 'number' ? proj.bug_auto_submit_min_confidence : 0.85;
+    document.getElementById('project-settings-bug-confidence').value = String(Math.round(threshold * 100));
   }
 
   async saveProjectSettings(e) {
@@ -4758,6 +4785,15 @@ class App {
     const targetPassword = document.getElementById('project-settings-password').value;
     const isSafeTestEnvironment =
       document.getElementById('project-settings-safe-test-environment').checked;
+    const confidencePercent = Number(document.getElementById('project-settings-bug-confidence').value);
+    if (!Number.isFinite(confidencePercent) || confidencePercent < 0 || confidencePercent > 100) {
+      alert('Minimum triage confidence must be a number from 0 to 100.');
+      return;
+    }
+    const bugAutoSubmit = {
+      enabled: document.getElementById('project-settings-bug-auto-submit').checked,
+      minConfidence: confidencePercent / 100
+    };
 
     try {
       const updated = await API.updateProject(
@@ -4770,13 +4806,16 @@ class App {
         targetUrl,
         targetUsername,
         targetPassword,
-        isSafeTestEnvironment
+        isSafeTestEnvironment,
+        bugAutoSubmit
       );
       
       // Update local project object
       proj.target_url = updated.target_url;
       proj.target_username = updated.target_username;
       proj.is_safe_test_environment = updated.is_safe_test_environment;
+      proj.bug_auto_submit = updated.bug_auto_submit;
+      proj.bug_auto_submit_min_confidence = updated.bug_auto_submit_min_confidence;
       if (this.currentProject?.id === updated.id) {
         this.currentProject.is_safe_test_environment = updated.is_safe_test_environment;
       }
@@ -4938,12 +4977,32 @@ class App {
     }
   }
 
-  viewTriageDetails(executionId) {
-    const execution = this.executions.find(ex => ex.id === executionId);
-    if (!execution) {
-      alert('Execution not found');
+  async viewTriageDetails(executionId) {
+    if (!this.currentProject) {
+      alert('Select a project to view execution details');
       return;
     }
+
+    const projectId = this.currentProject.id;
+    let execution;
+    try {
+      // Triage is saved asynchronously; don't render the cached execution list.
+      const detail = await API.getExecutionDetail(projectId, executionId);
+      execution = detail.execution;
+      if (!execution) {
+        throw new Error('Execution details were not returned.');
+      }
+    } catch (err) {
+      alert(`Failed to load triage details: ${err.message}`);
+      return;
+    }
+
+    if (this.currentProject?.id !== projectId) return;
+    this.executions = this.executions.map(executionEntry => (
+      executionEntry.id === executionId
+        ? { ...executionEntry, ...execution }
+        : executionEntry
+    ));
 
     const modal = document.getElementById('triage-modal');
     if (!modal) {
@@ -4959,18 +5018,85 @@ class App {
     document.getElementById('triage-screenshot-findings').textContent = execution.screenshot_findings || 'N/A';
     document.getElementById('triage-suggest-retry').textContent = execution.suggest_retry ? 'Yes' : 'No';
     document.getElementById('triage-bug-candidate').textContent = execution.retest_pending_candidate ? 'Yes' : 'No';
-    
+    document.getElementById('triage-failing-step').textContent = execution.failing_step || 'N/A';
+    document.getElementById('triage-confidence').textContent = formatTriagePercent(execution.confidence);
+    const history = execution.run_history_summary;
+    let flakyText = formatTriagePercent(execution.flaky_score);
+    if (history && history.runs) {
+      flakyText += ` (${history.flips} flips in last ${history.runs} runs)`;
+    }
+    document.getElementById('triage-flaky-score').textContent = flakyText;
+    document.getElementById('triage-frontend-error').textContent = execution.frontend_error_detected
+      ? (execution.frontend_error_details || 'Yes')
+      : 'None identified';
+    const evidenceList = document.getElementById('triage-evidence');
+    evidenceList.replaceChildren();
+    const evidence = Array.isArray(execution.evidence) ? execution.evidence : [];
+    if (evidence.length === 0) {
+      const empty = document.createElement('li');
+      empty.textContent = 'N/A';
+      evidenceList.appendChild(empty);
+    }
+    for (const line of evidence) {
+      const item = document.createElement('li');
+      item.textContent = line;
+      evidenceList.appendChild(item);
+    }
+
     const jiraBugElement = document.getElementById('triage-jira-bug');
+    jiraBugElement.replaceChildren();
     if (execution.jira_bug_id && execution.jira_bug_url) {
-      jiraBugElement.innerHTML = `<a href="${execution.jira_bug_url}" target="_blank">${execution.jira_bug_id}</a>`;
+      const link = document.createElement('a');
+      link.href = execution.jira_bug_url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = execution.jira_bug_id;
+      jiraBugElement.appendChild(link);
     } else {
       jiraBugElement.textContent = 'N/A';
+    }
+
+    // Report bug / View bug report (Bug Reporting Agent drafts).
+    const bugButton = document.getElementById('triage-bug-report-btn');
+    if (bugButton) {
+      const failed = execution.status === 'failed' || execution.status === 'error';
+      const canEdit = typeof window.hasPermission !== 'function' || window.hasPermission('Executions', 'edit');
+      bugButton.hidden = !failed || (!execution.bug_report_id && !canEdit);
+      bugButton.textContent = execution.bug_report_id ? 'View bug report' : 'Report bug';
+      bugButton.onclick = () => this.openBugReport(execution.bug_report_id || null, executionId);
     }
 
     // Show modal. The overlay is shown by its `active` class.
     this.openModal('triage-modal');
     this.triageExecutionId = executionId;
     this.notifyChatContext();
+  }
+
+  // Open a bug report in the Bugs view. With only an execution ID, draft one first.
+  async openBugReport(reportId, executionId = null) {
+    if (!this.currentProject) return;
+    const projectId = this.currentProject.id;
+    let id = reportId;
+    if (!id && executionId) {
+      const button = document.getElementById('triage-bug-report-btn');
+      if (button) { button.disabled = true; button.textContent = 'Drafting bug report...'; }
+      try {
+        const report = await API.createBugReportFromExecution(projectId, executionId);
+        id = report.id;
+        this.executions = (this.executions || []).map(ex => (ex.id === executionId ? { ...ex, bug_report_id: id } : ex));
+      } catch (err) {
+        showToast(`Could not draft a bug report: ${err.message}`, 'error');
+        return;
+      } finally {
+        if (button) { button.disabled = false; button.textContent = id ? 'View bug report' : 'Report bug'; }
+      }
+    }
+    if (!id || this.currentProject?.id !== projectId) return;
+    this.closeModal('triage-modal');
+    this.bugReportsView = this.bugReportsView || new BugReportsView();
+    this.bugReportsView.selectedId = id;
+    this.bugReportsView.filter = '';
+    this.navigateTo('bugs');
   }
 
   renderConfiguredTools(tools) {

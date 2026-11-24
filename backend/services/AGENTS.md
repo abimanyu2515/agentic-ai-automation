@@ -24,7 +24,11 @@ Services contain backend business behavior that supports API routes and workflow
 | `backend/services/chat_tools.py` | Project scoped read tools the chat model may call |
 | `backend/services/chat_actions.py` | Chat action catalog, proposal validation, and `ChatActionExecutor` for confirmed actions |
 | `backend/services/script_generation_jobs.py` | In memory background jobs for live verified script generation; the page polls them |
-| `backend/services/execution_service.py` | Batch execution runs and their live event logs |
+| `backend/services/execution_service.py` | Batch execution runs and their live event logs; triages failed batch and webhook runs before saving |
+| `backend/services/log_analysis_service.py` | Log analyser shared by `ExecutionAnalysisAgent`, batch and webhook runs: evidence, history, LLM triage, category rules |
+| `backend/services/log_evidence_collector.py` | Bounded, redacted text evidence from `report.json`, `trace.zip` and `error-context.md` |
+| `backend/services/run_history.py` | Earlier runs of a test case, error signatures, and the deterministic `flaky_score` |
+| `backend/services/bug_report_service.py` | The only place bugs are drafted and filed in Jira: drafts, signature dedupe, redaction, Jira duplicate search, submit, auto-submit |
 | `backend/services/dashboard_metrics.py` | Dashboard metric computation, shared by the dashboard and chat tools |
 | `backend/services/object_repository_service.py` | Object repository rules: CRUD, recon and harvest ingest (`ingest_recon`), run markers, detection score |
 | `backend/services/object_repository_script.py` | Inserts (render) and removes (strip) the `orx` block in scripts, and rewrites recorded selectors to keys |
