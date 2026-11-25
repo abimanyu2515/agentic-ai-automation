@@ -24,7 +24,7 @@ browser:
 
 rag:
   enabled: false
-  vector_db_provider: chroma
+  vector_db_provider: ragflow
   vector_db_path: ./data/vector_store
   ragflow_api_base: http://localhost:9380
   ragflow_api_key: ~

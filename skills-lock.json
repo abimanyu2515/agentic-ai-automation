@@ -37,6 +37,30 @@
       "skillPath": "skills/document/SKILL.md",
       "computedHash": "a47c5d29a1263d987c2fa05dbc993a5276aaf6c4ddc54fbd329463a5f3a1aa77"
     },
+    "rag-blueprint": {
+      "source": "NVIDIA/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rag-blueprint/SKILL.md",
+      "computedHash": "4621085caf70c1ab91cf321dcd97ed432e44150565c30f9b2d87bbb4a2b62dfe"
+    },
+    "rag-eval": {
+      "source": "NVIDIA/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rag-eval/SKILL.md",
+      "computedHash": "3c8d0780708a1d4d40a9286b77ff34f79ae8b2a62f4ca685cee21a154762f916"
+    },
+    "rag-evaluation": {
+      "source": "claude-dev-suite/claude-dev-suite",
+      "sourceType": "github",
+      "skillPath": "skills/rag/rag-evaluation/SKILL.md",
+      "computedHash": "ef8dbcbf0bd4d0a3c2a529b8999ec613d62ff95fa97c912ff0837e17b6929984"
+    },
+    "rag-perf": {
+      "source": "NVIDIA/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rag-perf/SKILL.md",
+      "computedHash": "f669e5c80e2adbc49e9de24e19c97751c5b56d78884b94142adac73343b6d213"
+    },
     "scope": {
       "source": "jsmastery-pro/skills",
       "sourceType": "github",
