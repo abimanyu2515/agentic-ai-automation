@@ -64,3 +64,9 @@ class ExecutionResult(BaseModel):
     # accepted (project_id, target_url, framework, credential_reference). The run uses
     # it even if the project is edited later. Never holds a secret. None for old runs.
     project_config_snapshot: dict[str, str] | None = None
+
+    # Spec 0011: a heal rerun points at the failed result it replaces
+    # (`heal_rerun_of`) and lists the heals it tests. Run history leaves out
+    # a result that another result's heal_rerun_of points at.
+    heal_rerun_of: UUID | None = None
+    heal_ids: list[UUID] | None = None

@@ -838,7 +838,7 @@ Example transformations:
         <div class="header">
             <div class="header-main">
                 <span class="badge badge-{execution_result.status.value}">
-                    {execution_result.status.value.upper()}
+                    {"PASSED AFTER HEAL" if execution_result.status.value == "passed" and getattr(execution_result, "heal_rerun_of", None) else execution_result.status.value.upper()}
                 </span>
                 <div class="header-title">
                     <h1>Enterprise Test Execution Report</h1>

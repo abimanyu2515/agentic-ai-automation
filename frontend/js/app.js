@@ -1,9 +1,9 @@
-import { API } from './api.js?v=25';
+import { API } from './api.js?v=27';
 import { ChatPanel } from './chat.js?v=9';
 import { OpenRows, ROW_VIEWS } from './chat-context.js?v=1';
-import { ObjectRepositoryView } from './object-repository.js?v=10';
+import { ObjectRepositoryView } from './object-repository.js?v=11';
 import { TokenUtilizationView } from './token-utilization.js?v=4';
-import { Components, escapeHTML, showToast } from './components.js?v=8';
+import { Components, escapeHTML, showToast } from './components.js?v=10';
 import { initSidebarToggle } from './sidebar-toggle.js?v=1';
 import { BugReportsView } from './bug-reports.js?v=2';
 
@@ -2261,6 +2261,38 @@ class App {
     container.innerHTML = `${html}</div>`;
   }
 
+  // Accept, reject, or revert a script repaired by self healing (spec 0011, AC-12, AC-14).
+  async decideScriptHeal(button) {
+    const { healId, testCaseId, decision } = button.dataset;
+    const labels = {
+      accept: { busy: 'Accepting...', done: 'Accepted the repaired script' },
+      reject: { busy: 'Rejecting...', done: 'Rejected the repaired script' },
+      revert: { busy: 'Reverting...', done: 'Restored the old script' },
+    };
+    if (!labels[decision] || !this.currentProject) return;
+    if (decision === 'revert' && !confirm('Put back the old script for this test case?')) return;
+    const errorBox = document.getElementById(`tc-script-heal-error-${testCaseId}`);
+    const buttons = button.closest('.tc-script-heal-actions')?.querySelectorAll('button') || [button];
+    const original = button.textContent;
+    buttons.forEach(b => { b.disabled = true; });
+    button.textContent = labels[decision].busy;
+    if (errorBox) errorBox.hidden = true;
+    try {
+      await API.decideScriptHeal(this.currentProject.id, healId, decision);
+      showToast(labels[decision].done, 'success');
+      this.addLog(labels[decision].done);
+      this.expandedTestCaseIds?.add(testCaseId);
+      await this.refreshProjectData();
+    } catch (err) {
+      buttons.forEach(b => { b.disabled = false; });
+      button.textContent = original;
+      if (errorBox) {
+        errorBox.textContent = `Could not ${decision} this script fix: ${err.message}`;
+        errorBox.hidden = false;
+      }
+    }
+  }
+
   async renderTestCases() {
     this.resetOpenRows('testcases');
     this.renderTestCasesRequirementDropdown();
@@ -2365,6 +2397,7 @@ class App {
       onViewScript: (id) => {
         this.openPlaywrightScriptWorkspace(id);
       },
+      onRunWithHealing: (id, btn) => this.runTestCaseWithHealing(id, btn),
       onGenerateScript: async (id, btn, framework) => {
         btn.disabled = true;
         btn.innerText = "Generating...";
@@ -2395,6 +2428,14 @@ class App {
       button.addEventListener('click', () => (
         onGenerateTestData(button.dataset.testCaseId)
       ));
+    });
+
+    // Script healing decisions (spec 0011, AC-14).
+    container.querySelectorAll('.btn-script-heal-decision').forEach(button => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.decideScriptHeal(button);
+      });
     });
 
     // Bulk actions
@@ -3191,6 +3232,8 @@ class App {
       onViewScript: (id) => {
         this.openPlaywrightScriptWorkspace(id);
       },
+      // Both test case tables share window._testCaseActions, so each handler set needs this.
+      onRunWithHealing: (id, btn) => this.runTestCaseWithHealing(id, btn),
       onGenerateScript: async (id, btn) => {
         btn.disabled = true;
         btn.innerText = "Generating...";
@@ -3264,6 +3307,8 @@ class App {
       if (this.currentProject) {
         await this.renderExecutionWorkspaceObserver(execId);
       }
+      // The route changed while this one loaded; the newer handler owns it.
+      if (window.location.hash !== hash) return;
       this.navigateTo('execution-workspace');
       return;
     }
@@ -3272,6 +3317,9 @@ class App {
       if (view !== 'project' && view !== 'token-utilization' && this.currentProject) {
         await this.refreshProjectData().catch(e => console.error("Router refresh error:", e));
       }
+      // The route changed while data refreshed. Navigating to this stale view
+      // would write its hash back and the two handlers would undo each other.
+      if (window.location.hash !== hash) return;
       this.navigateTo(view);
       if (view === 'dashboard' && this.isAdmin()) {
         this.renderDashboardMetrics();
@@ -3378,6 +3426,32 @@ class App {
     container.innerHTML = Components.ExecutionsTable(this.filteredExecutions);
   }
 
+  // Runs the stored script through the backend workflow (spec 0011), the only
+  // path with self healing, then follows its live log. Workspace runs skip healing.
+  async runTestCaseWithHealing(testCaseId, btn) {
+    if (!this.currentProject) return;
+    const label = btn ? btn.innerText : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = 'Starting...';
+    }
+    try {
+      await API.executeTestCase(this.currentProject.id, testCaseId);
+      this.addLog('Test case run started with self healing');
+      // The observer route takes an execution id; this marks it as a live
+      // test case stream so the observer skips the execution detail lookup.
+      this.liveTestCaseStreamId = testCaseId;
+      window.location.hash = `#/execution/${testCaseId}`;
+    } catch (err) {
+      if (!err.shown) alert(`Could not start the run: ${err.message}`);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerText = label;
+      }
+    }
+  }
+
   async renderExecutionWorkspaceObserver(execId) {
     const container = document.getElementById('execution-observer-body');
     if (!container) return;
@@ -3385,6 +3459,11 @@ class App {
     if (this.activeExecutionStream) {
       this.activeExecutionStream.close();
       this.activeExecutionStream = null;
+    }
+
+    if (execId === this.liveTestCaseStreamId) {
+      this.renderRealTimeObserver(execId, false);
+      return;
     }
 
     const isBatch = execId.startsWith('BATCH-');
@@ -4769,6 +4848,8 @@ class App {
     document.getElementById('project-settings-bug-auto-submit').checked = proj.bug_auto_submit === true;
     const threshold = typeof proj.bug_auto_submit_min_confidence === 'number' ? proj.bug_auto_submit_min_confidence : 0.85;
     document.getElementById('project-settings-bug-confidence').value = String(Math.round(threshold * 100));
+    // Spec 0011: healing defaults to on when the project response predates the field.
+    document.getElementById('project-settings-self-healing').checked = proj.self_healing_enabled !== false;
   }
 
   async saveProjectSettings(e) {
@@ -4807,15 +4888,17 @@ class App {
         targetUsername,
         targetPassword,
         isSafeTestEnvironment,
-        bugAutoSubmit
+        bugAutoSubmit,
+        document.getElementById('project-settings-self-healing').checked
       );
-      
+
       // Update local project object
       proj.target_url = updated.target_url;
       proj.target_username = updated.target_username;
       proj.is_safe_test_environment = updated.is_safe_test_environment;
       proj.bug_auto_submit = updated.bug_auto_submit;
       proj.bug_auto_submit_min_confidence = updated.bug_auto_submit_min_confidence;
+      proj.self_healing_enabled = updated.self_healing_enabled;
       if (this.currentProject?.id === updated.id) {
         this.currentProject.is_safe_test_environment = updated.is_safe_test_environment;
       }

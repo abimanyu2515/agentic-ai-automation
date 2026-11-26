@@ -17,6 +17,24 @@ class TestCaseUpdate(BaseModel):
     evaluation_reason: str | None = None
 
 
+class ScriptHealResponse(BaseModel):
+    """One script repair from the RCA (spec 0011, AC-12). Scripts hold object repository keys."""
+
+    id: UUID
+    test_case_id: UUID
+    status: str
+    old_script: str
+    new_script: str
+    rca_category: str
+    root_cause_summary: str
+    failing_step: str | None = None
+    reason: str
+    execution_id: UUID | None = None
+    created_at: datetime
+    decided_by: UUID | None = None
+    decided_at: datetime | None = None
+
+
 class TestCaseResponse(BaseModel):
     id: UUID
     scenario_id: UUID
@@ -43,6 +61,8 @@ class TestCaseResponse(BaseModel):
     jira_sync_status: str | None = None
     jira_last_synced_at: datetime | None = None
     test_data_sets: list[dict[str, str]] = Field(default_factory=list)
+    # Spec 0011, AC-12: the test case's latest script heal, or null.
+    latest_script_heal: ScriptHealResponse | None = None
 
 
 class ScriptUpdatePayload(BaseModel):

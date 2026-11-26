@@ -98,6 +98,11 @@ def _min_confidence(row) -> float:
     return 0.85 if value is None else float(value)
 
 
+def _self_healing_enabled(row) -> bool:
+    value = getattr(row, "self_healing_enabled", None)
+    return True if value is None else bool(value)
+
+
 @_rollback_on_database_errors
 class PostgresProjectRepository(ProjectRepository):
     def __init__(self):
@@ -164,6 +169,7 @@ class PostgresProjectRepository(ProjectRepository):
                 rag_dataset_id=getattr(p, "rag_dataset_id", None),
                 bug_auto_submit=bool(getattr(p, "bug_auto_submit", False)),
                 bug_auto_submit_min_confidence=_min_confidence(p),
+                self_healing_enabled=_self_healing_enabled(p),
                 created_at=p.created_at,
                 requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted],
                 is_deleted=p.is_deleted,
@@ -195,6 +201,7 @@ class PostgresProjectRepository(ProjectRepository):
             rag_dataset_id=getattr(p, "rag_dataset_id", None),
             bug_auto_submit=bool(getattr(p, "bug_auto_submit", False)),
             bug_auto_submit_min_confidence=_min_confidence(p),
+            self_healing_enabled=_self_healing_enabled(p),
             created_at=p.created_at,
             requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted],
             is_deleted=p.is_deleted,
@@ -279,6 +286,7 @@ class PostgresProjectRepository(ProjectRepository):
         db_proj.is_safe_test_environment = project.is_safe_test_environment
         db_proj.bug_auto_submit = project.bug_auto_submit
         db_proj.bug_auto_submit_min_confidence = project.bug_auto_submit_min_confidence
+        db_proj.self_healing_enabled = project.self_healing_enabled
         owner_id = db_proj.owner_id
         try:
             self._flush_or_commit()
@@ -1179,7 +1187,12 @@ class PostgresProjectRepository(ProjectRepository):
         "jira_bug_id",
         "jira_bug_url",
         "bug_report_id",
+        "heal_rerun_of",
     )
+
+    @staticmethod
+    def _heal_ids_out(result: ExecutionResult):
+        return [str(heal_id) for heal_id in result.heal_ids] if result.heal_ids is not None else None
 
     def _to_execution_result(self, ex: ExecutionDB) -> ExecutionResult:
         return ExecutionResult(
@@ -1197,6 +1210,7 @@ class PostgresProjectRepository(ProjectRepository):
             timeline=ex.timeline,
             screenshots=ex.screenshots,
             project_config_snapshot=ex.project_config_snapshot,
+            heal_ids=getattr(ex, "heal_ids", None),
             **{field: getattr(ex, field) for field in self._EXECUTION_TRIAGE_FIELDS},
         )
 
@@ -1243,6 +1257,7 @@ class PostgresProjectRepository(ProjectRepository):
                 timeline=result.timeline,
                 screenshots=result.screenshots,
                 project_config_snapshot=result.project_config_snapshot,
+                heal_ids=self._heal_ids_out(result),
                 **{field: getattr(result, field) for field in self._EXECUTION_TRIAGE_FIELDS},
             )
             session.add(db_ex)
@@ -1260,6 +1275,7 @@ class PostgresProjectRepository(ProjectRepository):
             db_ex.screenshots = result.screenshots
             for field in self._EXECUTION_TRIAGE_FIELDS:
                 setattr(db_ex, field, getattr(result, field))
+            db_ex.heal_ids = self._heal_ids_out(result)
             # The snapshot is immutable: keep the first one, only fill it when missing.
             if db_ex.project_config_snapshot is None:
                 db_ex.project_config_snapshot = result.project_config_snapshot

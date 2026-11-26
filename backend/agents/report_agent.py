@@ -75,6 +75,9 @@ from backend.models.execution_report import ExecutionReport, TestCaseReportEntry
 from backend.models.state import WorkflowState
 from backend.models.test_case import EvaluationStatus, TestCase, TestCaseStatus
 
+# Spec 0011, AC-11: shown for a latest result that passed on a heal rerun.
+PASSED_AFTER_HEAL = "Passed after heal"
+
 logger = logging.getLogger(__name__)
 
 
@@ -208,7 +211,8 @@ Executed {report_metrics['executed_count']} test cases with a {report_metrics['p
 
         state.add_log(f"{self.name} started")
 
-        results_by_test_case_id = {r.test_case_id: r for r in state.execution_results}
+        # The latest result per test case (spec 0011, AC-11).
+        results_by_test_case_id = {r.test_case_id: r for r in state.latest_results()}
 
         approved = sum(1 for tc in state.generated_test_cases if tc.evaluation_status == EvaluationStatus.APPROVED)
         needs_review = sum(1 for tc in state.generated_test_cases if tc.evaluation_status == EvaluationStatus.NEEDS_REVIEW)
@@ -227,6 +231,46 @@ Executed {report_metrics['executed_count']} test cases with a {report_metrics['p
                 duration_seconds=result.duration_seconds if result else None,
                 reason=result.error_message if result else None,
             )
+
+        passed_after_heal = [
+            TestCaseReportEntry(
+                title=tc.title,
+                status=PASSED_AFTER_HEAL,
+                duration_seconds=results_by_test_case_id[tc.id].duration_seconds,
+            )
+            for tc in passed
+            if tc.id in results_by_test_case_id and results_by_test_case_id[tc.id].heal_rerun_of is not None
+        ]
+        _outcome = {"passed": "passed", "failed": "failed", "pending_script_repair": "waiting for the script repair"}
+        self_healing = [
+            {
+                "kind": "locator",
+                "key": heal.get("key"),
+                "old_main_locator": heal.get("old_main_locator"),
+                "new_main_locator": heal.get("new_main_locator"),
+                "confidence": heal.get("confidence"),
+                "method": heal.get("method"),
+                "status": heal.get("status"),
+                "rerun_outcome": _outcome.get(heal.get("verified"), "not rerun"),
+            }
+            for heal in state.heal_results
+        ] + [
+            # Spec 0011, AC-11: one row per script fix. The diff is read through
+            # the script heal API by `script_heal_id` (the report never holds script text).
+            {
+                "kind": "script",
+                "script_heal_id": entry.get("script_heal_id"),
+                "test_case_id": entry.get("test_case_id"),
+                "test_case_title": next(
+                    (tc.title for tc in state.generated_test_cases if str(tc.id) == str(entry.get("test_case_id"))), None
+                ),
+                "rca_category": entry.get("rca_category"),
+                "root_cause_summary": entry.get("root_cause_summary"),
+                "status": entry.get("status"),
+                "rerun_outcome": _outcome.get(entry.get("verified"), "not rerun"),
+            }
+            for entry in state.script_heal_results
+        ]
 
         # Collect stories
         stories_list = [s.jira_issue_key for s in state.generated_scenarios if s.jira_issue_key]
@@ -271,6 +315,8 @@ Executed {report_metrics['executed_count']} test cases with a {report_metrics['p
             jira_stories_synced=stories_list,
             jira_bugs_raised=bugs_list,
             jira_retests_required=retests_count,
+            passed_after_heal=passed_after_heal,
+            self_healing=self_healing,
             executive_summary=executive_summary  # NEW: AI-generated summary
         )
 

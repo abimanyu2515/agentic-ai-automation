@@ -65,9 +65,10 @@ temp/
 tmp/
 
 proj-guide.md
-.agents/
 # Chat assistant store (spec 0005)
 backend/database/chat_store.json
+# Script heal store (spec 0011)
+backend/database/script_heal_store.json
 .claude/worktrees/
 ".env.*"       
 "!.env.example"  

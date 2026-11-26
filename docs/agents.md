@@ -327,6 +327,30 @@ Report statuses: `draft`, `submit_failed`, `submitted`, `linked_duplicate`, `res
 
 **Operation**: `EXECUTE` (sub-step, between ExecutionAnalysisAgent and ReportAgent)
 
+It reads only the latest result for each test case, so a test case that passed on a heal rerun gets no bug report (spec 0011).
+
+---
+
+### SelfHealingAgent (spec 0011)
+
+**File**: `backend/agents/self_healing_agent.py`
+**Services**: `backend/services/object_repository_healing.py` (`LocatorHealingService`, stage 1) and `backend/services/script_repair_service.py` (`ScriptRepairService`, stage 2)
+**Prompt**: `backend/prompts/agents/self_healing/roles_and_responsibilities.md` (LLM fallback only). Stage 2 uses PlaywrightAgent's own prompt with `repair_feedback`.
+
+Runs between ExecutionAgent's analysis and BugReportingAgent, only after a failure. Stage 1 runs when every stored locator of an object repository element failed. Stage 2 runs when the test still fails with every locator resolved and the log analyser's RCA is `Flaky Test / Automation Issue` at confidence 0.6 or more. A passed run is never processed.
+
+- **Heal phase.** For each failing key, it first applies the failed run's markers, then reads candidates only from that run's `harvest.json` (pages matching the element's `url_pattern`), redacted like a harvest ingest. It scores them with fixed rules (test id, role, id or name, label or name similarity, placeholder, element type). A score of at least 0.85 with a 0.15 lead is applied; an unclear score from 0.5 asks the `analysis` LLM to pick one of the top 5 candidates by index (page text is marked untrusted, and the final confidence is capped at the candidate's score plus 0.2). A confident match is applied: the candidate's locators go first, the old ones stay as backups, the fingerprint moves, and `locators_version` goes up. Anything less certain is saved as a suggestion. An element a tester edited is never applied automatically. When a heal is applied, the failed run's evidence is copied to `heal-<attempt>/` and the test case is rerun once.
+- **Verify phase.** After the rerun, a heal stays applied when every rerun passed. If the healed key resolved but the test still failed for an automation reason, the heal waits for stage 2. Otherwise the old locators and fingerprint go back and the heal becomes a suggestion.
+- **Script repair phase (stage 2).** It regenerates the script with PlaywrightAgent:
+  - **Inputs.** The repair feedback is built from the RCA (`root_cause_summary`, `failing_step`, `trace_analysis`, up to 8 evidence lines). Run text is wrapped as untrusted data, redacted, and capped at 2000 characters. The page evidence is the run's harvest. The prompt also lists the object repository, including any heal from stage 1.
+  - **Gates.** The new script is applied only when it passes the validator, uses only known keys, keeps at least as many `expect(` assertions, and leaves the steps, expected result, and test data unchanged. A script that fails a gate becomes a suggestion with no rerun.
+  - **Saving.** An applied fix is saved to the test case (keys only, never rendered) and to the state's copy, then rerun once.
+- **Script verify phase.** A fix whose rerun passed stays, along with any heal that waited for it. A fix whose rerun failed is restored and becomes a suggestion, and the waiting heal is put back too.
+
+**State writes**: `heal_results`, `heal_attempts`, `heal_rerun_test_case_ids`, `script_heal_results`, `script_repair_attempts`, `markers_applied_result_ids`, the failed result's artifact paths, and the state's copy of a repaired script. It never raises and never changes a result's status.
+
+**Operation**: `EXECUTE` (sub-step, only when routed)
+
 ---
 
 ### 14. ReportAgent

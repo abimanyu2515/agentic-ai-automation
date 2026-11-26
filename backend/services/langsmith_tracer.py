@@ -192,8 +192,8 @@ class LangSmithTracer:
         
         # Extract execution_id from execution results
         if state.execution_results:
-            # Get execution_id from the first result (all results share the same execution context)
-            metadata["execution_id"] = str(state.execution_results[0].id)
+            # The latest result per test case (spec 0011, AC-11): after a heal rerun it is the rerun.
+            metadata["execution_id"] = str(state.latest_results()[0].id)
         
         # Extract scenario information
         if state.generated_scenarios:

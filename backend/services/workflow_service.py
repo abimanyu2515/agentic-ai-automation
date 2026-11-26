@@ -18,6 +18,7 @@ from backend.models.execution_result import ExecutionResult
 from backend.models.requirement import Requirement
 from backend.agents.execution_analysis_agent import ExecutionAnalysisAgent
 from backend.agents.bug_reporting_agent import BugReportingAgent
+from backend.agents.self_healing_agent import SelfHealingAgent
 from backend.repository.project_repository import get_project_repository
 from backend.services.knowledge_indexer import queue_defect_keys, queue_knowledge_source
 from backend.services.llm_context import llm_operation
@@ -1047,11 +1048,16 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
         from backend.services.playwright_runner import ARTIFACTS_ROOT
         
         known_screenshots = set()
-        marker_lines: list[str] = []
+
+        # Spec 0011, AC-1: heal only when both the global and the project switch are on.
+        from backend.config.settings import get_settings
+        project_for_healing = workflow_service.repo.get_project(project_id)
+        state.healing_enabled = bool(
+            get_settings().object_repository.healing.enabled
+            and getattr(project_for_healing, "self_healing_enabled", True)
+        )
 
         def on_log_callback(log_line: str):
-            if "[OBJREPO]" in log_line:
-                marker_lines.append(log_line)
             timeline_msg = None
             timeline_match = re.search(r"\[Timeline\]\s*([^:\n]+)(?::\s*(.+))?", log_line, re.IGNORECASE)
             if timeline_match:
@@ -1080,6 +1086,21 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
                 log_event("Execution Analysis", "Analyzing execution failure", "Identifying root cause and flakiness...")
                 return super().run(state)
 
+        class LoggingSelfHealingAgent(SelfHealingAgent):
+            def run(self, state: WorkflowState) -> WorkflowState:
+                from backend.services.object_repository_healing import find_heal_targets
+                from backend.services.script_repair_service import pending_script_verification
+
+                if pending_script_verification(state):
+                    log_event("Self Healing", "Checking the repaired script", "Comparing the rerun with the script fix...")
+                elif state.heal_results and not state.heal_rerun_test_case_ids:
+                    log_event("Self Healing", "Checking the healed locators", "Comparing the rerun with the heal...")
+                elif not find_heal_targets(state):
+                    log_event("Self Healing", "Repairing the script", "Using the failure analysis to fix the script...")
+                else:
+                    log_event("Self Healing", "Healing broken locators", "Looking for the failed elements in the run's harvest...")
+                return super().run(state)
+
         class LoggingBugReportingAgent(BugReportingAgent):
             def run(self, state: WorkflowState) -> WorkflowState:
                 log_event("Bug Report", "Drafting bug report", "Writing a bug report draft for product defects...")
@@ -1097,20 +1118,41 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
             execution_agent=exec_agent,
             execution_analysis_agent=LoggingExecutionAnalysisAgent(),
             bug_reporting_agent=bug_reporting_agent,
+            self_healing_agent=LoggingSelfHealingAgent(project_id=project_id, repo=workflow_service.repo),
         )
         
         config = {"configurable": {"operation": WorkflowOperation.EXECUTE}}
         raw_result = local_graph.invoke(state, config)
         final_state = WorkflowState(**raw_result)
         
-        result = final_state.execution_results[0]
+        # Spec 0011, AC-11: a heal rerun appends a second result. The latest one
+        # is the run's result and takes the caller's execution_id; the earlier
+        # attempt is saved too, under its own id.
+        latest = final_state.latest_results()
+        if not latest:
+            raise ValueError("The run produced no execution result")
+        result = latest[0]
+        old_result_id = result.id
         if execution_id:
             if result.bug_report_id and result.id != execution_id:
                 bug_reporting_agent.bug_report_service.relink_execution(result.bug_report_id, result.id, execution_id)
             result.id = execution_id
         
-        # Save updated test case status and execution result in repo
+        # Save updated test case status and every execution result in repo.
+        # Spec 0011, AC-21: script repair saves the script itself during the run,
+        # so the script fields come from the store, never from the copy loaded above.
+        final_case = next((tc for tc in final_state.generated_test_cases if tc.id == test_case.id), None)
+        if final_case is not None:
+            test_case.status = final_case.status
+        stored_case = workflow_service.repo.get_test_case(test_case.id)
+        if stored_case is not None:
+            test_case.playwright_script = stored_case.playwright_script
+            test_case.script_validation_status = stored_case.script_validation_status
+            test_case.script_validation_diagnostic = stored_case.script_validation_diagnostic
         workflow_service.repo.update_test_case(test_case)
+        for earlier in final_state.execution_results:
+            if earlier is not result:
+                workflow_service.repo.save_execution_result(project_id, earlier)
         workflow_service.repo.save_execution_result(project_id, result)
         # Knowledge (spec 0006, AC-15): a failed run, with its analysis, joins the index.
         from backend.services.knowledge_sources import FAILED_EXECUTION_STATUSES
@@ -1121,10 +1163,16 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
         queue_defect_keys(project_id, [result.jira_bug_id])
 
         # Element and locator health from the run's [OBJREPO] markers (spec 0004, AC-10).
+        # ExecutionAgent keyed them by result id; self healing may already have
+        # applied the failed attempt's markers (spec 0011, AC-7).
         from backend.services.execution_service import ExecutionService
-        ExecutionService().apply_object_repository_markers(project_id, result.id, marker_lines)
+        if str(old_result_id) not in final_state.markers_applied_result_ids:
+            ExecutionService().apply_object_repository_markers(
+                project_id, result.id, final_state.run_marker_lines.get(str(old_result_id), [])
+            )
 
         # Pages the run visited, written by the runner to its run directory (AC-18).
+        # After a heal rerun the directory holds the rerun's harvest.
         from backend.services.object_repository_harvest import read_harvest_file
         ExecutionService().apply_object_repository_harvest(
             project_id, test_case_id, result.id, read_harvest_file(ARTIFACTS_ROOT / tc_id_str)

@@ -48,7 +48,9 @@ class BugReportingAgent(BaseAgent):
         return self.bug_report_service.llm_service
 
     def run(self, state: WorkflowState) -> WorkflowState:
-        failed = [r for r in state.execution_results if getattr(r.status, "value", r.status) in _FAILED]
+        # Spec 0011, AC-11: only the latest result per test case, so a test case
+        # that passed on a heal rerun gets no bug report.
+        failed = [r for r in state.latest_results() if getattr(r.status, "value", r.status) in _FAILED]
         if not failed:
             state.add_log(f"{self.name}: no failed results, nothing to report.")
             return state

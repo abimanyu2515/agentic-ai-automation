@@ -12,6 +12,83 @@ export function escapeHTML(str) {
   );
 }
 
+// ── Script healing (spec 0011, AC-14) ────────────────────────────────
+// Scripts repaired by the self healing agent from the failure analysis.
+
+const SCRIPT_HEAL_STATUS_TEXT = {
+  applied: 'Applied by self healing',
+  suggested: 'Waiting for review',
+  accepted: 'Accepted',
+  rejected: 'Rejected',
+  reverted: 'Reverted',
+};
+
+// A text badge next to the validation badge, not colour alone.
+function scriptHealBadge(heal) {
+  if (!heal) return '';
+  if (heal.status === 'applied' || heal.status === 'accepted') {
+    return '<span class="badge badge-approved tc-script-heal-badge">Script repaired</span>';
+  }
+  if (heal.status === 'suggested') {
+    return '<span class="badge badge-review tc-script-heal-badge">Script suggestion</span>';
+  }
+  return '';
+}
+
+// Line level diff: removed old lines and added new lines are marked; shared lines stay plain.
+function scriptDiffColumn(lines, otherLines, kind) {
+  const other = new Set(otherLines);
+  return lines.map(line => {
+    const changed = !other.has(line);
+    const marker = changed ? (kind === 'old' ? '−' : '+') : ' ';
+    const cls = changed ? `tc-script-heal-line tc-script-heal-${kind}` : 'tc-script-heal-line';
+    const label = changed ? (kind === 'old' ? 'removed: ' : 'added: ') : '';
+    return `<span class="${cls}"><span class="tc-script-heal-mark" aria-hidden="true">${marker}</span><span class="sr-only">${label}</span>${escapeHTML(line) || ' '}</span>`;
+  }).join('');
+}
+
+export function renderScriptHealSection(tc) {
+  const heal = tc.latest_script_heal;
+  if (!heal) return '';
+  const canEdit = typeof window.hasPermission !== 'function' || window.hasPermission('TestCases', 'edit');
+  const oldLines = (heal.old_script || '').split('\n');
+  const newLines = (heal.new_script || '').split('\n');
+  const actions = [];
+  if (heal.status === 'suggested') actions.push(['accept', 'Accept'], ['reject', 'Reject']);
+  if (heal.status === 'applied' || heal.status === 'accepted') actions.push(['revert', 'Revert']);
+  const buttons = canEdit && actions.length ? `
+    <div class="tc-script-heal-actions">
+      ${actions.map(([decision, label]) => `
+        <button type="button" class="btn ${decision === 'accept' ? 'btn-primary' : 'btn-secondary'} btn-script-heal-decision"
+          data-heal-id="${escapeHTML(heal.id)}" data-test-case-id="${escapeHTML(tc.id)}" data-decision="${decision}">${label}</button>
+      `).join('')}
+    </div>` : '';
+  return `
+    <section class="tc-script-heal" aria-labelledby="tc-script-heal-title-${tc.id}" onclick="event.stopPropagation();">
+      <h4 id="tc-script-heal-title-${tc.id}" class="tc-script-heal-title">Script healing</h4>
+      <dl class="tc-script-heal-facts">
+        <div><dt>Status</dt><dd>${escapeHTML(SCRIPT_HEAL_STATUS_TEXT[heal.status] || heal.status)}</dd></div>
+        <div><dt>Failure analysis</dt><dd>${escapeHTML(heal.rca_category)}</dd></div>
+        <div><dt>Root cause</dt><dd>${escapeHTML(heal.root_cause_summary || 'Not given')}</dd></div>
+        ${heal.failing_step ? `<div><dt>Failing step</dt><dd>${escapeHTML(heal.failing_step)}</dd></div>` : ''}
+        <div><dt>Reason</dt><dd>${escapeHTML(heal.reason)}</dd></div>
+      </dl>
+      <div class="tc-script-heal-diff">
+        <figure>
+          <figcaption>Old script</figcaption>
+          <pre tabindex="0" aria-label="Old script">${scriptDiffColumn(oldLines, newLines, 'old')}</pre>
+        </figure>
+        <figure>
+          <figcaption>New script</figcaption>
+          <pre tabindex="0" aria-label="New script">${scriptDiffColumn(newLines, oldLines, 'new')}</pre>
+        </figure>
+      </div>
+      ${buttons}
+      <p class="tc-script-heal-error" id="tc-script-heal-error-${tc.id}" role="alert" hidden></p>
+    </section>
+  `;
+}
+
 // Helper to safely render simple Markdown markups
 export function renderMarkup(text) {
   if (!text) return '';
@@ -488,6 +565,7 @@ export const Components = {
             <span class="badge ${validationBadgeClass}" title="${escapeHTML(tc.script_validation_diagnostic || '')}">
               ${escapeHTML(validationStatus)}
             </span>
+            ${scriptHealBadge(tc.latest_script_heal)}
           </td>
           <td>
             <div class="tc-conf-text" id="tc-conf-txt-${tc.id}">${confidencePct}%</div>
@@ -584,6 +662,7 @@ export const Components = {
                     ${tc.evaluation_status === 'approved' ? `
                       ${hasScript ? `
                         <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="window._testCaseActions.onViewScript('${tc.id}')">Edit Script</button>
+                        <button data-requires="Executions.create" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" title="Runs the stored script through the backend workflow: log analysis, self healing, one rerun, and bug drafting. Workspace runs skip self healing." onclick="window._testCaseActions.onRunWithHealing('${tc.id}', this)">Run with self healing</button>
                       ` : `
                         <select id="framework-select-${tc.id}" class="form-control" style="width: 140px; padding: 4px 8px; font-size: 0.85rem; height: 32px; display: inline-block;">
                           <option value="playwright" selected>Playwright</option>
@@ -612,6 +691,8 @@ export const Components = {
                   </div>
                 </div>
               </div>
+
+              ${renderScriptHealSection(tc)}
 
               <!-- Comment Section -->
               <div style="border-top: 1px solid var(--border-color); padding-top: 12px;">

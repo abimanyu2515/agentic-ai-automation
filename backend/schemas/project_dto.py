@@ -29,4 +29,5 @@ class ProjectResponse(BaseModel):
     is_safe_test_environment: bool = False
     bug_auto_submit: bool = False
     bug_auto_submit_min_confidence: float = 0.85
+    self_healing_enabled: bool = True
     readiness: dict[str, Any]

@@ -14,6 +14,7 @@ This area provides the common persistence interface and its JSON and PostgreSQL 
 | `backend/repository/postgres_chat_repository.py` | SQL implementation of the chat repository |
 | `backend/repository/token_usage_store.py` / `postgres_token_usage_store.py` | Token usage records, JSON and SQL |
 | `backend/repository/object_repository_store.py` / `postgres_object_repository_store.py` | Object repository locators, JSON and SQL |
+| `backend/repository/script_heal_store.py` / `postgres_script_heal_store.py` | Proposed and applied test case script repairs, JSON or SQL |
 | `backend/repository/bug_report_repository.py` / `postgres_bug_report_repository.py` | Bug reports (`backend/database/bug_report_store.json` or the `bug_reports` table) |
 
 ## Conventions
@@ -26,6 +27,7 @@ This area provides the common persistence interface and its JSON and PostgreSQL 
 * Chat, token usage, and object repository stores follow the same provider setting as `get_project_repository()`.
 * A chat action's status changes only through `compare_and_set_action_status`.
 * JSON stores write through a temp file plus an atomic rename, under a process lock.
+* Script heals live outside test case records. Every test case heal change goes through `ScriptHealStore.mutate(test_case_id, fn)` so one suggestion and retention rules stay atomic.
 
 ## Gotchas
 

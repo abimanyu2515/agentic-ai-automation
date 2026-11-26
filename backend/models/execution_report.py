@@ -48,6 +48,12 @@ class ExecutionReport(BaseModel):
     jira_bugs_raised: list[str] = Field(default_factory=list)
     jira_retests_required: int = 0
     
+    # Spec 0011: latest results that passed on a heal rerun, labelled
+    # "Passed after heal" (a display label, not a stored status), and one
+    # entry per heal: key, old and new main locator, confidence, method, rerun outcome.
+    passed_after_heal: list[TestCaseReportEntry] = Field(default_factory=list)
+    self_healing: list[dict] = Field(default_factory=list)
+
     # AI-generated executive summary (NEW)
     executive_summary: str = Field(
         default="",

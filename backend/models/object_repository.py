@@ -21,6 +21,10 @@ ELEMENT_TYPES = ("button", "link", "input", "select", "checkbox", "radio", "text
 HEALTH_STATES = ("healthy", "needs_review", "broken", "missing")
 MAX_LOCATORS = 5
 APPLIED_EXECUTION_HISTORY = 20
+# Spec 0011: LocatorHeal.status and LocatorHeal.method.
+HEAL_STATUSES = ("applied", "suggested", "accepted", "rejected", "reverted")
+HEAL_METHODS = ("deterministic", "llm")
+HEAL_DECIDED_KEEP = 10
 
 
 def _now() -> datetime:
@@ -44,6 +48,33 @@ class ObjectLocator(BaseModel):
         return (self.strategy, self.value, tuple(sorted(self.options.items())))
 
 
+class LocatorHeal(BaseModel):
+    """One proposed or applied fix for an element's locators (spec 0011).
+
+    Lives in the element's `heals` list inside the store unit, so a heal is
+    written in the same `mutate` as the locator change it records.
+    """
+
+    id: UUID = Field(default_factory=uuid4)
+    element_id: UUID
+    project_id: UUID
+    execution_id: UUID | None = None
+    test_case_id: UUID | None = None
+    status: str
+    method: str = "deterministic"
+    confidence: float = Field(ge=0.0, le=1.0)
+    old_locators: list[dict] = Field(default_factory=list)
+    new_locators: list[dict] = Field(default_factory=list)
+    old_fingerprint: str | None = None
+    candidate_fingerprint: str | None = None
+    reason: str = ""
+    evidence_source: str = "harvest"
+    locators_version: int = 0
+    created_at: datetime = Field(default_factory=_now)
+    decided_by: UUID | None = None
+    decided_at: datetime | None = None
+
+
 class ObjectElement(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     page_id: UUID
@@ -59,12 +90,18 @@ class ObjectElement(BaseModel):
     failure_count: int = 0
     consecutive_failed_runs: int = 0
     applied_execution_ids: list[str] = Field(default_factory=list)
+    # Spec 0011: changes only on tester create and update, heal apply, accept, and revert.
+    locators_version: int = 0
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
     is_deleted: bool = False
     deleted_at: datetime | None = None
     deleted_by: UUID | None = None
     locators: list[ObjectLocator] = Field(default_factory=list)
+    heals: list[LocatorHeal] = Field(default_factory=list)
+
+    def latest_heal(self) -> LocatorHeal | None:
+        return max(self.heals, key=lambda heal: heal.created_at) if self.heals else None
 
 
 class ObjectPage(BaseModel):

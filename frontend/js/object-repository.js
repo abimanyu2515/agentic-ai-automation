@@ -1,6 +1,7 @@
 // Object Repository view (spec 0004): pages, elements, locator editing, and scans.
-import { API } from './api.js?v=25';
-import { escapeHTML } from './components.js?v=8';
+// Self healing (spec 0011): heal badges, the suggestion count, and the drawer Healing section.
+import { API } from './api.js?v=27';
+import { escapeHTML } from './components.js?v=10';
 
 const STRATEGIES = ['role', 'label', 'placeholder', 'text', 'test_id', 'css', 'xpath'];
 const ELEMENT_TYPES = ['button', 'link', 'input', 'select', 'checkbox', 'radio', 'textarea', 'nav'];
@@ -9,6 +10,25 @@ const HEALTH_LABELS = {
   needs_review: 'Needs review',
   broken: 'Broken',
   missing: 'Missing'
+};
+// Badges come from ElementResponse.latest_heal.status (spec 0011, AC-14).
+const HEAL_BADGES = {
+  applied: { label: 'Healed', tone: 'healed', title: 'Self healing replaced locators that stopped working' },
+  accepted: { label: 'Healed', tone: 'healed', title: 'A tester accepted a self healing suggestion' },
+  suggested: { label: 'Suggestion', tone: 'suggested', title: 'Self healing found a likely match that waits for review' }
+};
+const HEAL_STATUS_LABELS = {
+  applied: 'Applied automatically',
+  suggested: 'Waiting for review',
+  accepted: 'Accepted',
+  rejected: 'Rejected',
+  reverted: 'Reverted'
+};
+const HEAL_METHOD_LABELS = { deterministic: 'Matching rules', llm: 'AI pick among page candidates' };
+const HEAL_DECISIONS = {
+  accept: { label: 'Accept', busy: 'Accepting...', done: 'Accepted the suggestion for' },
+  reject: { label: 'Reject', busy: 'Rejecting...', done: 'Rejected the suggestion for' },
+  revert: { label: 'Revert', busy: 'Reverting...', done: 'Put back the old locators for' }
 };
 const MAX_LOCATORS = 5;
 const PAGE_PREVIEW = 5;
@@ -28,6 +48,19 @@ const ICONS = {
 
 function healthBadge(health) {
   return `<span class="badge objrepo-health objrepo-health-${esc(health)}">${esc(HEALTH_LABELS[health] || health)}</span>`;
+}
+
+function healBadge(heal) {
+  const badge = heal && HEAL_BADGES[heal.status];
+  if (!badge) return '';
+  return `<span class="badge objrepo-heal-badge objrepo-heal-${badge.tone}" title="${esc(badge.title)}">${esc(badge.label)}</span>`;
+}
+
+// Which decisions a heal allows (spec 0011, AC-12): accept or reject a suggestion, revert an applied heal.
+function healDecisions(heal) {
+  if (heal.status === 'suggested') return ['accept', 'reject'];
+  if (heal.status === 'applied' || heal.status === 'accepted') return ['revert'];
+  return [];
 }
 
 function locatorText(locator) {
@@ -58,6 +91,50 @@ function playwrightCall(locator) {
     case 'xpath': return `locator(${jsString(`xpath=${locator.value ?? ''}`)})`;
     default: return `locator(${value})`;
   }
+}
+
+function healLocatorList(locators) {
+  if (!locators || !locators.length) return '<p class="objrepo-heal-note">None</p>';
+  return `<ol class="objrepo-locator-list">${locators.map((loc, index) => `
+    <li>
+      <span class="objrepo-locator-rank">${index === 0 ? 'Main' : `Backup ${index}`}</span>
+      <code class="objrepo-pw" title="${esc(locatorText(loc))}">${esc(playwrightCall(loc))}</code>
+    </li>`).join('')}</ol>`;
+}
+
+// The Healing section, shared by the drawer (with decisions) and the expanded row (read only).
+function healSection(heal, { canEdit, headingId }) {
+  const heading = `<h3 id="${headingId}" class="objrepo-heal-title" tabindex="-1">Healing</h3>`;
+  if (!heal) {
+    return `
+      <section class="objrepo-heal objrepo-heal-empty" aria-labelledby="${headingId}">
+        ${heading}
+        <p class="objrepo-heal-note">No self healing for this element yet. When every locator fails in a run, self healing looks for the element on the page and shows what it found here.</p>
+      </section>`;
+  }
+  const decisions = canEdit ? healDecisions(heal) : [];
+  const confidence = Math.round((Number(heal.confidence) || 0) * 100);
+  const buttons = decisions.map((decision) => `
+        <button type="button" class="btn ${decision === 'accept' ? 'btn-primary' : 'btn-secondary'} objrepo-small" data-heal-decision="${decision}">${HEAL_DECISIONS[decision].label}</button>`).join('');
+  return `
+    <section class="objrepo-heal objrepo-heal-status-${esc(heal.status)}" aria-labelledby="${headingId}" data-heal-id="${esc(heal.id)}">
+      <div class="objrepo-heal-head">
+        ${heading}
+        <span class="objrepo-heal-state">${esc(HEAL_STATUS_LABELS[heal.status] || heal.status)}</span>
+      </div>
+      <dl class="objrepo-heal-facts">
+        <div><dt>Confidence</dt><dd>${confidence}%</dd></div>
+        <div><dt>Method</dt><dd>${esc(HEAL_METHOD_LABELS[heal.method] || heal.method)}</dd></div>
+        <div><dt>Found</dt><dd title="${esc(formatDate(heal.created_at))}">${esc(formatRelative(heal.created_at))}</dd></div>
+      </dl>
+      <p class="objrepo-heal-reason"><span class="objrepo-heal-label">Reason:</span> ${esc(heal.reason)}</p>
+      <div class="objrepo-heal-compare">
+        <div><h4 class="objrepo-heal-subtitle">Old locators</h4>${healLocatorList(heal.old_locators)}</div>
+        <div><h4 class="objrepo-heal-subtitle">New locators</h4>${healLocatorList(heal.new_locators)}</div>
+      </div>
+      ${buttons ? `<div class="objrepo-heal-actions">${buttons}</div>` : ''}
+      <p class="objrepo-error objrepo-heal-error" role="alert"></p>
+    </section>`;
 }
 
 // Detection score (share of run lookups where any locator found the element).
@@ -130,6 +207,8 @@ export class ObjectRepositoryView {
     this.toastTimer = null;
     this.drawerReturnFocus = null;
     this.actions = [];
+    // Pending self healing suggestions for the project (spec 0011); null when they could not load.
+    this.suggestions = [];
   }
 
   // Permissions come from the backend for this project, so project roles apply.
@@ -273,8 +352,12 @@ export class ObjectRepositoryView {
     const list = this.root?.querySelector('#objrepo-page-list');
     if (!list) return;
     try {
-      const data = await API.getObjectPages(this.project.id);
+      const [data, suggestions] = await Promise.all([
+        API.getObjectPages(this.project.id),
+        API.getObjectHeals(this.project.id, 'suggested').catch(() => null)
+      ]);
       this.pages = data.pages || [];
+      this.suggestions = Array.isArray(suggestions) ? suggestions : null;
     } catch (err) {
       list.innerHTML = `<p class="objrepo-error" role="alert">Could not load pages: ${esc(err.message)}</p>`;
       return;
@@ -303,19 +386,36 @@ export class ObjectRepositoryView {
     const card = this.root?.querySelector('#objrepo-review-btn');
     if (!text || !card) return;
     const { broken, needs_review: review } = this.attentionCounts();
-    card.disabled = !broken && !review;
-    text.textContent = broken || review
-      ? `${broken} broken and ${review} needing review across all pages. Opens the first page with problems.`
-      : 'Every element is healthy or missing. Nothing to review right now.';
+    const suggestions = this.suggestions ? this.suggestions.length : 0;
+    card.disabled = !broken && !review && !suggestions;
+    const suggestionText = `${suggestions} self healing suggestion${suggestions === 1 ? '' : 's'} waiting`;
+    let message = broken || review || suggestions
+      ? `${broken} broken, ${review} needing review, and ${suggestionText} across all pages. Opens the first page with problems.`
+      : 'Every element is healthy or missing, and no self healing suggestion is waiting. Nothing to review right now.';
+    if (this.suggestions === null) message += ' Self healing suggestions could not be counted.';
+    text.textContent = message;
+  }
+
+  // The page of a heal, from its element key (page_name.element_name).
+  pageForHeal(heal) {
+    const pageName = String(heal.key || '').split('.')[0];
+    return this.pages.find((page) => page.name === pageName) || null;
   }
 
   // Opens the first page with broken elements (or ones needing review) and filters to them.
   reviewAttention() {
     const pick = (health) => this.pages.find((page) => page.counts?.[health]);
     const page = pick('broken') || pick('needs_review');
-    if (!page) return;
-    const health = page.counts?.broken ? 'broken' : 'needs_review';
-    this.openPage(page.id, health);
+    if (page) {
+      const health = page.counts?.broken ? 'broken' : 'needs_review';
+      this.openPage(page.id, health);
+      return;
+    }
+    // Only suggestions are waiting: open the first one's page with its element expanded.
+    const heal = (this.suggestions || []).find((item) => this.pageForHeal(item));
+    if (!heal) return;
+    this.openPage(this.pageForHeal(heal).id);
+    this.expandedElementIds.add(heal.element_id);
   }
 
   visiblePages() {
@@ -583,7 +683,7 @@ export class ObjectRepositoryView {
                     ${element.manually_edited ? '<span class="objrepo-tag" title="A person changed this element, so scans will not overwrite it">edited</span>' : ''}
                   </div>
                 </td>
-                <td>${healthBadge(element.health)}</td>
+                <td><span class="objrepo-badges">${healthBadge(element.health)}${healBadge(element.latest_heal)}</span></td>
                 <td class="objrepo-locator">
                   <code class="objrepo-pw" title="${esc(locatorText(element.locators[0]))}">${esc(playwrightCall(element.locators[0]))}</code>
                   ${backups > 0 ? `<span class="objrepo-more">+${backups} backup${backups > 1 ? 's' : ''}</span>` : ''}
@@ -606,6 +706,7 @@ export class ObjectRepositoryView {
                         </li>`).join('')}
                     </ol>
                     <p class="objrepo-detail-hint">Scripts try these in order and use the first one that finds the element.</p>
+                    ${element.latest_heal ? healSection(element.latest_heal, { canEdit: false, headingId: `objrepo-heal-title-${esc(element.id)}` }) : ''}
                   </div>
                 </td>
               </tr>`;
@@ -732,15 +833,7 @@ export class ObjectRepositoryView {
     const drawer = this.root.querySelector('#objrepo-drawer');
     const backdrop = this.root.querySelector('#objrepo-drawer-backdrop');
     this.drawerReturnFocus = trigger || document.activeElement;
-    this.draft = element
-      ? {
-          id: element.id,
-          name: element.name,
-          element_type: element.element_type,
-          description: element.description || '',
-          locators: element.locators.map((loc) => ({ strategy: loc.strategy, value: loc.value, options: { ...(loc.options || {}) } }))
-        }
-      : { id: null, name: '', element_type: 'button', description: '', locators: [{ strategy: 'role', value: 'button', options: {} }] };
+    this.draft = this.draftFor(element);
     drawer.hidden = false;
     backdrop.hidden = false;
     this.renderDrawer();
@@ -758,6 +851,57 @@ export class ObjectRepositoryView {
         else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
       }
     };
+  }
+
+  draftFor(element) {
+    return element
+      ? {
+          id: element.id,
+          name: element.name,
+          element_type: element.element_type,
+          description: element.description || '',
+          locators: element.locators.map((loc) => ({ strategy: loc.strategy, value: loc.value, options: { ...(loc.options || {}) } })),
+          heal: element.latest_heal || null
+        }
+      : { id: null, name: '', element_type: 'button', description: '', locators: [{ strategy: 'role', value: 'button', options: {} }], heal: null };
+  }
+
+  // Accept, reject, or revert the drawer element's latest heal, then reload it (spec 0011, AC-12, AC-14).
+  async decideHeal(decision, button) {
+    const heal = this.draft?.heal;
+    const copy = HEAL_DECISIONS[decision];
+    if (!heal || !copy) return;
+    if (decision === 'revert' && !confirm(`Put back the old locators for ${heal.key}?`)) return;
+    const section = button.closest('.objrepo-heal');
+    const error = section.querySelector('.objrepo-heal-error');
+    const buttons = [...section.querySelectorAll('[data-heal-decision]')];
+    error.textContent = '';
+    buttons.forEach((item) => { item.disabled = true; });
+    button.textContent = copy.busy;
+    section.setAttribute('aria-busy', 'true');
+    try {
+      await API.decideObjectHeal(this.project.id, heal.id, decision);
+    } catch (err) {
+      section.removeAttribute('aria-busy');
+      buttons.forEach((item) => { item.disabled = false; });
+      button.textContent = copy.label;
+      error.textContent = `Could not ${decision} this heal: ${err.message}`;
+      button.focus();
+      return;
+    }
+    this.toast(`${copy.done} ${heal.key}`);
+    const elementId = this.draft.id;
+    await this.loadPages();
+    const element = this.elements.find((item) => item.id === elementId);
+    const drawer = this.root?.querySelector('#objrepo-drawer');
+    if (!element || !drawer || drawer.hidden) {
+      this.closeDrawer();
+      return;
+    }
+    // The table re-rendered, so return focus to the new Edit button on close.
+    this.drawerReturnFocus = this.root.querySelector(`[data-edit-element="${CSS.escape(elementId)}"]`) || this.drawerReturnFocus;
+    this.draft = this.draftFor(element);
+    this.renderDrawer('#objrepo-heal-title-drawer');
   }
 
   closeDrawer() {
@@ -802,6 +946,7 @@ export class ObjectRepositoryView {
         </div>
         <button type="button" class="modal-close" id="objrepo-drawer-close" aria-label="Close">&times;</button>
       </div>
+      ${isNew ? '' : healSection(draft.heal, { canEdit: this.can('edit'), headingId: 'objrepo-heal-title-drawer' })}
       <form id="objrepo-element-form" novalidate>
         <div class="objrepo-form-grid">
           <div class="form-group">
@@ -868,6 +1013,9 @@ export class ObjectRepositoryView {
         const preview = row.querySelector('[data-preview]');
         if (preview) preview.textContent = playwrightCall(this.draft.locators[index]);
       });
+    });
+    drawer.querySelectorAll('[data-heal-decision]').forEach((button) => {
+      button.addEventListener('click', () => this.decideHeal(button.getAttribute('data-heal-decision'), button));
     });
     drawer.querySelector('#objrepo-element-form').addEventListener('submit', (e) => this.saveElement(e));
     if (focusSelector) drawer.querySelector(focusSelector)?.focus();
