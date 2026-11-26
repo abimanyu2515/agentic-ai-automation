@@ -78,6 +78,20 @@ object_repository:
   harvest_enabled: true
   harvest_max_pages: 20
   harvest_page_budget_ms: 5000
+  healing:
+    # Self healing locators (spec 0011). Each project can also switch it off.
+    enabled: true
+    auto_apply_threshold: 0.85
+    suggest_threshold: 0.5
+    min_margin: 0.15
+    llm_enabled: true            # uses the analysis LLM role
+    max_attempts_per_run: 1
+    max_candidates_for_llm: 5
+    script_repair:
+      # Repair the script from the log analyser's RCA (spec 0011, AC-18 to AC-21).
+      enabled: true
+      min_rca_confidence: 0.6    # only "Flaky Test / Automation Issue" at or above this
+      max_attempts: 1
 
 chat:
   # Chat assistant (spec 0005). CHAT_* env vars override these.

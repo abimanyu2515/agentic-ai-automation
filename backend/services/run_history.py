@@ -129,9 +129,11 @@ def summarize(
     """
     try:
         rows = repo.get_execution_results(project_id) or []
+        # Spec 0011, AC-11: an attempt a heal rerun replaced is not its own run.
+        superseded = {row.heal_rerun_of for row in rows if getattr(row, "heal_rerun_of", None)}
         earlier = []
         for row in rows:
-            if row.test_case_id != result.test_case_id or row.id == result.id:
+            if row.test_case_id != result.test_case_id or row.id == result.id or row.id in superseded:
                 continue
             try:
                 if repo.is_execution_deleted(project_id, row.id):

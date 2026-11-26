@@ -17,6 +17,7 @@ The backend exposes the FastAPI application and coordinates the requirement to e
 | `backend/services/playwright_runner.py` | The only direct Playwright subprocess integration |
 | `backend/services/vault_service.py` | Encrypted project credential storage |
 | `backend/tests/` | pytest tests with stub LLM services and fake browser runners |
+| `backend/agents/self_healing_agent.py` | Two stage locator and script healing between execution analysis and reruns |
 
 ## Commands
 

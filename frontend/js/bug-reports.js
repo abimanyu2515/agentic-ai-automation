@@ -1,7 +1,7 @@
 // Bugs view: bug report drafts from the Bug Reporting Agent, reviewed and
 // edited here, then submitted to Jira.
-import { API } from './api.js?v=25';
-import { escapeHTML, showToast } from './components.js?v=8';
+import { API } from './api.js?v=27';
+import { escapeHTML, showToast } from './components.js?v=10';
 
 const esc = (value) => escapeHTML(value === null || value === undefined ? '' : String(value));
 

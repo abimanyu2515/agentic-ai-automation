@@ -122,7 +122,7 @@ from backend.services.project_configuration import (
 )
 from backend.schemas.requirement_dto import RequirementCreate, RequirementResponse
 from backend.schemas.scenario_dto import ScenarioUpdate, ScenarioResponse
-from backend.schemas.testcase_dto import TestCaseUpdate, TestCaseResponse, ScriptUpdatePayload
+from backend.schemas.testcase_dto import TestCaseUpdate, TestCaseResponse, ScriptUpdatePayload, ScriptHealResponse
 from backend.schemas.object_repository_dto import (
     ElementCreate,
     ElementDeleteResponse,
@@ -130,6 +130,8 @@ from backend.schemas.object_repository_dto import (
     ElementResponse,
     ElementUpdate,
     ElementUpdateResponse,
+    HealDecisionResponse,
+    HealResponse,
     PageCreate,
     PageDeleteResponse,
     PageListResponse,
@@ -145,6 +147,10 @@ from backend.services.object_repository_service import (
     ScriptRenderer,
 )
 from backend.services.object_repository_scan import ObjectRepositoryScanService
+from backend.models.object_repository import HEAL_STATUSES
+from backend.services.object_repository_healing import LocatorHealingService
+from backend.services.script_repair_service import ScriptRepairService
+from backend.models.script_heal import SCRIPT_HEAL_STATUSES
 from backend.services.knowledge_service import (
     KnowledgeService,
     KnowledgeUploadError,
@@ -359,13 +365,40 @@ grounded_playwright_service = GroundedPlaywrightScriptService()
 object_repository_service = ObjectRepositoryService()
 knowledge_service = KnowledgeService()
 object_repository_scan_service = ObjectRepositoryScanService(object_repository_service)
+locator_healing_service = LocatorHealingService()
+script_repair_service = ScriptRepairService()
 
 
-def _test_case_response(tc, renderer: ScriptRenderer | None = None) -> TestCaseResponse:
+def _script_heal_response(heal) -> ScriptHealResponse:
+    return ScriptHealResponse(**heal.model_dump(exclude={"project_id"}))
+
+
+def _latest_script_heals(project_id: UUID) -> dict:
+    """Each test case's newest script heal, read once for a list response."""
+    latest: dict = {}
+    try:
+        for heal in script_repair_service.store.list_heals(project_id):
+            latest.setdefault(heal.test_case_id, heal)  # newest first
+    except Exception:
+        logger.warning("Could not read script heals: project_id=%s", project_id)
+    return latest
+
+
+def _test_case_response(tc, renderer: ScriptRenderer | None = None, latest_heals: dict | None = None) -> TestCaseResponse:
     """The one TestCase response mapper. Scripts are rendered with the current
-    object repository locators; the project comes from the test case itself."""
+    object repository locators; the project comes from the test case itself.
+    `latest_heals` maps test case id to its newest script heal (list responses
+    read it once); without it the store is read for this one case."""
     renderer = renderer or object_repository_service.renderer()
+    if latest_heals is None:
+        try:
+            latest_heal = script_repair_service.store.latest_for_test_case(tc.id)
+        except Exception:
+            latest_heal = None
+    else:
+        latest_heal = latest_heals.get(tc.id)
     return TestCaseResponse(
+        latest_script_heal=_script_heal_response(latest_heal) if latest_heal else None,
         id=tc.id,
         scenario_id=tc.scenario_id,
         test_case_ref_id=tc.test_case_ref_id,
@@ -458,6 +491,7 @@ def resolve_project_response(p, all_projects=None) -> ProjectResponse:
         is_safe_test_environment=getattr(p, "is_safe_test_environment", False),
         bug_auto_submit=getattr(p, "bug_auto_submit", False),
         bug_auto_submit_min_confidence=getattr(p, "bug_auto_submit_min_confidence", 0.85),
+        self_healing_enabled=getattr(p, "self_healing_enabled", True),
         readiness=readiness_for_project(p, owner_projects),
     )
 
@@ -517,6 +551,8 @@ class ProjectUpdate(BaseModel):
     # Bug Reporting Agent: file drafts to Jira without review at or above this triage confidence.
     bug_auto_submit: bool | None = None
     bug_auto_submit_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Spec 0011: heal broken object repository locators after a run.
+    self_healing_enabled: bool | None = None
 
 
 @app.get("/api/v1/projects", response_model=list[ProjectResponse])
@@ -642,6 +678,8 @@ def update_project_settings(
         p.bug_auto_submit = data.bug_auto_submit
     if data.bug_auto_submit_min_confidence is not None:
         p.bug_auto_submit_min_confidence = data.bug_auto_submit_min_confidence
+    if data.self_healing_enabled is not None:
+        p.self_healing_enabled = data.self_healing_enabled
     
     if data.target_username is not None or (data.target_password is not None and data.target_password != "" and data.target_password != "********"):
         from backend.services.vault_service import VaultService
@@ -1563,7 +1601,7 @@ def generate_test_cases(
         test_cases = workflow_service.generate_test_cases(project_id, requirement_id)
         renderer = object_repository_service.renderer()
         return [
-            _test_case_response(tc, renderer)
+            _test_case_response(tc, renderer, latest_heals={})  # new cases have no script heals
             for tc in test_cases
         ]
     except ValueError as exc:
@@ -1670,12 +1708,73 @@ def get_test_cases(project_id: UUID):
     try:
         test_cases = project_service.get_test_cases_for_project(project_id)
         renderer = object_repository_service.renderer()
+        latest_heals = _latest_script_heals(project_id)
         return [
-            _test_case_response(tc, renderer)
+            _test_case_response(tc, renderer, latest_heals)
             for tc in test_cases
         ]
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# Script heals (spec 0011, AC-12, AC-13). Registered before the
+# /testcases/{test_case_id} routes so `script-heals` is never read as an id.
+
+def _script_heal_audit(db: Session, user: UserDB, project_id: UUID):
+    return lambda action, changes: log_audit(db, user.id, project_id, action, "TESTCASE", changes)
+
+
+@app.get("/api/v1/projects/{project_id}/testcases/script-heals", response_model=list[ScriptHealResponse])
+def list_script_heals(
+    project_id: UUID,
+    heal_status: Optional[str] = Query(None, alias="status"),
+    authorized: bool = Depends(has_permission("TestCases", "view")),
+):
+    if heal_status is not None and heal_status not in SCRIPT_HEAL_STATUSES:
+        raise HTTPException(status_code=422, detail=f"status must be one of {', '.join(SCRIPT_HEAL_STATUSES)}")
+    try:
+        heals = script_repair_service.list_heals(project_id, heal_status)
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    return [_script_heal_response(heal) for heal in heals]
+
+
+def _decide_script_heal(decide, project_id: UUID, heal_id: UUID, user: UserDB, db: Session) -> ScriptHealResponse:
+    try:
+        heal = decide(project_id, heal_id, user.id, audit=_script_heal_audit(db, user, project_id))
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    return _script_heal_response(heal)
+
+
+@app.post("/api/v1/projects/{project_id}/testcases/script-heals/{heal_id}/accept", response_model=ScriptHealResponse)
+def accept_script_heal(
+    project_id: UUID,
+    heal_id: UUID,
+    user: UserDB = Depends(require_project_permission("TestCases", "edit")),
+    db: Session = Depends(get_db),
+):
+    return _decide_script_heal(script_repair_service.accept_heal, project_id, heal_id, user, db)
+
+
+@app.post("/api/v1/projects/{project_id}/testcases/script-heals/{heal_id}/reject", response_model=ScriptHealResponse)
+def reject_script_heal(
+    project_id: UUID,
+    heal_id: UUID,
+    user: UserDB = Depends(require_project_permission("TestCases", "edit")),
+    db: Session = Depends(get_db),
+):
+    return _decide_script_heal(script_repair_service.reject_heal, project_id, heal_id, user, db)
+
+
+@app.post("/api/v1/projects/{project_id}/testcases/script-heals/{heal_id}/revert", response_model=ScriptHealResponse)
+def revert_script_heal(
+    project_id: UUID,
+    heal_id: UUID,
+    user: UserDB = Depends(require_project_permission("TestCases", "edit")),
+    db: Session = Depends(get_db),
+):
+    return _decide_script_heal(script_repair_service.revert_heal, project_id, heal_id, user, db)
 
 
 # Ownership (spec 0009, AC-4 and AC-5). Neither a scenario nor a test case
@@ -2355,7 +2454,7 @@ def get_execution_detail(project_id: UUID, execution_id: UUID):
                 "failure_category", "root_cause_summary", "trace_analysis", "screenshot_findings",
                 "suggest_retry", "retest_pending_candidate", "failing_step", "evidence", "confidence",
                 "flaky_score", "frontend_error_detected", "frontend_error_details", "run_history_summary",
-                "jira_bug_id", "jira_bug_url", "bug_report_id",
+                "jira_bug_id", "jira_bug_url", "bug_report_id", "heal_rerun_of", "heal_ids",
             }),
         },
         "timeline": timeline,
@@ -2962,11 +3061,19 @@ def _page_response(page, counts: dict | None = None, score: dict | None = None) 
     return PageResponse(**page.model_dump(exclude={"elements"}), counts=counts, score=score)
 
 
+def _heal_response(page, heal) -> HealResponse:
+    element = next((e for e in page.elements if e.id == heal.element_id), None)
+    key = f"{page.name}.{element.name}" if element else page.name
+    return HealResponse(**heal.model_dump(exclude={"project_id", "old_fingerprint", "candidate_fingerprint", "locators_version"}), key=key)
+
+
 def _element_response(page, element) -> ElementResponse:
+    latest = max(element.heals, key=lambda heal: heal.created_at, default=None)
     return ElementResponse(
-        **element.model_dump(exclude={"locators", "fingerprint", "applied_execution_ids", "is_deleted", "deleted_at", "deleted_by"}),
+        **element.model_dump(exclude={"locators", "heals", "fingerprint", "applied_execution_ids", "is_deleted", "deleted_at", "deleted_by"}),
         key=f"{page.name}.{element.name}",
         locators=[locator.model_dump() for locator in sorted(element.locators, key=lambda loc: loc.position)],
+        latest_heal=_heal_response(page, latest) if latest else None,
     )
 
 
@@ -3132,6 +3239,74 @@ def _queue_element_page(project_id: UUID, element_id: UUID) -> None:
         return
     if found:
         queue_knowledge_source(project_id, "locator", found[0].id)
+
+
+# Self healing heals (spec 0011, AC-12, AC-13)
+
+
+@app.get(f"{_OBJREPO}/heals", response_model=list[HealResponse])
+def list_object_heals(
+    project_id: UUID,
+    heal_status: Optional[str] = Query(None, alias="status"),
+    authorized: bool = Depends(has_permission("ObjectRepository", "view")),
+):
+    if heal_status is not None and heal_status not in HEAL_STATUSES:
+        raise HTTPException(status_code=422, detail=f"status must be one of {', '.join(HEAL_STATUSES)}")
+    try:
+        heals = locator_healing_service.list_heals(project_id, heal_status)
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    return [_heal_response(page, heal) for page, heal in heals]
+
+
+@app.post(f"{_OBJREPO}/heals/{{heal_id}}/accept", response_model=HealDecisionResponse)
+def accept_object_heal(
+    project_id: UUID,
+    heal_id: UUID,
+    user: UserDB = Depends(require_project_permission("ObjectRepository", "edit")),
+    db: Session = Depends(get_db),
+):
+    try:
+        page, element, heal = locator_healing_service.accept_heal(
+            project_id, heal_id, user.id, audit=_objrepo_audit(db, user, project_id)
+        )
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    queue_knowledge_source(project_id, "locator", page.id)
+    return HealDecisionResponse(heal=_heal_response(page, heal), element=_element_response(page, element))
+
+
+@app.post(f"{_OBJREPO}/heals/{{heal_id}}/reject", response_model=HealResponse)
+def reject_object_heal(
+    project_id: UUID,
+    heal_id: UUID,
+    user: UserDB = Depends(require_project_permission("ObjectRepository", "edit")),
+    db: Session = Depends(get_db),
+):
+    try:
+        page, _, heal = locator_healing_service.reject_heal(
+            project_id, heal_id, user.id, audit=_objrepo_audit(db, user, project_id)
+        )
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    return _heal_response(page, heal)
+
+
+@app.post(f"{_OBJREPO}/heals/{{heal_id}}/revert", response_model=HealDecisionResponse)
+def revert_object_heal(
+    project_id: UUID,
+    heal_id: UUID,
+    user: UserDB = Depends(require_project_permission("ObjectRepository", "edit")),
+    db: Session = Depends(get_db),
+):
+    try:
+        page, element, heal = locator_healing_service.revert_heal(
+            project_id, heal_id, user.id, audit=_objrepo_audit(db, user, project_id)
+        )
+    except ObjectRepositoryError as exc:
+        raise _objrepo_error(exc)
+    queue_knowledge_source(project_id, "locator", page.id)
+    return HealDecisionResponse(heal=_heal_response(page, heal), element=_element_response(page, element))
 
 
 @app.post(f"{_OBJREPO}/scan", response_model=ScanStartResponse, status_code=status.HTTP_202_ACCEPTED)

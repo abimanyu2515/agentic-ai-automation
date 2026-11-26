@@ -65,16 +65,25 @@ class ExecutionAnalysisAgent(BaseAgent):
             state.add_log(f"{self.name}: no execution results found to analyze.")
             return state
 
-        failed = [r for r in state.execution_results if r.status != ExecutionStatus.PASSED]
+        # Spec 0011, AC-9, AC-21: after a heal or script repair rerun, only the new results are still untriaged.
+        if state.heal_attempts or state.script_repair_attempts:
+            pending = [r for r in state.execution_results if r.failure_category is None]
+        else:
+            pending = list(state.execution_results)
+        if not pending:
+            state.add_log(f"{self.name}: every result is already analysed.")
+            return state
+
+        failed = [r for r in pending if r.status != ExecutionStatus.PASSED]
         if not failed:
-            for result in state.execution_results:
+            for result in pending:
                 self.analysis_service.analyze(state.project_id, result)
             state.add_log(f"{self.name}: skipped analysis as execution passed.")
             return state
 
         state.add_log(f"{self.name} started analysis of {len(failed)} failed execution(s)")
         cases = {tc.id: tc for tc in state.generated_test_cases}
-        for result in state.execution_results:
+        for result in pending:
             self.analysis_service.analyze(
                 state.project_id,
                 result,

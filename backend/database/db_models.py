@@ -40,6 +40,8 @@ class ProjectDB(Base):
     # Bug Reporting Agent: file drafts to Jira without review above this confidence.
     bug_auto_submit = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     bug_auto_submit_min_confidence = Column(Float, nullable=False, default=0.85, server_default=text("0.85"))
+    # Spec 0011: heal broken object repository locators after a run.
+    self_healing_enabled = Column(Boolean, nullable=False, default=True, server_default=text("true"))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     
@@ -255,6 +257,9 @@ class ExecutionDB(Base):
     bug_report_id = Column(UUID(as_uuid=True), nullable=True)
     # Spec 0001: project configuration captured when the run was accepted.
     project_config_snapshot = Column(JSON, nullable=True)
+    # Spec 0011: a heal rerun points at the failed result it replaces, and lists the heals it tests.
+    heal_rerun_of = Column(UUID(as_uuid=True), nullable=True)
+    heal_ids = Column(JSON, nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
@@ -503,6 +508,8 @@ class ObjectElementDB(Base):
     failure_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
     consecutive_failed_runs = Column(Integer, nullable=False, default=0, server_default=text("0"))
     applied_execution_ids = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+    # Spec 0011: changes only on tester edits, heal apply, accept, and revert.
+    locators_version = Column(Integer, nullable=False, default=0, server_default=text("0"))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
@@ -548,6 +555,78 @@ class ObjectLocatorDB(Base):
 
     __table_args__ = (
         UniqueConstraint("element_id", "position", name="uq_object_locators_element_position"),
+    )
+
+
+class ObjectLocatorHealDB(Base):
+    """One proposed or applied fix for an element's locators (spec 0011)."""
+
+    __tablename__ = "object_locator_heals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    element_id = Column(UUID(as_uuid=True), ForeignKey("object_elements.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), nullable=False)
+    execution_id = Column(UUID(as_uuid=True), nullable=True)
+    test_case_id = Column(UUID(as_uuid=True), nullable=True)
+    status = Column(String(20), nullable=False)
+    method = Column(String(20), nullable=False)
+    confidence = Column(Float, nullable=False)
+    old_locators = Column(JSON, nullable=False)
+    new_locators = Column(JSON, nullable=False)
+    old_fingerprint = Column(String(64), nullable=True)
+    candidate_fingerprint = Column(String(64), nullable=True)
+    reason = Column(Text, nullable=False)
+    evidence_source = Column(String(20), nullable=False)
+    locators_version = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    decided_by = Column(UUID(as_uuid=True), nullable=True)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_object_locator_heals_element_created", "element_id", "created_at"),
+        Index("ix_object_locator_heals_project_status", "project_id", "status"),
+        # At most one pending suggestion per element (AC-8).
+        Index(
+            "uq_object_locator_heals_one_suggested",
+            "element_id",
+            unique=True,
+            postgresql_where=text("status = 'suggested'"),
+            sqlite_where=text("status = 'suggested'"),
+        ),
+    )
+
+
+class TestCaseScriptHealDB(Base):
+    """One proposed or applied repair of a test case's script (spec 0011, AC-21)."""
+
+    __tablename__ = "test_case_script_heals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    test_case_id = Column(UUID(as_uuid=True), ForeignKey("test_cases.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), nullable=False)
+    execution_id = Column(UUID(as_uuid=True), nullable=True)
+    status = Column(String(20), nullable=False)
+    old_script = Column(Text, nullable=False)
+    new_script = Column(Text, nullable=False)
+    rca_category = Column(String(100), nullable=False)
+    root_cause_summary = Column(Text, nullable=False, default="")
+    failing_step = Column(Text, nullable=True)
+    reason = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    decided_by = Column(UUID(as_uuid=True), nullable=True)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_test_case_script_heals_test_case_created", "test_case_id", "created_at"),
+        Index("ix_test_case_script_heals_project_status", "project_id", "status"),
+        # At most one pending script suggestion per test case (AC-21).
+        Index(
+            "uq_test_case_script_heals_one_suggested",
+            "test_case_id",
+            unique=True,
+            postgresql_where=text("status = 'suggested'"),
+            sqlite_where=text("status = 'suggested'"),
+        ),
     )
 
 

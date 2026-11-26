@@ -13,6 +13,8 @@ This area contains pytest coverage for API routes, workflow agents, repositories
 | `backend/tests/test_project_configuration_snapshot.py` | JSON execution snapshot persistence |
 | `backend/tests/test_graph.py` | Workflow graph routing and injection |
 | `backend/tests/test_project_creation_target_url.py` | Target URL validation, readiness, and conflict behavior |
+| `backend/tests/test_self_healing.py` | Locator healing decisions, reruns, stores, routes, and PostgreSQL parity |
+| `backend/tests/test_script_repair.py` | RCA driven script repairs, validation gates, reruns, and tester decisions |
 
 ## Conventions
 

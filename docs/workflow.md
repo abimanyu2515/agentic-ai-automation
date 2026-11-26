@@ -124,7 +124,13 @@ SupervisorAgent ──(reads operation)──►
       │  - Classify failure type with quoted evidence       │ │
       │  - Detect flakiness from the test's run history     │ │
       ▼                                                      │ │
-    BugReportingAgent                                       │ │
+    SelfHealingAgent (only after a failure, spec 0011)      │ │
+      │  - Stage 1: heal a broken locator from the harvest  │ │
+      │  - Stage 2: repair the script from the RCA          │ │
+      │  - Rerun once per stage, at most 2 reruns           │ │
+      │  - Put back any change whose rerun still fails      │ │
+      ▼                                                      │ │
+    BugReportingAgent (latest result per test case)         │ │
       │  - Draft a bug report per Product Bug failure       │ │
       │  - Reuse the open report for a repeat failure       │ │
       ▼                                                      │ │
@@ -300,6 +306,7 @@ def build_graph(
     jira_sync_agent=None, qa_story_analyzer_agent=None,
     execution_analysis_agent=None, bug_reporting_agent=None,
     knowledge_retrieval_agents=None,  # {"requirements" | "scenarios" | "test_cases" | "analysis": agent}
+    self_healing_agent=None,          # spec 0011
 ):
 ```
 
@@ -336,6 +343,7 @@ SupervisorAgent routing_map:
 "jira_sync_agent"         → jira_sync_agent
 "execution_analysis"      → execution_analysis_agent
 "bug_reporting_agent"     → bug_reporting_agent
+"self_healing_agent"      → self_healing_agent
 "retrieval_requirements"  → retrieval_requirements
 "retrieval_scenarios"     → retrieval_scenarios
 "retrieval_test_cases"    → retrieval_test_cases
@@ -346,8 +354,25 @@ SupervisorAgent routing_map:
 Fixed edges (always execute in sequence):
 - `scenario_agent → human_approval_agent_1`
 - `test_case_agent → evaluation_agent → human_approval_agent_2`
-- `execution_analysis_agent → bug_reporting_agent → report_agent → END`
+- `bug_reporting_agent → report_agent → END`
 - each retrieval node to its consumer: `retrieval_requirements → requirement_analyst_agent`, `retrieval_scenarios → scenario_agent`, `retrieval_test_cases → test_case_agent`, `retrieval_analysis → execution_analysis_agent`
+
+### Self healing (spec 0011)
+
+`execution_analysis_agent` used to have a fixed edge to `bug_reporting_agent`. Two routers replace it:
+
+- `route_after_execution_analysis` goes to `self_healing_agent` when `state.healing_enabled` is true and either an applied heal waits for its rerun check, or `heal_attempts < object_repository.healing.max_attempts_per_run` and the latest failed or errored result (not a `Test Environment Issue`) has an `[OBJREPO]` marker with `ok: false`. Otherwise it goes to `bug_reporting_agent`.
+- It also goes to `self_healing_agent` for stage 2, script repair (amendment, AC-18), when the latest result failed with no `ok: false` marker and the log analyser's RCA is `Flaky Test / Automation Issue` with confidence of at least `object_repository.healing.script_repair.min_rca_confidence` (0.6). The case must have a script and no `test_data_sets`, and `script_repair_attempts` must be under `script_repair.max_attempts` (1). It goes there too while an applied script fix waits for its rerun check. A run where every result passed never goes to self healing.
+- `route_after_self_healing` goes back to `execution_agent` when `heal_rerun_test_case_ids` is set, else to `bug_reporting_agent`.
+
+A heal rerun runs only the healed test cases, once, with `RecoveryManager` retries off and the first run's batch id (so the saved login session is reused). It appends a second result with `heal_rerun_of` pointing at the failed one. Every reader after that (BugReportingAgent, ReportAgent, `WorkflowService`, the LangSmith tracer) uses the latest result per test case (`WorkflowState.latest_results()`), and run history leaves out the replaced attempt. `WorkflowService` sets `healing_enabled` from `object_repository.healing.enabled` and the project's `self_healing_enabled`, and saves every result, giving the caller's `execution_id` to the latest. The batch and webhook paths don't heal yet.
+
+**Two stages.** When the stage 1 rerun still fails but the healed key resolved, and the RCA of that rerun is an automation issue, the heal waits (`verified: "pending_script_repair"`) and stage 2 runs in the same visit:
+- `ScriptRepairService` regenerates the script through `PlaywrightAgent` with `repair_feedback`. The feedback is built from the RCA, with run text wrapped as untrusted data and redacted. The page evidence is the run's harvest, and the prompt lists the healed keys.
+- The new script is applied only when the validator, the unknown key check, and the assertion count gate all pass. It is then rerun once.
+- A passing rerun keeps the script fix and the waiting heal. A failing one restores the old script and puts both back as suggestions.
+
+So a test case runs at most three times: the first run, stage 1, and stage 2. A `Product Bug` or `Test Environment Issue` RCA never changes a script.
 
 ### Retrieval stage (spec 0006)
 

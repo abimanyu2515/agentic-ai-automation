@@ -45,6 +45,9 @@ Complete Pipeline Flow:
         ↓
     ExecutionAnalysisAgent
         ↓
+    SelfHealingAgent (spec 0011, only with a heal target or a heal to verify;
+                      may route back to ExecutionAgent for one rerun)
+        ↓
     BugReportingAgent
         ↓
     ReportAgent
@@ -90,6 +93,7 @@ from backend.agents.jira_sync_agent import JiraSyncAgent
 from backend.agents.qa_story_analyzer_agent import QAStoryAnalyzerAgent
 from backend.agents.execution_analysis_agent import ExecutionAnalysisAgent
 from backend.agents.bug_reporting_agent import BugReportingAgent
+from backend.agents.self_healing_agent import SelfHealingAgent
 from backend.agents.knowledge_retrieval_agent import STAGE_NODES, KnowledgeRetrievalAgent
 from backend.models.requirement import Requirement
 from backend.models.state import WorkflowState
@@ -142,6 +146,7 @@ def build_graph(
     execution_analysis_agent: BaseAgent | None = None,
     bug_reporting_agent: BaseAgent | None = None,
     knowledge_retrieval_agents: dict[str, BaseAgent] | None = None,
+    self_healing_agent: BaseAgent | None = None,
 ):
     """
     Build LangGraph workflow with optional agent dependency injection.
@@ -164,6 +169,7 @@ def build_graph(
         knowledge_retrieval_agents: Optional retrieval agents keyed by stage
             ("requirements", "scenarios", "test_cases", "analysis"); missing
             stages get a real KnowledgeRetrievalAgent (spec 0006)
+        self_healing_agent: Optional SelfHealingAgent instance (spec 0011)
         
     Returns:
         Compiled LangGraph CompiledGraph ready for invocation
@@ -192,6 +198,7 @@ def build_graph(
     qa_story_analyzer_agent = qa_story_analyzer_agent or QAStoryAnalyzerAgent()
     execution_analysis_agent = execution_analysis_agent or ExecutionAnalysisAgent()
     bug_reporting_agent = bug_reporting_agent or BugReportingAgent()
+    self_healing_agent = self_healing_agent or SelfHealingAgent()
     # Spec 0006: one retrieval agent per stage. Real ones share one knowledge
     # service and one retrieval LLM service, both built on first use.
     injected_retrieval = knowledge_retrieval_agents or {}
@@ -270,6 +277,10 @@ def build_graph(
     def _execution_analysis_node(state: WorkflowState) -> WorkflowState:
         return execution_analysis_agent.run(state)
 
+    @traceable(name="SelfHealingAgent")
+    def _self_healing_node(state: WorkflowState) -> WorkflowState:
+        return self_healing_agent.run(state)
+
     @traceable(name="BugReportingAgent")
     def _bug_reporting_node(state: WorkflowState) -> WorkflowState:
         return bug_reporting_agent.run(state)
@@ -302,6 +313,7 @@ def build_graph(
     builder.add_node("jira_sync_agent", _jira_sync_node)
     builder.add_node("execution_analysis_agent", _execution_analysis_node)
     builder.add_node("bug_reporting_agent", _bug_reporting_node)
+    builder.add_node("self_healing_agent", _self_healing_node)
     for stage, node_name in STAGE_NODES.items():
         builder.add_node(node_name, _retrieval_node_for(stage))
 
@@ -322,6 +334,7 @@ def build_graph(
         "jira_sync_agent": "jira_sync_agent",
         "execution_analysis_agent": "execution_analysis_agent",
         "bug_reporting_agent": "bug_reporting_agent",
+        "self_healing_agent": "self_healing_agent",
         **{node_name: node_name for node_name in STAGE_NODES.values()},
         "end": END,
     }
@@ -383,7 +396,17 @@ def build_graph(
         supervisor_agent.route_after_execution,
         routing_map
     )
-    builder.add_edge("execution_analysis_agent", "bug_reporting_agent")
+    # Spec 0011: was a fixed edge to bug_reporting_agent.
+    builder.add_conditional_edges(
+        "execution_analysis_agent",
+        supervisor_agent.route_after_execution_analysis,
+        routing_map
+    )
+    builder.add_conditional_edges(
+        "self_healing_agent",
+        supervisor_agent.route_after_self_healing,
+        routing_map
+    )
     builder.add_edge("bug_reporting_agent", "report_agent")
     builder.add_edge("report_agent", END)
     builder.add_edge("jira_sync_agent", END)

@@ -228,6 +228,39 @@ class SupervisorAgent(BaseAgent):
         """Was a fixed edge to execution_analysis_agent; now passes through retrieval when it is on."""
         return self._via_retrieval("execution_analysis_agent")
 
+    def route_after_execution_analysis(self, state: WorkflowState, config: RunnableConfig | None = None) -> str:
+        """Spec 0011: to self healing when a heal target, a script repair target,
+        or an unverified heal or script fix waits, else bug reporting.
+
+        Was a fixed edge to bug_reporting_agent. A pure function of the state
+        plus the healing settings. When every result passed nothing matches,
+        so a passed run is never processed (AC-1).
+        """
+        from backend.config.settings import get_settings
+        from backend.services.object_repository_healing import find_heal_targets, pending_verification
+        from backend.services.script_repair_service import find_repair_targets, pending_script_verification
+
+        if not state.healing_enabled:
+            return "bug_reporting_agent"
+        try:
+            if pending_script_verification(state) or pending_verification(state):
+                return "self_healing_agent"
+            healing = get_settings().object_repository.healing
+            healed_before = {heal.get("key") for heal in state.heal_results}
+            targets = [key for key in find_heal_targets(state) if key not in healed_before]
+            if state.heal_attempts < healing.max_attempts_per_run and targets:
+                return "self_healing_agent"
+            # Stage 2 (AC-18): every locator resolved and the RCA says automation issue.
+            if find_repair_targets(state, healing):
+                return "self_healing_agent"
+        except Exception:
+            state.add_log("Supervisor: self healing routing failed; continuing to bug reporting")
+        return "bug_reporting_agent"
+
+    def route_after_self_healing(self, state: WorkflowState, config: RunnableConfig | None = None) -> str:
+        """Spec 0011: rerun the healed test cases once, else continue to bug reporting."""
+        return "execution_agent" if state.heal_rerun_test_case_ids else "bug_reporting_agent"
+
     def route_after_requirement_analyst(self, state: WorkflowState, config: RunnableConfig | None = None) -> str:
         """Routes after requirement analyst to either feature inventory or end based on supervisor logic."""
         from backend.config.settings import get_settings

@@ -356,13 +356,16 @@ def test_relink_execution_moves_the_report_to_the_final_run_id(repo, world):
 def test_agent_drafts_for_every_product_bug_and_skips_the_rest(repo, world):
     service = _service(repo)
     other_case = TestCase(scenario_id=world.scenario.id, title="Refund email", steps=["refund"], expected_result="mail")
+    # One result per test case: the agent reads only the latest result of each (spec 0011, AC-11).
+    flaky_case = TestCase(scenario_id=world.scenario.id, title="Search", steps=["search"], expected_result="results")
+    passed_case = TestCase(scenario_id=world.scenario.id, title="Logout", steps=["logout"], expected_result="signed out")
     bug_a = _result(world.case)
     bug_b = _result(other_case, error="Mail never sent")
-    flaky = _result(world.case, category="Flaky Test / Automation Issue", error="locator timeout")
-    passed = _result(world.case, status=ExecutionStatus.PASSED)
+    flaky = _result(flaky_case, category="Flaky Test / Automation Issue", error="locator timeout")
+    passed = _result(passed_case, status=ExecutionStatus.PASSED)
     state = WorkflowState(
         project_id=world.project.id,
-        generated_test_cases=[world.case, other_case],
+        generated_test_cases=[world.case, other_case, flaky_case, passed_case],
         execution_results=[bug_a, flaky, bug_b, passed],
     )
 

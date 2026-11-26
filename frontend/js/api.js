@@ -1,4 +1,4 @@
-import { showToast } from './components.js?v=8';
+import { showToast } from './components.js?v=10';
 
 const API_BASE = '/api/v1';
 const TEST_CASE_GENERATION_TIMEOUT_MS = 20 * 60 * 1000;
@@ -312,7 +312,7 @@ export const API = {
     });
   },
 
-  async updateProject(id, name, description, lineOfBusiness, framework = 'playwright', jiraProjectKey = null, targetUrl = null, targetUsername = null, targetPassword = null, isSafeTestEnvironment = undefined, bugAutoSubmit = undefined) {
+  async updateProject(id, name, description, lineOfBusiness, framework = 'playwright', jiraProjectKey = null, targetUrl = null, targetUsername = null, targetPassword = null, isSafeTestEnvironment = undefined, bugAutoSubmit = undefined, selfHealingEnabled = undefined) {
     const body = {
       name,
       description,
@@ -332,6 +332,10 @@ export const API = {
       if (typeof bugAutoSubmit.minConfidence === 'number') {
         body.bug_auto_submit_min_confidence = bugAutoSubmit.minConfidence;
       }
+    }
+    // Spec 0011: per project switch for self healing locators.
+    if (typeof selfHealingEnabled === 'boolean') {
+      body.self_healing_enabled = selfHealingEnabled;
     }
     return request(`/projects/${id}`, {
       method: 'PUT',
@@ -858,6 +862,28 @@ export const API = {
 
   async getObjectScan(projectId, scanId) {
     return request(`/projects/${projectId}/object-repository/scan/${scanId}`);
+  },
+
+  // Self healing heals (spec 0011). status is optional: applied, suggested, accepted, rejected, reverted.
+  async getObjectHeals(projectId, status = '') {
+    const filter = status ? `?status=${encodeURIComponent(status)}` : '';
+    return request(`/projects/${projectId}/object-repository/heals${filter}`);
+  },
+
+  async decideObjectHeal(projectId, healId, decision) {
+    if (!['accept', 'reject', 'revert'].includes(decision)) throw new Error(`Unknown heal decision: ${decision}`);
+    return request(`/projects/${projectId}/object-repository/heals/${healId}/${decision}`, { method: 'POST' });
+  },
+
+  // Script heals: scripts repaired from the failure analysis (spec 0011, AC-12).
+  async getScriptHeals(projectId, status = '') {
+    const filter = status ? `?status=${encodeURIComponent(status)}` : '';
+    return request(`/projects/${projectId}/testcases/script-heals${filter}`);
+  },
+
+  async decideScriptHeal(projectId, healId, decision) {
+    if (!['accept', 'reject', 'revert'].includes(decision)) throw new Error(`Unknown script heal decision: ${decision}`);
+    return request(`/projects/${projectId}/testcases/script-heals/${healId}/${decision}`, { method: 'POST' });
   },
 
   // ── Token Utilization ───────────────────────────────────────────────

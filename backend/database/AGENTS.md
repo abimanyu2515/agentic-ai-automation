@@ -11,6 +11,7 @@ This area owns SQLAlchemy engine setup, ORM models, sessions, and Alembic migrat
 | `backend/database/db.py` | Engine creation and session lifecycle |
 | `backend/database/db_models.py` | SQLAlchemy table mappings |
 | `backend/database/alembic/` | Schema migration history |
+| `backend/database/alembic/versions/f4c2d8e6a915_add_test_case_script_heals.py` | Script healing table and the one pending suggestion constraint |
 
 ## Conventions
 
@@ -19,6 +20,7 @@ This area owns SQLAlchemy engine setup, ORM models, sessions, and Alembic migrat
 * Use `get_db_session()` when a short lived direct database session is needed.
 * Roll back immediately after every database exception, then close or remove the session before reuse.
 * Add schema changes through a new Alembic migration. Project URL normalization belongs in the shared project configuration service.
+* Script heal persistence uses `test_case_script_heals` in PostgreSQL or `backend/database/script_heal_store.json` in the JSON provider.
 
 ## Gotchas
 

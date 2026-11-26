@@ -43,18 +43,47 @@ async function seedBrowser(page: Page, session: Session, projectId: string) {
   }, { session, projectId });
 }
 
+type RoutingWindow = Window & {
+  appInstance?: { startingUp?: boolean; handleRouting: (...args: unknown[]) => Promise<unknown> };
+  __routesInFlight?: number;
+};
+
+// Every route change to the view renders it again, and startup ends with a
+// route change of its own. Count route changes in flight so the test opens the
+// view only once routing is idle; a late render would replace a form or drawer
+// the test is using.
+async function waitForRoutingIdle(page: Page) {
+  await page.waitForFunction(() => {
+    const w = window as RoutingWindow;
+    return w.appInstance?.startingUp === false && w.__routesInFlight === 0;
+  }, undefined, { timeout: 60_000 });
+}
+
 async function openObjectRepository(page: Page) {
   await page.goto(`${BASE_URL}/`);
-  // Startup restores the saved project and then routes to the dashboard, so
-  // keep asking for the view until it sticks.
+  await page.waitForFunction(() => !!(window as RoutingWindow).appInstance, undefined, { timeout: 60_000 });
+  await page.evaluate(() => {
+    const w = window as RoutingWindow;
+    const app = w.appInstance!;
+    const original = app.handleRouting.bind(app);
+    w.__routesInFlight = 0;
+    app.handleRouting = async (...args: unknown[]) => {
+      w.__routesInFlight! += 1;
+      try {
+        return await original(...args);
+      } finally {
+        w.__routesInFlight! -= 1;
+      }
+    };
+  });
+  await waitForRoutingIdle(page);
+  await page.evaluate(() => { window.location.hash = '#/object-repository'; });
   const view = page.locator('#object-repository-view');
-  const heading = view.getByRole('heading', { name: 'Object Repository', level: 1 });
-  await expect(async () => {
-    await page.evaluate(() => {
-      if (window.location.hash !== '#/object-repository') window.location.hash = '#/object-repository';
-    });
-    await expect(heading).toBeVisible({ timeout: 1000 });
-  }).toPass({ timeout: 60_000 });
+  // The panel turns active when the route change lands, then routing goes idle.
+  await expect(view).toHaveClass(/\bactive\b/, { timeout: 60_000 });
+  await waitForRoutingIdle(page);
+  await expect(view.getByRole('heading', { name: 'Object Repository', level: 1 })).toBeVisible();
+  await expect(view.locator('#objrepo-page-list .loading-overlay')).toHaveCount(0, { timeout: 30_000 });
   return view;
 }
 
@@ -82,6 +111,143 @@ async function addLoginButton(page: Page) {
   await drawer.getByRole('button', { name: 'Add element' }).click();
   await expect(drawer).toBeHidden();
 }
+
+// Self healing (spec 0011, AC-14). No route creates a suggestion directly (only a
+// failed run does), so the page and element are real, and the browser is served
+// one suggested heal for the element through the heal routes and the element list.
+type Locator = { strategy: string; value: string; options: Record<string, unknown> };
+const HEAL_ID = 'a0000000-0000-4000-8000-000000000011';
+const OLD_LOCATORS: Locator[] = [{ strategy: 'role', value: 'button', options: { name: 'Log in' } }];
+const NEW_LOCATORS: Locator[] = [
+  { strategy: 'role', value: 'button', options: { name: 'Sign in' } },
+  { strategy: 'test_id', value: 'login-submit', options: {} },
+];
+
+async function seedLoginButton(request: APIRequestContext, session: Session, projectId: string): Promise<string> {
+  const headers = { Authorization: `Bearer ${session.access_token}` };
+  const base = `${BASE_URL}/api/v1/projects/${projectId}/object-repository`;
+  const created = await request.post(`${base}/pages`, { headers, data: { name: 'login_page', url_pattern: '/login' } });
+  expect(created.ok()).toBeTruthy();
+  const pageId = (await created.json()).id;
+  const element = await request.post(`${base}/pages/${pageId}/elements`, {
+    headers,
+    data: { name: 'login_button', element_type: 'button', locators: OLD_LOCATORS },
+  });
+  expect(element.ok()).toBeTruthy();
+  return (await element.json()).id;
+}
+
+async function serveSuggestion(page: Page, elementId: string) {
+  const state = { status: 'suggested', decidedAt: null as string | null };
+  const heal = () => ({
+    id: HEAL_ID,
+    element_id: elementId,
+    key: 'login_page.login_button',
+    status: state.status,
+    method: 'llm',
+    confidence: 0.72,
+    old_locators: OLD_LOCATORS,
+    new_locators: NEW_LOCATORS,
+    reason: 'Same test id on the page; the label changed from Log in to Sign in.',
+    evidence_source: 'harvest',
+    execution_id: null,
+    test_case_id: null,
+    created_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+    decided_by: null,
+    decided_at: state.decidedAt,
+  });
+  const locatorRows = (locators: Locator[]) => locators.map((loc, position) => ({
+    ...loc, id: `b0000000-0000-4000-8000-00000000000${position}`, position,
+    success_count: 0, failure_count: 0, last_succeeded_at: null,
+  }));
+  const withHeal = (element: Record<string, unknown>) => ({
+    ...element,
+    latest_heal: heal(),
+    ...(state.status === 'accepted' ? { locators: locatorRows(NEW_LOCATORS) } : {}),
+  });
+
+  await page.route(/\/object-repository\/heals(\?.*)?$/, (route) => route.fulfill({
+    json: state.status === 'suggested' ? [heal()] : [],
+  }));
+  await page.route(/\/object-repository\/pages\/[^/]+\/elements(\?.*)?$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    body.elements = (body.elements || []).map((el: Record<string, unknown>) => (el.id === elementId ? withHeal(el) : el));
+    await route.fulfill({ response, json: body });
+  });
+  await page.route(new RegExp(`/object-repository/heals/${HEAL_ID}/accept$`), async (route) => {
+    state.status = 'accepted';
+    state.decidedAt = new Date().toISOString();
+    await route.fulfill({ json: { heal: heal(), element: { id: elementId } } });
+  });
+  return state;
+}
+
+test.describe('Object Repository self healing (spec 0011)', () => {
+  test('a project manager reviews and accepts a self healing suggestion with the keyboard (AC-14)', async ({ page, request }) => {
+    const session = await signIn(request, 'pm@agenticai.com', 'pmpassword');
+    const projectId = await createProject(request, session);
+    const elementId = await seedLoginButton(request, session, projectId);
+    const healState = await serveSuggestion(page, elementId);
+    await seedBrowser(page, session, projectId);
+    const view = await openObjectRepository(page);
+
+    // The attention card counts the pending suggestion, and the row shows a text badge.
+    await expect(view.locator('#objrepo-review-text')).toContainText('1 self healing suggestion waiting');
+    const row = view.getByRole('row', { name: /login_page\.login_button/ });
+    await expect(row.getByText('Suggestion', { exact: true })).toBeVisible();
+
+    // Open the drawer with the keyboard and review the Healing section.
+    const edit = row.getByRole('button', { name: 'Edit' });
+    await edit.focus();
+    await page.keyboard.press('Enter');
+    const drawer = page.getByRole('dialog');
+    const healing = drawer.getByRole('region', { name: 'Healing' });
+    await expect(healing).toContainText('Waiting for review');
+    await expect(healing).toContainText('72%');
+    await expect(healing).toContainText('AI pick among page candidates');
+    await expect(healing).toContainText('the label changed from Log in to Sign in');
+    await expect(healing).toContainText(`getByRole('button', { name: 'Log in' })`);
+    await expect(healing).toContainText(`getByTestId('login-submit')`);
+    await expect(healing.getByRole('button', { name: 'Reject' })).toBeVisible();
+
+    const accepted = page.waitForRequest((r) => r.url().endsWith(`/heals/${HEAL_ID}/accept`) && r.method() === 'POST');
+    await healing.getByRole('button', { name: 'Accept' }).focus();
+    await page.keyboard.press('Enter');
+    await accepted;
+    expect(healState.status).toBe('accepted');
+
+    // The drawer reloads the element: the heal is accepted and can now be reverted.
+    await expect(view.locator('#objrepo-toast')).toContainText('Accepted the suggestion for login_page.login_button');
+    await expect(healing).toContainText('Accepted');
+    await expect(healing.getByRole('button', { name: 'Accept' })).toHaveCount(0);
+    await expect(healing.getByRole('button', { name: 'Revert' })).toBeVisible();
+    await expect(drawer.getByLabel('Main locator accessible name')).toHaveValue('Sign in');
+
+    await page.keyboard.press('Escape');
+    await expect(drawer).toBeHidden();
+    await expect(row.getByText('Healed', { exact: true })).toBeVisible();
+    await expect(view.locator('#objrepo-review-text')).toContainText('no self healing suggestion is waiting');
+  });
+
+  test('a stakeholder sees the Healing section read only (AC-14)', async ({ page, request }) => {
+    const pm = await signIn(request, 'pm@agenticai.com', 'pmpassword');
+    const projectId = await createProject(request, pm);
+    const elementId = await seedLoginButton(request, pm, projectId);
+    const stakeholder = await signIn(request, 'stakeholder@agenticai.com', 'stakeholderpassword');
+    await serveSuggestion(page, elementId);
+    await seedBrowser(page, stakeholder, projectId);
+    const view = await openObjectRepository(page);
+
+    const row = view.getByRole('row', { name: /login_page\.login_button/ });
+    await expect(row.getByText('Suggestion', { exact: true })).toBeVisible();
+    await row.getByRole('button', { name: 'Show all locators for login_page.login_button' }).click();
+    const healing = view.getByRole('region', { name: 'Healing' });
+    await expect(healing).toContainText('Waiting for review');
+    await expect(healing.getByRole('button')).toHaveCount(0);
+  });
+});
 
 test.describe('Object Repository view', () => {
   test('a project manager adds a page and an element and edits its locators with the keyboard (AC-13)', async ({ page, request }) => {

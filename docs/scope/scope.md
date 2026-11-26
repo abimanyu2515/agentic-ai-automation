@@ -21,6 +21,7 @@ _These recommendations keep the build orderly. You can skip any step that does n
 | 8 | Agentic RAG | Project knowledge | done |
 | 9 | Jira knowledge sources | Project knowledge | in-progress |
 | 10 | Failure analysis for UI and batch runs | Project knowledge | planned |
+| 11 | Self healing locators | Locator reliability | in-progress |
 
 ## Existing product
 
@@ -79,6 +80,21 @@ Store each project's pages, UI elements, and ordered locators so generated scrip
   - [x] Harvest during execution: shared extractor, harvest ingest with redaction, Python runner file transport, workspace engine payload, covering AC-16, AC-17, AC-18, AC-19, AC-20, and AC-21
 - [ ] Verify it: `/check verify object repository`
 - [ ] Test it: `/test object repository`
+
+### 11. Self healing locators · in-progress
+When every stored locator for an element fails during a run, find the same element in the run's harvest. Apply confident matches to the object repository and rerun the test case once. Save unsure matches as suggestions a tester can accept or reject. Revert a heal when the rerun still fails.
+**Done when:** a renamed element heals and its rerun passes with no bug filed and `Passed after heal` in the report. Unsure matches become suggestions that testers can accept, reject, or revert in the Object Repository view. A failed rerun reverts the heal. Healing can be switched off per project. Everything works the same on the JSON store and PostgreSQL.
+- [x] Design it (spec): `/architect self healing locators`
+- Spec: [0011](../specs/0011-self-healing-locators/index.md)
+- Code: `backend/services/object_repository_healing.py`, `backend/agents/self_healing_agent.py`, `backend/agents/execution_agent.py`, `backend/agents/execution_analysis_agent.py`, `backend/agents/bug_reporting_agent.py`, `backend/agents/report_agent.py`, `backend/agents/supervisor_agent.py`, `backend/graph/workflow.py`, `backend/services/workflow_service.py`, `backend/services/object_repository_service.py`, `backend/services/run_history.py`, `backend/repository/`, `backend/database/`, `backend/models/`, `backend/main.py`, `frontend/js/object-repository.js`, `frontend/js/api.js`, `frontend/js/app.js`, `frontend/index.html`, `frontend/css/styles.css`, `backend/e2e/object-repository.spec.ts`, `backend/services/script_repair_service.py`, `backend/repository/script_heal_store.py`, `backend/repository/postgres_script_heal_store.py`, `backend/models/script_heal.py`, `frontend/js/components.js`, `backend/e2e/script-healing.spec.ts`
+- [x] Build it: `/develop self healing locators`
+  - [x] One deterministic heal end to end: migration, models and store mappings, config and toggle, marker capture, healing service, agent, graph routing, rerun, latest result rules and report, tracer test, covering AC-1 to AC-5, AC-7, AC-9, AC-11, AC-15
+  - [x] LLM fallback, suggestions with the duplicate guard, and the rerun failure revert, covering AC-6, AC-8, AC-10
+  - [x] Heal API, permissions, audit, retention, and JSON and PostgreSQL parity, covering AC-12, AC-13, AC-16, AC-17
+  - [x] Object Repository view badges, the drawer Healing section, the project Self healing switch, e2e, and docs, covering AC-14
+  - [x] Amendment 2026-11-26, script repair from the RCA: script heal store and migration, `ScriptRepairService` with gates, two stage verify, routing, report rows, script heal API, test case view badges and diff, tests, e2e, and docs, covering AC-1, AC-10, AC-11 to AC-21
+- [ ] Verify it: `/check verify self healing locators`
+- [ ] Test it: `/test self healing locators`
 
 ## Assistant
 
@@ -164,6 +180,9 @@ Run the AI failure analysis (with its knowledge retrieval stage) on failed runs 
 - Groundedness score on the test case detail view (from spec 0006)
 - pgvector retriever for running without RAGFlow (from spec 0006)
 - Persistent indexing queue and support for more than one server process (from spec 0006)
+- Aria snapshot and live inspect evidence for self healing (from spec 0011)
+- Self healing on the batch and webhook execution paths (from spec 0011)
+- Merge a healed element with an existing duplicate element (from spec 0011)
 
 ## Legend
 

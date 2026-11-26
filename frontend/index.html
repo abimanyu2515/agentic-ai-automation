@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agentic AI Automation</title>
-  <link rel="stylesheet" href="/css/styles.css?v=4">
+  <link rel="stylesheet" href="/css/styles.css?v=5">
   <link rel="stylesheet" href="/css/token-utilization.css">
   <!-- Chart.js (dashboard and Token Utilization) and the chat assistant's Markdown
        rendering (spec 0005): pinned versions, the Markdown sanitized before use.
@@ -1020,6 +1020,13 @@
                 <label for="project-settings-bug-confidence" style="display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500;">Minimum triage confidence (%)</label>
                 <input type="number" id="project-settings-bug-confidence" class="form-control" min="0" max="100" step="1" value="85" style="width: 120px;" />
               </div>
+              <div class="form-group" style="margin-bottom: 24px;">
+                <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 0.85rem; font-weight: 500;">
+                  <input type="checkbox" id="project-settings-self-healing" role="switch" aria-describedby="project-settings-self-healing-help" />
+                  <span>Self healing</span>
+                </label>
+                <p id="project-settings-self-healing-help" style="margin: 8px 0 0; color: var(--text-secondary); font-size: 0.8rem;">On by default. When every stored locator for an element fails in a run, self healing finds the element on the page, fixes the object repository when it is confident, and reruns the test case once. Unsure matches wait in the Object Repository as suggestions. Turn it off to keep full manual control.</p>
+              </div>
               <button type="submit" class="btn btn-primary w-100" style="padding: 12px; font-weight: 600;">Save Project Settings</button>
             </form>
           </div>
@@ -1448,7 +1455,7 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=35"></script>
+  <script type="module" src="/js/app.js?v=40"></script>
   <script>
     document.getElementById('login-form').addEventListener('submit', async function(e) {
       e.preventDefault();

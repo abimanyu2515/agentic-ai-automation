@@ -81,6 +81,14 @@ object_repository:
   harvest_enabled: true         # global switch for harvesting during test runs
   harvest_max_pages: 20         # distinct paths harvested per execution
   harvest_page_budget_ms: 5000  # deadline per snapshot, and the end of test wait
+  healing:                      # self healing locators (spec 0011)
+    enabled: true               # global switch; each project also has self_healing_enabled
+    auto_apply_threshold: 0.85  # score needed to apply a heal without review
+    suggest_threshold: 0.5      # below this nothing is saved
+    min_margin: 0.15            # lead over the second candidate needed to apply
+    llm_enabled: true           # ask the analysis LLM to pick when the score is unclear
+    max_attempts_per_run: 1     # heal attempts and reruns per run
+    max_candidates_for_llm: 5
 ```
 
 The workspace engine reads the harvest settings at run start from `GET /api/v1/object-repository/harvest-settings` (any failure means off for that run). The Python runner passes them to the test process as `OBJREPO_HARVEST`, `OBJREPO_HARVEST_MAX_PAGES`, and `OBJREPO_HARVEST_BUDGET_MS`.
@@ -97,6 +105,8 @@ Module `ObjectRepository`: Admin gets every action, Project Manager gets view, c
 * Selenium scripts get stored locators through `orx(driver, key)`, but no health feedback yet.
 * Scan status lives in memory per process. A restart loses an in flight scan's status (the data it already saved stays).
 * An element whose locators all fail costs up to `5 × locator_timeout_ms` before the step errors.
+* **Self healing** (spec 0011, single test case runs only for now; start one with **Run with self healing** on an approved test case with a script, on the Test Cases page. Execution Workspace and batch runs don't heal): when every locator of an element fails, the run's harvest is searched for the same element. A confident match is applied and the test case is rerun once; the report shows `Passed after heal` when the rerun passes, and the heal is put back as a suggestion when it doesn't. Unsure matches are saved as suggestions. Heals live with the element (`heals`; the `object_locator_heals` table in PostgreSQL) and never change a stored script. A pending suggestion's candidate is not added as a new element by a later harvest. Turn it off per project with the **Self healing** switch in project settings (`self_healing_enabled` on `PUT /api/v1/projects/{id}`; on by default).
+* **Reviewing heals in the view**: an element whose latest heal is `applied` or `accepted` shows a `Healed` badge next to its health badge, and one with a pending suggestion shows `Suggestion` (both as text). The attention card counts pending suggestions across the project and, when nothing is broken or needing review, opens the first suggestion's page with its element expanded. The element drawer has a **Healing** section with the old and new locators, confidence, method, and reason. People with `edit` see **Accept** and **Reject** on a suggestion, and **Revert** on an applied or accepted heal. Everyone else sees the same section read only in the expanded row. A decision reloads the element in the drawer; an error (such as `409 element changed, review again`) shows in the section and keeps the buttons usable.
 * Harvesting runs on every project, not only safe test environments, and `harvest_enabled` is global. A run's first visit to a page costs up to `harvest_page_budget_ms`, and so does the generator's first miss on a page.
 * A page the test leaves or ends on within 1000 ms of arriving never settles, so it isn't harvested.
 * A run sees pages mid flow, so it can add controls that exist only in that state (an open dialog's button). Runs never mark elements missing and scans can't reach pages behind login, so delete those by hand.

@@ -64,6 +64,34 @@ class WorkflowState(BaseModel):
     retrieved_context: list[dict] = Field(default_factory=list)
     # Bug reports drafted or reused for this run's failures. Written only by BugReportingAgent.
     bug_report_ids: list[UUID] = Field(default_factory=list)
+    # Self healing (spec 0011). Runtime only, never persisted.
+    # healing_enabled: set by WorkflowService before the graph runs.
+    # execution_batch_id: set by ExecutionAgent on its first run, reused by the heal rerun.
+    # run_marker_lines: [OBJREPO] lines keyed by str(result.id), written by ExecutionAgent.
+    # heal_results / heal_attempts / heal_rerun_test_case_ids: written by SelfHealingAgent;
+    # ExecutionAgent clears heal_rerun_test_case_ids after the rerun.
+    healing_enabled: bool = False
+    execution_batch_id: str | None = None
+    heal_attempts: int = 0
+    heal_results: list[dict] = Field(default_factory=list)
+    heal_rerun_test_case_ids: list[UUID] = Field(default_factory=list)
+    run_marker_lines: dict[str, list[str]] = Field(default_factory=dict)
+    # Result ids whose markers SelfHealingAgent already applied, so WorkflowService
+    # does not count them twice after it renames the latest result.
+    markers_applied_result_ids: list[str] = Field(default_factory=list)
+    # Script repair (spec 0011, AC-18 to AC-21). Runtime only. Written by SelfHealingAgent.
+    # script_heal_results entries: script_heal_id, test_case_id, status, rca_category, verified.
+    script_repair_attempts: int = 0
+    script_heal_results: list[dict] = Field(default_factory=list)
+
+    def latest_results(self) -> list[ExecutionResult]:
+        """The last appended result for each test case, in first run order (spec 0011, AC-11)."""
+        latest: dict[UUID, ExecutionResult] = {}
+        for result in self.execution_results:
+            latest.pop(result.test_case_id, None)
+            latest[result.test_case_id] = result
+        order = list(dict.fromkeys(r.test_case_id for r in self.execution_results))
+        return [latest[test_case_id] for test_case_id in order]
 
     def add_log(self, message: str) -> None:
         self.logs.append(f"[{datetime.now(timezone.utc).isoformat()}] {message}")

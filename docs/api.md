@@ -174,6 +174,8 @@ PUT /api/v1/projects/{project_id}
 
 Credentials are stored in encrypted vault. Password `"********"` is ignored (no update).
 
+Optional switches: `is_safe_test_environment`, `bug_auto_submit` with `bug_auto_submit_min_confidence` (0 to 1), and `self_healing_enabled` (spec 0011; `true` by default, `false` turns self healing locators off for the project). `ProjectResponse` returns each of them.
+
 **Response**: `200` — `ProjectResponse`, `404` if not found.
 
 ---
@@ -598,6 +600,10 @@ All routes sit under `/api/v1/projects/{project_id}/object-repository`, need a b
 | `/elements/{element_id}` | DELETE | delete | none | `{"referencing_test_cases"}` | 404 |
 | `/scan` | POST | create | none | `202` `{"scan_id"}` | 409 not a safe test environment, no target URL, or a scan already running |
 | `/scan/{scan_id}` | GET | view | none | `{"scan_id", "status", "pages_scanned", "added", "updated", "marked_missing", "error"}` | 404 unknown, expired, or other project |
+| `/heals` | GET | view | `status` (optional: `applied`, `suggested`, `accepted`, `rejected`, `reverted`) | list of heals, newest first, no pagination | 422 bad status |
+| `/heals/{heal_id}/accept` | POST | edit | none | `{"heal", "element"}` | 404, 409 |
+| `/heals/{heal_id}/reject` | POST | edit | none | heal | 404, 409 |
+| `/heals/{heal_id}/revert` | POST | edit | none | `{"heal", "element"}` | 404, 409 |
 
 **Rules**: names are snake_case (`^[a-z][a-z0-9_]*$`); `url_pattern` is a path glob that starts with `/` and has no `***` or `?` (`*` is one segment, `**` any number); `strategy` is one of `role`, `label`, `placeholder`, `text`, `test_id`, `css`, `xpath`; `element_type` is one of `button`, `link`, `input`, `select`, `checkbox`, `radio`, `textarea`, `nav`. Options: `role` allows `name` and `exact`, `label` and `text` allow `exact`, others `{}`.
 
@@ -622,9 +628,65 @@ Any create or update sets `manually_edited = true`, `health = healthy`, and rese
   "consecutive_failed_runs": 0,
   "locators": [
     {"id": "uuid", "position": 0, "strategy": "role", "value": "button", "options": {"name": "Log in"}, "success_count": 0, "failure_count": 0, "last_succeeded_at": null}
-  ]
+  ],
+  "latest_heal": null
 }
 ```
+
+### Heals (spec 0011)
+
+A heal is one proposed or applied fix for an element's locators, written by self healing after a run. `latest_heal` on an element is its heal with the latest `created_at`, or `null`.
+
+**Heal** example:
+
+```json
+{
+  "id": "uuid",
+  "element_id": "uuid",
+  "key": "login_page.login_button",
+  "status": "suggested",
+  "method": "deterministic",
+  "confidence": 0.72,
+  "old_locators": [{"strategy": "test_id", "value": "login-btn", "options": {}}],
+  "new_locators": [{"strategy": "test_id", "value": "sign-in-btn", "options": {}}],
+  "reason": "test id and role match",
+  "evidence_source": "harvest",
+  "execution_id": "uuid",
+  "test_case_id": "uuid",
+  "created_at": "2026-11-25T10:00:00Z",
+  "decided_by": null,
+  "decided_at": null
+}
+```
+
+* **Accept** applies a `suggested` heal: its locators go first, the old ones stay as backups (at most 5), the fingerprint moves to the candidate, `health` becomes `needs_review`, and `manually_edited` keeps its value. Nothing is rerun.
+* **Reject** marks a `suggested` heal `rejected` and changes no locator.
+* **Revert** puts back the locators and fingerprint an `applied` or `accepted` heal replaced, and marks it `reverted`.
+* Accept, reject, and revert set `decided_by` and `decided_at`, and write one audit entry (entity `object_locator_heal`, action `heal_accepted`, `heal_rejected`, or `heal_reverted`, with the old and new main locator).
+* `404`: an unknown heal, a heal from another project, or one whose element or page is deleted. `409 heal is <status>`: the heal is in the wrong status. `409 element changed, review again`: a tester edited the element (or another heal changed it) since the heal was computed or applied, so review it again.
+* Each element keeps its pending suggestion, its latest applied or accepted heal, and its last 10 other decided heals.
+
+### Script heals (spec 0011 amendment)
+
+A script heal is one repair of a test case's Playwright script, made by self healing from the log analyser's RCA after an automation issue failure. `latest_script_heal` on every `TestCaseResponse` is the test case's newest script heal, or `null`. Scripts in a script heal hold object repository keys, like stored scripts.
+
+Routes under `/api/v1/projects/{project_id}/testcases`:
+
+| Path | Method | Permission | Inputs | Returns | Errors |
+|---|---|---|---|---|---|
+| `/script-heals` | GET | `TestCases` view | `status` (optional: `applied`, `suggested`, `accepted`, `rejected`, `reverted`) | list of script heals, newest first | 403, 404, 422 bad status |
+| `/script-heals/{heal_id}/accept` | POST | `TestCases` edit | none | script heal | 403, 404, 409 |
+| `/script-heals/{heal_id}/reject` | POST | `TestCases` edit | none | script heal | 403, 404, 409 |
+| `/script-heals/{heal_id}/revert` | POST | `TestCases` edit | none | script heal | 403, 404, 409 |
+
+**Script heal** fields: `id`, `test_case_id`, `status`, `old_script`, `new_script`, `rca_category`, `root_cause_summary`, `failing_step`, `reason`, `execution_id`, `created_at`, `decided_by`, `decided_at`.
+
+* **Accept** saves `new_script` to a `suggested` heal's test case, sets `script_validation_status` to `unverified` with the diagnostic `Repaired by self healing`, and marks the heal `accepted`. Nothing is rerun.
+* **Reject** marks a `suggested` heal `rejected` and changes no script.
+* **Revert** puts back `old_script` for an `applied` or `accepted` heal and marks it `reverted`.
+* Each decision sets `decided_by` and `decided_at`, and writes one audit entry (module `TESTCASE`, entity `test_case_script_heal`, action `script_heal_accepted`, `script_heal_rejected`, or `script_heal_reverted`). The script text is never written to the audit log.
+* `404`: an unknown heal, or one from another project. `409 heal is <status>`: the heal is in the wrong status. `409 script changed, review again`: the stored script is no longer the one the heal starts from (accept) or put in place (revert).
+* A test case has at most one `suggested` script heal; a newer one rejects the older with the reason `replaced by a newer suggestion`. Each test case keeps its suggestion, its latest applied or accepted heal, and its last 10 other decided heals.
 
 ### Execution webhook `logs`
 

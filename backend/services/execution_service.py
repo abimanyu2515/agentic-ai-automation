@@ -322,6 +322,29 @@ class ExecutionService:
 
         return ObjectRepositoryService(project_repo=self.repo).apply_run_markers(project_id, execution_id, lines)
 
+    def harvest_secrets(self, project_id: UUID, test_case_id: UUID | None) -> list:
+        """Values redacted from harvested elements: vault credentials and test data.
+
+        Self healing (spec 0011, AC-2) redacts candidates with the same list.
+        """
+        import logging
+
+        from backend.services import object_repository_harvest as harvest
+
+        secrets: list = []
+        try:
+            from backend.services.vault_service import VaultService
+
+            secrets.extend(VaultService().get_credentials(str(project_id)))
+        except Exception:
+            logging.warning("Harvest redaction could not load vault credentials: project_id=%s", project_id)
+        try:
+            test_case = self.repo.get_test_case(test_case_id) if test_case_id else None
+        except Exception:
+            test_case = None
+        secrets.extend(harvest.values_from_test_data(test_case))
+        return secrets
+
     def apply_object_repository_harvest(self, project_id: UUID, test_case_id: UUID | None, execution_id: UUID, snapshots) -> dict:
         """The single place harvested pages are ingested (spec 0004, AC-18 to AC-20).
 
@@ -344,15 +367,7 @@ class ExecutionService:
             pages = harvest.parse_snapshots(snapshots, settings.harvest_max_pages)
             if not pages:
                 return totals
-            secrets: list = []
-            try:
-                from backend.services.vault_service import VaultService
-
-                secrets.extend(VaultService().get_credentials(str(project_id)))
-            except Exception:
-                logging.warning("Harvest redaction could not load vault credentials: project_id=%s", project_id)
-            test_case = self.repo.get_test_case(test_case_id) if test_case_id else None
-            secrets.extend(harvest.values_from_test_data(test_case))
+            secrets = self.harvest_secrets(project_id, test_case_id)
 
             service = ObjectRepositoryService(project_repo=self.repo)
             for path, elements in pages:

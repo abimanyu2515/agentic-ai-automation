@@ -20,6 +20,7 @@ You are in the workflow agent area when you change how requirements become scena
 | `backend/agents/execution_analysis_agent.py` | Log analyser: triages every failed result through `LogAnalysisService` |
 | `backend/agents/bug_reporting_agent.py` | Bug report drafts for Product Bug failures (logic in `BugReportService`) |
 | `backend/agents/report_agent.py` | Execution reports in JSON and JUnit form |
+| `backend/agents/self_healing_agent.py` | Verifies locator heals, repairs automation issue scripts, and reruns failed test cases |
 | `backend/agents/test_data_agent.py` | Row by row test data for each test case |
 | `backend/agents/application_reconnaissance_agent.py` | Live, sanitized DOM inspection of the project target URL for grounded scripts |
 | `backend/prompts/agents/` | Prompt text for each agent, one folder per agent |
@@ -46,5 +47,6 @@ You are in the workflow agent area when you change how requirements become scena
 * [0001 project specific testing](../docs/specs/0001-project-specific-testing/index.md)
 * [0002 project creation target URL](../docs/specs/0002-project-creation-target-url/index.md)
 * [0010 bug reporting agent](../docs/specs/0010-bug-reporting-agent/index.md)
+* [0011 self healing locators and script repair](../docs/specs/0011-self-healing-locators/index.md)
 
 _Drafted by /audit from the repo, worth a quick human pass. Edit freely: once a line stops matching this draft, later runs treat it as curated and will flag rather than overwrite it._

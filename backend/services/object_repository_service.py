@@ -481,6 +481,7 @@ class ObjectRepositoryService:
                 description=description,
                 manually_edited=True,
                 health="healthy",
+                locators_version=1,
                 locators=[ObjectLocator(position=i, **data) for i, data in enumerate(cleaned)],
             )
             page.elements.append(element)
@@ -522,6 +523,8 @@ class ObjectRepositoryService:
             element.health = "healthy"
             element.failure_count = 0
             element.consecutive_failed_runs = 0
+            # Spec 0011, AC-7: a tester edit invalidates any heal computed before it.
+            element.locators_version += 1
             element.updated_at = _now()
             return page, element, self._rewrite_keys(unit, renames)
 
@@ -841,6 +844,13 @@ class ObjectRepositoryService:
                 repository.pages.append(page)
 
             by_fingerprint = {e.fingerprint: e for e in page.elements if e.fingerprint}
+            # Spec 0011, AC-8: a candidate held in a pending suggestion is not a new element.
+            pending = {
+                heal.candidate_fingerprint
+                for e in page.active_elements()
+                for heal in e.heals
+                if heal.status == "suggested" and heal.candidate_fingerprint
+            }
             taken = {e.name for e in page.active_elements()}
             seen: set[UUID] = set()
             type_counters: dict[str, int] = {}
@@ -849,6 +859,8 @@ class ObjectRepositoryService:
                 if not locators:
                     continue
                 fingerprint = self.fingerprint(data)
+                if fingerprint and fingerprint in pending and fingerprint not in by_fingerprint:
+                    continue
                 existing = by_fingerprint.get(fingerprint) if fingerprint else None
                 if existing is not None:
                     if existing.id in seen or existing.is_deleted:

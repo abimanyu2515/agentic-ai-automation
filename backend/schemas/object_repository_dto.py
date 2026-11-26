@@ -87,6 +87,26 @@ class LocatorResponse(BaseModel):
     last_succeeded_at: datetime | None = None
 
 
+class HealResponse(BaseModel):
+    """One self healing heal (spec 0011, AC-12)."""
+
+    id: UUID
+    element_id: UUID
+    key: str
+    status: str
+    method: str
+    confidence: float
+    old_locators: list[dict]
+    new_locators: list[dict]
+    reason: str
+    evidence_source: str
+    execution_id: UUID | None = None
+    test_case_id: UUID | None = None
+    created_at: datetime
+    decided_by: UUID | None = None
+    decided_at: datetime | None = None
+
+
 class ElementResponse(BaseModel):
     id: UUID
     page_id: UUID
@@ -104,6 +124,14 @@ class ElementResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     locators: list[LocatorResponse]
+    latest_heal: HealResponse | None = None
+
+
+class HealDecisionResponse(BaseModel):
+    """An accept, reject, or revert result: the heal and the element it changed."""
+
+    heal: HealResponse
+    element: ElementResponse
 
 
 class ElementListResponse(BaseModel):

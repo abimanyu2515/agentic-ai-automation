@@ -15,11 +15,14 @@ class BatchQueueManager:
         self,
         repo: Any = None,
         runner: Any = None,
-        on_log: Optional[Callable[[str], None]] = None
+        on_log: Optional[Callable[[str], None]] = None,
+        retries: bool = True,
     ):
         self.repo = repo
         self.runner = runner
         self.on_log = on_log
+        # Spec 0011, AC-9: a heal rerun runs once, with RecoveryManager retries off.
+        self.retries = retries
         self.recovery_manager = RecoveryManager()
         self.state_resolver = ApplicationStateResolver()
         self.navigation_planner = NavigationPlanner()
@@ -200,6 +203,8 @@ class BatchQueueManager:
                         error_msg,
                         context.current_retry_count
                     )
+                    if not self.retries:
+                        action = RecoveryAction.FAIL
                     
                     if self.on_log:
                         self.on_log(f"[QueueManager] Execution failed. Recovery action: {action}")

@@ -31,6 +31,8 @@ class Project(BaseModel):
     # triage confidence reaches the threshold. Off by default.
     bug_auto_submit: bool = False
     bug_auto_submit_min_confidence: float = Field(default=0.85, ge=0.0, le=1.0)
+    # Spec 0011: heal broken object repository locators after a run. On by default.
+    self_healing_enabled: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     requirements: list[UUID] = Field(default_factory=list)
     is_deleted: bool = False

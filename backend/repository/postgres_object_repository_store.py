@@ -9,6 +9,7 @@ from backend.database.db import SessionLocal
 from backend.database.db_models import (
     ObjectElementDB,
     ObjectLocatorDB,
+    ObjectLocatorHealDB,
     ObjectPageDB,
     ProjectDB,
     RequirementDB,
@@ -16,6 +17,7 @@ from backend.database.db_models import (
     TestCaseDB,
 )
 from backend.models.object_repository import (
+    LocatorHeal,
     ObjectElement,
     ObjectLocator,
     ObjectPage,
@@ -38,12 +40,17 @@ _PAGE_FIELDS = (
 _ELEMENT_FIELDS = (
     "page_id", "name", "element_type", "description", "fingerprint", "health",
     "manually_edited", "last_used_at", "last_execution_id", "last_locator_index",
-    "failure_count", "consecutive_failed_runs", "applied_execution_ids",
+    "failure_count", "consecutive_failed_runs", "applied_execution_ids", "locators_version",
     "created_at", "updated_at", "is_deleted", "deleted_at", "deleted_by",
 )
 _LOCATOR_FIELDS = (
     "position", "strategy", "value", "options", "success_count", "failure_count",
     "last_succeeded_at", "created_at", "updated_at",
+)
+_HEAL_FIELDS = (
+    "element_id", "project_id", "execution_id", "test_case_id", "status", "method", "confidence",
+    "old_locators", "new_locators", "old_fingerprint", "candidate_fingerprint", "reason",
+    "evidence_source", "locators_version", "created_at", "decided_by", "decided_at",
 )
 
 
@@ -73,6 +80,17 @@ class PostgresObjectRepositoryStore(ObjectRepositoryStore):
             .order_by(ObjectLocatorDB.position)
         ).all() if element_ids else []
 
+        heals = session.scalars(
+            select(ObjectLocatorHealDB)
+            .where(ObjectLocatorHealDB.element_id.in_(element_ids))
+            .order_by(ObjectLocatorHealDB.created_at)
+        ).all() if element_ids else []
+        heals_by_element: dict[UUID, list[LocatorHeal]] = {}
+        for row in heals:
+            heals_by_element.setdefault(row.element_id, []).append(
+                LocatorHeal(id=row.id, **_values(row, _HEAL_FIELDS))
+            )
+
         locators_by_element: dict[UUID, list[ObjectLocator]] = {}
         for row in locators:
             locators_by_element.setdefault(row.element_id, []).append(
@@ -83,7 +101,12 @@ class PostgresObjectRepositoryStore(ObjectRepositoryStore):
             values = _values(row, _ELEMENT_FIELDS)
             values["applied_execution_ids"] = list(values["applied_execution_ids"] or [])
             elements_by_page.setdefault(row.page_id, []).append(
-                ObjectElement(id=row.id, locators=locators_by_element.get(row.id, []), **values)
+                ObjectElement(
+                    id=row.id,
+                    locators=locators_by_element.get(row.id, []),
+                    heals=heals_by_element.get(row.id, []),
+                    **values,
+                )
             )
         return ProjectObjectRepository(
             project_id=project_id,
@@ -201,3 +224,47 @@ class PostgresObjectRepositoryStore(ObjectRepositoryStore):
                     for field, value in values.items():
                         setattr(row, field, value)
             session.flush()
+
+        self._save_heals(session, old_elements, after)
+
+    @staticmethod
+    def _save_heals(session, old_elements: dict, after: ProjectObjectRepository) -> None:
+        """Write heal rows: deletes (retention), then updates, then inserts.
+
+        Rows leaving `suggested` flush first, then the other updates, then
+        inserts, so an older suggestion is already `rejected` before another
+        row becomes or is inserted as `suggested`, and the partial unique
+        index on pending suggestions holds at every step.
+        """
+        inserts = []
+        later: list[tuple] = []
+        for page in after.pages:
+            for element in page.elements:
+                old = old_elements.get(element.id)
+                old_heals = {heal.id: heal for heal in (old.heals if old else [])}
+                keep = {heal.id for heal in element.heals}
+                for heal_id in old_heals:
+                    if heal_id not in keep:
+                        row = session.get(ObjectLocatorHealDB, heal_id)
+                        if row is not None:
+                            session.delete(row)
+                for heal in element.heals:
+                    values = _values(heal, _HEAL_FIELDS)
+                    previous = old_heals.get(heal.id)
+                    if previous is None:
+                        inserts.append(ObjectLocatorHealDB(id=heal.id, **values))
+                    elif values != _values(previous, _HEAL_FIELDS):
+                        row = session.get(ObjectLocatorHealDB, heal.id)
+                        if previous.status == "suggested":
+                            for field, value in values.items():
+                                setattr(row, field, value)
+                        else:
+                            later.append((row, values))
+        session.flush()
+        for row, values in later:
+            for field, value in values.items():
+                setattr(row, field, value)
+        session.flush()
+        for row in inserts:
+            session.add(row)
+        session.flush()

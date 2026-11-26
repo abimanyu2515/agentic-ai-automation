@@ -149,6 +149,25 @@ class RepositoryConfig(BaseModel):
     pool_timeout: int = 30
 
 
+class ScriptRepairConfig(BaseModel):
+    """Script repair from the RCA (spec 0011, AC-18), under `object_repository.healing.script_repair`."""
+    enabled: bool = True
+    min_rca_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+    max_attempts: int = Field(default=1, ge=0)
+
+
+class HealingConfig(BaseModel):
+    """Self healing locators (spec 0011), under `object_repository.healing`."""
+    enabled: bool = True
+    auto_apply_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    suggest_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    min_margin: float = Field(default=0.15, ge=0.0, le=1.0)
+    llm_enabled: bool = True
+    max_attempts_per_run: int = Field(default=1, ge=0)
+    max_candidates_for_llm: int = Field(default=5, ge=1)
+    script_repair: ScriptRepairConfig = ScriptRepairConfig()
+
+
 class ObjectRepositoryConfig(BaseModel):
     max_prompt_elements: int = 150
     locator_timeout_ms: int = 3000
@@ -156,6 +175,7 @@ class ObjectRepositoryConfig(BaseModel):
     harvest_enabled: bool = True
     harvest_max_pages: int = 20
     harvest_page_budget_ms: int = 5000
+    healing: HealingConfig = HealingConfig()
 
 
 class ChatConfig(BaseModel):
