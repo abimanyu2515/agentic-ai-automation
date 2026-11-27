@@ -20,6 +20,7 @@
             </div>
             
             {% include 'components/screenshot_gallery.html' %}
+            {% include 'components/accessibility_section.html' %}
             {% include 'components/footer.html' %}
         </div>
         
@@ -42,6 +43,7 @@
                         {% endfor %}
                     </div>
                     <a href="#screenshot-gallery" style="color: #475569; text-decoration: none; font-size: 14px; padding: 8px 12px; border-radius: 6px; transition: background-color 0.2s;">Screenshot Gallery</a>
+                    {% if context.accessibility %}<a href="#accessibility" style="color: #475569; text-decoration: none; font-size: 14px; padding: 8px 12px; border-radius: 6px; transition: background-color 0.2s;">Accessibility</a>{% endif %}
                 </nav>
             </div>
         </div>

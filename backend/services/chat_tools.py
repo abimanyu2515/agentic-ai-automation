@@ -552,7 +552,9 @@ class ChatToolbox:
                 "status": r.status.value,
                 "severity": r.severity,
                 "jira_key": r.jira_key or r.duplicate_of_jira_key,
-                "execution_id": str(r.execution_id),
+                "failure_category": r.failure_category,
+                # Spec 0011: a bug from a standalone accessibility scan has no run.
+                "execution_id": _str_or_none(r.execution_id),
                 "occurrences": len(r.occurrences),
                 "updated": r.updated_at.isoformat(),
             }
@@ -580,8 +582,11 @@ class ChatToolbox:
             "root_cause": report.root_cause,
             "evidence": report.evidence,
             "confidence": report.confidence,
-            "execution_id": str(report.execution_id),
-            "test_case_id": str(report.test_case_id),
+            "execution_id": _str_or_none(report.execution_id),
+            "test_case_id": _str_or_none(report.test_case_id),
+            "accessibility_report_id": _str_or_none(report.accessibility_report_id),
+            "accessibility_rule": report.a11y_rule_id,
+            "wcag_criteria": report.wcag_criteria,
             "occurrences": len(report.occurrences),
             "jira_key": report.jira_key or report.duplicate_of_jira_key,
             "jira_url": report.jira_url,
@@ -630,3 +635,7 @@ class ChatToolbox:
                 }
             )
         return {"items": items}
+
+
+def _str_or_none(value) -> str | None:
+    return str(value) if value is not None else None

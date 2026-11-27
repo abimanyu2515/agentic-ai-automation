@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def _utc_now() -> datetime:
@@ -43,17 +43,28 @@ EDITABLE_STATUSES = frozenset({BugReportStatus.DRAFT, BugReportStatus.SUBMIT_FAI
 
 SEVERITIES = ("critical", "major", "minor", "trivial")
 
+# Spec 0011, AC-6: accessibility findings become bugs in their own category.
+# Functional lookups (get_by_execution, find_open_by_signature) leave it out,
+# so one run can hold a functional bug and accessibility bugs side by side.
+ACCESSIBILITY_CATEGORY = "Accessibility Issue"
+
 
 class BugOccurrence(BaseModel):
-    execution_id: UUID
+    # A functional occurrence names a run; an accessibility occurrence names
+    # the report it came from (and its run, when the report has one).
+    execution_id: UUID | None = None
+    accessibility_report_id: UUID | None = None
     executed_at: datetime
 
 
 class BugReport(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     project_id: UUID
-    execution_id: UUID
-    test_case_id: UUID
+    # Spec 0011: an accessibility bug from a standalone scan has no run and no
+    # test case. At least one of execution_id or accessibility_report_id is set.
+    execution_id: UUID | None = None
+    test_case_id: UUID | None = None
+    accessibility_report_id: UUID | None = None
     scenario_id: UUID | None = None
     requirement_id: UUID | None = None
 
@@ -74,6 +85,11 @@ class BugReport(BaseModel):
     flaky_score: float | None = None
     failure_category: str | None = None
 
+    # Accessibility bugs only (spec 0011, AC-7): they become the
+    # `a11y_<rule>` and `wcag_<criterion>` Jira labels.
+    a11y_rule_id: str | None = None
+    wcag_criteria: list[str] = Field(default_factory=list)
+
     attachments: list[str] = Field(default_factory=list)
     error_signature: str = ""
     occurrences: list[BugOccurrence] = Field(default_factory=list)
@@ -90,6 +106,16 @@ class BugReport(BaseModel):
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
     deleted_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _needs_a_source(self) -> "BugReport":
+        if self.execution_id is None and self.accessibility_report_id is None:
+            raise ValueError("A bug report needs an execution_id or an accessibility_report_id")
+        return self
+
+    @property
+    def is_accessibility(self) -> bool:
+        return self.failure_category == ACCESSIBILITY_CATEGORY
 
     def touch(self) -> None:
         self.updated_at = _utc_now()

@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 from backend.models.project import Project
@@ -9,6 +10,7 @@ from backend.models.test_case import TestCaseStatus, EvaluationStatus
 from backend.models.document import Document
 from backend.models.execution_result import ExecutionResult
 from backend.repository.project_repository import get_project_repository
+logger = logging.getLogger(__name__)
 
 
 
@@ -249,6 +251,14 @@ class ProjectService:
             from backend.repository.chat_repository import get_chat_repository
 
             get_chat_repository().delete_threads_for_project(project_id)
+
+            # Spec 0011, AC-15: accessibility reports are kept until their project is deleted.
+            from backend.repository.accessibility_repository import get_accessibility_repository
+
+            try:
+                get_accessibility_repository().delete_for_project(project_id)
+            except Exception:
+                logger.exception("Accessibility reports were not removed: project_id=%s", project_id)
         return deleted
 
     def get_documents(self, project_id: UUID) -> list[Document]:

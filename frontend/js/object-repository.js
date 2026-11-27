@@ -1,6 +1,6 @@
 // Object Repository view (spec 0004): pages, elements, locator editing, and scans.
 // Self healing (spec 0011): heal badges, the suggestion count, and the drawer Healing section.
-import { API } from './api.js?v=27';
+import { API } from './api.js?v=30';
 import { escapeHTML } from './components.js?v=10';
 
 const STRATEGIES = ['role', 'label', 'placeholder', 'text', 'test_id', 'css', 'xpath'];

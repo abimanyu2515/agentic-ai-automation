@@ -353,6 +353,27 @@ def workspace_or_user(body_model):
     return dependency
 
 
+def workspace_or_project_permission(module: str, action: str):
+    """Read routes CI may call (spec 0011, AC-9): a valid `X-Webhook-Secret`,
+    else a signed in user with the module permission and project access.
+    Returns the user, or None for the workspace."""
+    async def dependency(
+        request: Request,
+        project_id: UUID,
+        credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
+        db: Session = Depends(get_db),
+    ) -> UserDB | None:
+        presented = request.headers.get("X-Webhook-Secret")
+        if presented:
+            _check_secret(request, presented, WORKSPACE_SECRET_VAR, "workspace")
+            return None
+        user = await get_current_user(credentials=credentials, db=db)
+        authorize_project(user, db, project_id, module, action, request)
+        return user
+    dependency.workspace_or_user = True  # marker for the route audit (spec 0009, AC-12)
+    return dependency
+
+
 # ---------------------------------------------------------------- access log (spec 0009, AC-7)
 
 _SECRET_QUERY = re.compile(r"(?i)([?&]secret=)[^&\s]*")

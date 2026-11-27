@@ -29,7 +29,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from backend.models.accessibility import AccessibilityReport, AccessibilityReportStatus, FindingKind
 from backend.models.bug_report import (
+    ACCESSIBILITY_CATEGORY,
     EDITABLE_STATUSES,
     SEVERITIES,
     BugOccurrence,
@@ -38,7 +40,13 @@ from backend.models.bug_report import (
 )
 from backend.models.execution_result import ExecutionResult, ExecutionStatus
 from backend.services import run_history
-from backend.services.object_repository_harvest import REDACTED, secret_values, values_from_test_data
+from backend.services.accessibility_service import (
+    BLOCK_SEVERITIES,
+    DEFAULT_BLOCK_SEVERITY,
+    _at_or_above,
+    screenshot_file,
+)
+from backend.services.redaction import clean, secret_patterns
 from backend.utils.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
@@ -90,15 +98,25 @@ def _first_line(text: str | None) -> str:
     return next((line.strip() for line in (text or "").splitlines() if line.strip()), "")
 
 
+def _label_text(value: str) -> str:
+    """Jira labels cannot hold spaces."""
+    return re.sub(r"\s+", "_", str(value).strip())
+
+
 def _jql_text(value: str) -> str:
     """Quote a value for a JQL string literal."""
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 class BugReportService:
-    """Inject `llm_service`, `bug_repo`, `project_repo`, `jira_service` and `vault` in tests."""
+    """Inject `llm_service`, `bug_repo`, `project_repo`, `jira_service`, `vault` and
+    `accessibility_repo` in tests."""
 
-    def __init__(self, llm_service=None, bug_repo=None, project_repo=None, jira_service=None, vault=None):
+    def __init__(
+        self, llm_service=None, bug_repo=None, project_repo=None, jira_service=None, vault=None,
+        accessibility_repo=None,
+    ):
+        self._accessibility_repo = accessibility_repo
         self._llm_service = llm_service
         self._bug_repo = bug_repo
         self._project_repo = project_repo
@@ -199,6 +217,182 @@ class BugReportService:
         report.touch()
         self.bug_repo.save(report)
 
+    # ---------------------------------------------------------------- accessibility (spec 0011)
+
+    @property
+    def accessibility_repo(self):
+        if self._accessibility_repo is None:
+            from backend.repository.accessibility_repository import get_accessibility_repository
+
+            self._accessibility_repo = get_accessibility_repository()
+        return self._accessibility_repo
+
+    def draft_from_accessibility(
+        self,
+        project_id: UUID,
+        a11y_report: AccessibilityReport,
+        result: ExecutionResult | None = None,
+        test_case=None,
+        actor: str = "agent",
+    ) -> list[BugReport]:
+        """Draft (or reuse) one bug per violation at or above the project's
+        `a11y_block_severity` (AC-6), and set each finding's `bug_report_id`.
+
+        One open bug covers one finding signature per project. A repeat adds an
+        occurrence; a dismissed bug ignores repeats; a resolved bug gets a new
+        draft. `needs_review` findings never create bugs. Saves the report's
+        updated findings. Never raises.
+        """
+        try:
+            return self._draft_accessibility(project_id, a11y_report, result, test_case, actor)
+        except Exception:
+            logger.exception("Accessibility bug drafting failed: report_id=%s", a11y_report.id)
+            return []
+
+    def _draft_accessibility(self, project_id, a11y_report, result, test_case, actor) -> list[BugReport]:
+        if a11y_report.status != AccessibilityReportStatus.SUCCEEDED:
+            return []
+        project = self._safe(lambda: self.project_repo.get_project(project_id))
+        threshold = getattr(project, "a11y_block_severity", None)
+        if threshold not in BLOCK_SEVERITIES:
+            threshold = DEFAULT_BLOCK_SEVERITY
+        findings = [
+            f for f in a11y_report.findings
+            if f.kind == FindingKind.VIOLATION and _at_or_above(f.impact, threshold)
+        ]
+        if not findings:
+            return []
+        if test_case is None and a11y_report.test_case_id is not None:
+            test_case = self._safe(lambda: self.project_repo.get_test_case(a11y_report.test_case_id))
+        patterns = secret_patterns(project_id, test_case, self._vault)
+
+        reports: list[BugReport] = []
+        created: list[BugReport] = []
+        changed = False
+        for finding in findings:
+            report, is_new = self._accessibility_bug(project_id, a11y_report, finding, result, test_case, patterns, actor)
+            if report is None:
+                continue
+            if finding.bug_report_id != report.id:
+                finding.bug_report_id = report.id
+                changed = True
+            reports.append(report)
+            if is_new:
+                created.append(report)
+        if changed:
+            self._safe(lambda: self.accessibility_repo.save(a11y_report))
+
+        # AC-7: the project's bug_auto_submit setting decides, as for functional bugs.
+        if created and getattr(project, "bug_auto_submit", False):
+            submitted = {r.id: self.submit(project_id, r.id, actor="auto") for r in created}
+            reports = [submitted.get(r.id, r) for r in reports]
+        return reports
+
+    def _accessibility_bug(self, project_id, a11y_report, finding, result, test_case, patterns, actor):
+        """Returns (report, created). (None, False) when a dismissed bug ignores the repeat."""
+        occurrence = BugOccurrence(
+            execution_id=a11y_report.execution_id,
+            accessibility_report_id=a11y_report.id,
+            executed_at=a11y_report.finished_at or a11y_report.created_at,
+        )
+        open_report = self.bug_repo.find_open_a11y_by_signature(project_id, finding.signature)
+        if open_report is not None:
+            return self._add_accessibility_occurrence(open_report, occurrence), False
+        latest = self.bug_repo.find_latest_a11y_by_signature(project_id, finding.signature)
+        if latest is not None and latest.status == BugReportStatus.DISMISSED:
+            return None, False
+
+        page = finding.pages[0] if finding.pages else ""
+        scenario_id = getattr(test_case, "scenario_id", None)
+        scenario = self._safe(lambda: self.project_repo.get_scenario(scenario_id)) if scenario_id else None
+        shot = screenshot_file(a11y_report, finding.screenshot_path) if finding.screenshot_path else None
+        evidence = [f"Element: {finding.selector}"] if finding.selector else []
+        if finding.html_snippet:
+            evidence.append(f"HTML: {finding.html_snippet}")
+        if finding.pages:
+            evidence.append("Pages: " + ", ".join(finding.pages))
+        if finding.help_url:
+            evidence.append(f"Rule details: {finding.help_url}")
+
+        report = BugReport(
+            project_id=project_id,
+            execution_id=a11y_report.execution_id,
+            test_case_id=a11y_report.test_case_id,
+            accessibility_report_id=a11y_report.id,
+            scenario_id=scenario_id,
+            requirement_id=getattr(scenario, "requirement_id", None),
+            environment=self._accessibility_environment(project_id, page, result),
+            root_cause=clean(finding.ai_explanation, patterns) or None,
+            evidence=[clean(line, patterns) for line in evidence],
+            failure_category=ACCESSIBILITY_CATEGORY,
+            a11y_rule_id=finding.rule_id,
+            wcag_criteria=list(finding.wcag_criteria),
+            attachments=[str(shot)] if shot else [],
+            error_signature=finding.signature,
+            occurrences=[occurrence],
+            created_by=actor,
+            **self._accessibility_content(finding, page, test_case, patterns),
+        )
+        self.bug_repo.save(report)
+        logger.info(
+            "Accessibility bug drafted: report_id=%s rule=%s a11y_report_id=%s",
+            report.id, finding.rule_id, a11y_report.id,
+        )
+        return report, True
+
+    def _add_accessibility_occurrence(self, report: BugReport, occurrence: BugOccurrence) -> BugReport:
+        # A retried webhook replaces the accessibility report under the same id,
+        # so it never counts twice.
+        if all(o.accessibility_report_id != occurrence.accessibility_report_id for o in report.occurrences):
+            report.occurrences.append(occurrence)
+            report.touch()
+            self.bug_repo.save(report)
+            key = report.jira_key or report.duplicate_of_jira_key
+            if key:
+                self._safe(lambda: self.jira_service.add_comment(
+                    key,
+                    f"The same accessibility problem was found again at {occurrence.executed_at.isoformat()} "
+                    f"(occurrence {len(report.occurrences)}).",
+                ))
+        logger.info("Accessibility bug reused: report_id=%s", report.id)
+        return report
+
+    def _accessibility_content(self, finding, page: str, test_case, patterns) -> dict:
+        """Deterministic text: the finding already carries the AI explanation and fix."""
+        rule = finding.help or finding.rule_id
+        # AC-7: a bug with no test case uses the page URL as its title context.
+        context = getattr(test_case, "title", None) or page or "unknown page"
+        criteria = ", ".join(f"WCAG {c}" for c in finding.wcag_criteria) or "WCAG"
+        summary = finding.ai_explanation or rule
+        if finding.ai_fix:
+            summary = f"{summary}\n\nSuggested fix:\n{finding.ai_fix}"
+        steps = [f"Open {page}" if page else "Open the page named in the evidence"]
+        if test_case is not None and getattr(test_case, "title", None):
+            steps.insert(0, f"Run the test case \"{test_case.title}\" or go straight to the page")
+        if finding.selector:
+            steps.append(f"Find the element {finding.selector}")
+        steps.append(f"Check it against {criteria} (axe rule {finding.rule_id})")
+        severity = "critical" if finding.impact == "critical" else "major"
+        return self._normalize({
+            "title": f"Accessibility: {rule} ({context})",
+            "summary": summary,
+            "steps_to_reproduce": steps,
+            "expected_result": f"The element meets {criteria}: {rule}.",
+            "actual_result": finding.failure_summary or rule,
+            "severity": severity,
+            "priority": "high" if severity == "critical" else "medium",
+        }, patterns)
+
+    def _accessibility_environment(self, project_id: UUID, page: str, result: ExecutionResult | None) -> dict[str, str]:
+        if result is not None:
+            env = self._environment(result)
+        else:
+            project = self._safe(lambda: self.project_repo.get_project(project_id))
+            env = {k: str(getattr(project, k)) for k in ("target_url", "framework") if getattr(project, k, None)}
+        if page:
+            env["page_url"] = page
+        return env
+
     def _draft(self, project_id, result, test_case, retrieved_context, force, actor) -> BugReport | None:
         status = _status_value(result.status)
         if status not in (ExecutionStatus.FAILED.value, ExecutionStatus.ERROR.value):
@@ -219,7 +413,7 @@ class BugReportService:
         if open_report is not None:
             return self._add_occurrence(open_report, result, occurrence)
 
-        patterns = self._secret_patterns(project_id, test_case)
+        patterns = secret_patterns(project_id, test_case, self._vault)
         content = self._generate(result, test_case, retrieved_context, patterns)
         scenario_id = getattr(test_case, "scenario_id", None)
         scenario = self._safe(lambda: self.project_repo.get_scenario(scenario_id)) if scenario_id else None
@@ -231,9 +425,9 @@ class BugReportService:
             scenario_id=scenario_id,
             requirement_id=getattr(scenario, "requirement_id", None),
             environment=self._environment(result),
-            failing_step=self._clean(result.failing_step, patterns) or None,
-            root_cause=self._clean(result.root_cause_summary, patterns) or None,
-            evidence=[self._clean(line, patterns) for line in (result.evidence or [])],
+            failing_step=clean(result.failing_step, patterns) or None,
+            root_cause=clean(result.root_cause_summary, patterns) or None,
+            evidence=[clean(line, patterns) for line in (result.evidence or [])],
             confidence=result.confidence,
             flaky_score=result.flaky_score,
             failure_category=result.failure_category,
@@ -293,7 +487,7 @@ class BugReportService:
                 environment=_block([f"{k}: {v}" for k, v in self._environment(result).items()], "Unknown"),
                 run_history=_block(self._history_text(result), "No earlier runs"),
             )
-            prompt = with_project_knowledge(self._clean(prompt, patterns), retrieved_context)
+            prompt = with_project_knowledge(clean(prompt, patterns), retrieved_context)
             draft = self.llm_service.structured_generate(user=prompt, response_model=_BugReportDraft)
             content = {
                 "title": draft.title,
@@ -326,13 +520,13 @@ class BugReportService:
     def _normalize(self, content: dict, patterns) -> dict:
         severity = str(content.get("severity") or "").strip().lower()
         priority = str(content.get("priority") or "").strip().lower()
-        title = self._clean(content.get("title"), patterns).strip() or "Untitled bug"
+        title = clean(content.get("title"), patterns).strip() or "Untitled bug"
         return {
             "title": title[:255],
-            "summary": self._clean(content.get("summary"), patterns),
-            "steps_to_reproduce": [self._clean(s, patterns) for s in content.get("steps_to_reproduce") or []],
-            "expected_result": self._clean(content.get("expected_result"), patterns),
-            "actual_result": self._clean(content.get("actual_result"), patterns),
+            "summary": clean(content.get("summary"), patterns),
+            "steps_to_reproduce": [clean(s, patterns) for s in content.get("steps_to_reproduce") or []],
+            "expected_result": clean(content.get("expected_result"), patterns),
+            "actual_result": clean(content.get("actual_result"), patterns),
             "severity": severity if severity in SEVERITIES else "major",
             "priority": priority if priority in PRIORITIES else "medium",
         }
@@ -366,34 +560,17 @@ class BugReportService:
 
     # ---------------------------------------------------------------- redaction
 
-    def _secret_patterns(self, project_id: UUID, test_case) -> list[re.Pattern]:
-        values: list = []
-        try:
-            if self._vault is None:
-                from backend.services.vault_service import VaultService
-
-                self._vault = VaultService()
-            values.extend(self._vault.get_credentials(str(project_id)))
-        except Exception:
-            logger.warning("Bug report could not load vault credentials: project_id=%s", project_id)
-        values.extend(values_from_test_data(test_case))
-        return [re.compile(re.escape(v), re.IGNORECASE) for v in secret_values(values)]
-
-    @staticmethod
-    def _clean(text, patterns) -> str:
-        text = "" if text is None else str(text)
-        for pattern in patterns:
-            text = pattern.sub(REDACTED, text)
-        return text
-
     # ---------------------------------------------------------------- edits
 
     def update(self, project_id: UUID, report_id: UUID, patch: dict, actor: str) -> BugReport:
         report = self._require(project_id, report_id)
         if report.status not in EDITABLE_STATUSES:
             raise BugReportError(f"A {report.status.value} bug report cannot be edited")
-        test_case = self._safe(lambda: self.project_repo.get_test_case(report.test_case_id))
-        patterns = self._secret_patterns(project_id, test_case)
+        test_case = (
+            self._safe(lambda: self.project_repo.get_test_case(report.test_case_id))
+            if report.test_case_id else None
+        )
+        patterns = secret_patterns(project_id, test_case, self._vault)
         merged = {field: getattr(report, field) for field in EDITABLE_FIELDS}
         merged.update({k: v for k, v in patch.items() if k in EDITABLE_FIELDS and v is not None})
         for field, value in self._normalize(merged, patterns).items():
@@ -471,7 +648,10 @@ class BugReportService:
 
         report.touch()
         self.bug_repo.save(report)
-        self._link_runs(project_id, report, linked_key, report.jira_url, sync_status)
+        if not report.is_accessibility:
+            # A run's jira_bug_id and the test case's Jira link belong to its
+            # functional bug; an accessibility bug links through the finding.
+            self._link_runs(project_id, report, linked_key, report.jira_url, sync_status)
         self._safe(lambda: self._queue_defect(project_id, linked_key))
         logger.info("Bug report submitted: report_id=%s jira=%s status=%s", report.id, linked_key, report.status.value)
         return report
@@ -516,7 +696,15 @@ class BugReportService:
         return f"bugsig_{report.error_signature[:12]}"
 
     def _labels(self, report: BugReport) -> list[str]:
-        labels = ["platform_sync", "bug", f"test_{report.test_case_id}"]
+        labels = ["platform_sync", "bug"]
+        if report.is_accessibility:
+            # AC-7: accessibility, a11y_<rule_id>, and wcag_<criterion> for each criterion.
+            labels.append("accessibility")
+            if report.a11y_rule_id:
+                labels.append(f"a11y_{_label_text(report.a11y_rule_id)}")
+            labels += [f"wcag_{_label_text(c)}" for c in report.wcag_criteria]
+        if report.test_case_id:
+            labels.append(f"test_{report.test_case_id}")
         if report.scenario_id:
             labels.append(f"scenario_{report.scenario_id}")
         if report.error_signature:
@@ -542,14 +730,29 @@ class BugReportService:
             details.append(f"Triage confidence: {report.confidence:.0%}")
         if report.flaky_score is not None:
             details.append(f"Flaky score: {report.flaky_score:.2f}")
-        lines += ["", " | ".join(details), f"Execution: {report.execution_id}", "Reported by the QA platform Bug Reporting Agent."]
+        if report.a11y_rule_id:
+            details.append(f"Accessibility rule: {report.a11y_rule_id}")
+        if report.wcag_criteria:
+            details.append("WCAG: " + ", ".join(report.wcag_criteria))
+        lines += ["", " | ".join(details)]
+        if report.execution_id:
+            lines.append(f"Execution: {report.execution_id}")
+        if report.accessibility_report_id:
+            lines.append(f"Accessibility report: {report.accessibility_report_id}")
+        if report.is_accessibility:
+            lines.append("An automated scan does not certify WCAG conformance.")
+        lines.append("Reported by the QA platform Bug Reporting Agent.")
         return "\n".join(lines)
 
     @staticmethod
     def _duplicate_comment(report: BugReport) -> str:
+        source = (
+            f"Execution: {report.execution_id}" if report.execution_id
+            else f"Accessibility report: {report.accessibility_report_id}"
+        )
         return (
             "The QA platform found this failure again.\n"
-            f"Execution: {report.execution_id}\n"
+            f"{source}\n"
             f"Occurrences: {len(report.occurrences)}\n"
             f"Actual result: {report.actual_result or 'N/A'}"
         )
@@ -575,7 +778,9 @@ class BugReportService:
             self._safe(lambda: self.jira_service.link_issues(report.jira_key, story_key, "Relates"))
 
     def _link_runs(self, project_id: UUID, report: BugReport, key: str, url: str | None, sync_status: str) -> None:
-        execution_ids = dict.fromkeys([report.execution_id, *(o.execution_id for o in report.occurrences)])
+        execution_ids = dict.fromkeys(
+            e for e in [report.execution_id, *(o.execution_id for o in report.occurrences)] if e is not None
+        )
         for execution_id in execution_ids:
             def save(execution_id=execution_id):
                 result = self.project_repo.get_execution_result(project_id, execution_id)
@@ -585,6 +790,8 @@ class BugReportService:
             self._safe(save)
 
         def save_test_case():
+            if report.test_case_id is None:
+                return
             test_case = self.project_repo.get_test_case(report.test_case_id)
             if test_case:
                 test_case.jira_issue_key = key

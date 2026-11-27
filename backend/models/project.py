@@ -10,6 +10,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
+from backend.models.accessibility import A11yBlockSeveritySetting, A11yGateModeSetting
+
 
 class Project(BaseModel):
     id: UUID = Field(default_factory=uuid4)
@@ -33,6 +35,10 @@ class Project(BaseModel):
     bug_auto_submit_min_confidence: float = Field(default=0.85, ge=0.0, le=1.0)
     # Spec 0011: heal broken object repository locators after a run. On by default.
     self_healing_enabled: bool = True
+    # Accessibility Agent (spec 0011, AC-13): copied into each run's snapshot.
+    a11y_enabled: bool = True
+    a11y_gate_mode: A11yGateModeSetting = "warn"
+    a11y_block_severity: A11yBlockSeveritySetting = "serious"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     requirements: list[UUID] = Field(default_factory=list)
     is_deleted: bool = False

@@ -670,7 +670,7 @@ def test_batch_run_triages_failed_items_before_saving(monkeypatch):
         object_repository_service.ObjectRepositoryService, "renderer",
         lambda self: SimpleNamespace(render=lambda test_case: test_case.playwright_script),
     )
-    monkeypatch.setattr(playwright_runner, "PlaywrightRunner", lambda: object())
+    monkeypatch.setattr(playwright_runner, "PlaywrightRunner", type("RunnerDouble", (), {"__init__": lambda self, **kwargs: None}))
     monkeypatch.setattr(object_repository_harvest, "read_harvest_file", lambda path: [])
     monkeypatch.setattr(report_service.ReportService, "compile_reports_with_engine_selection", lambda *args: None)
     monkeypatch.setattr(ExecutionService, "apply_object_repository_markers", lambda *args: 0)

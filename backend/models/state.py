@@ -29,6 +29,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from backend.models.accessibility import AccessibilityReport
 from backend.models.requirement import Requirement
 from backend.models.scenario import Scenario
 from backend.models.execution_result import ExecutionResult
@@ -92,6 +93,8 @@ class WorkflowState(BaseModel):
             latest[result.test_case_id] = result
         order = list(dict.fromkeys(r.test_case_id for r in self.execution_results))
         return [latest[test_case_id] for test_case_id in order]
+    # One accessibility report per execution result (spec 0011). Written only by AccessibilityAgent.
+    accessibility_results: list[AccessibilityReport] = Field(default_factory=list)
 
     def add_log(self, message: str) -> None:
         self.logs.append(f"[{datetime.now(timezone.utc).isoformat()}] {message}")

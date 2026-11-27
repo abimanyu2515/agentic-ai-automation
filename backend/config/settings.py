@@ -178,6 +178,38 @@ class ObjectRepositoryConfig(BaseModel):
     healing: HealingConfig = HealingConfig()
 
 
+# axe-core tags the accessibility scan may request (spec 0011). A tag outside
+# this set fails when the config loads, not partway through a run.
+KNOWN_AXE_WCAG_TAGS = frozenset({
+    "wcag2a", "wcag2aa", "wcag2aaa", "wcag21a", "wcag21aa", "wcag22aa",
+    "best-practice", "section508", "EN-301-549",
+})
+
+
+class AccessibilityConfig(BaseModel):
+    """Accessibility scans (spec 0011). A11Y_* env vars override some values."""
+    enabled: bool = True
+    wcag_tags: list[str] = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]
+    max_pages: int = Field(default=10, ge=1)
+    page_budget_ms: int = Field(default=30000, ge=1000)
+    max_llm_findings: int = Field(default=20, ge=0)
+    llm_timeout_seconds: float = Field(default=60, gt=0)
+    max_element_screenshots: int = Field(default=10, ge=0)
+    max_nodes_per_rule: int = Field(default=50, ge=1)
+    max_pages_per_finding: int = Field(default=20, ge=1)
+    webhook_payload_max_bytes: int = Field(default=1_000_000, ge=10_000)
+    scan_stale_after_seconds: int = Field(default=900, ge=60)
+
+    @model_validator(mode="after")
+    def _check_tags(self) -> "AccessibilityConfig":
+        if not self.wcag_tags:
+            raise ValueError("accessibility.wcag_tags must name at least one axe tag")
+        unknown = [tag for tag in self.wcag_tags if tag not in KNOWN_AXE_WCAG_TAGS]
+        if unknown:
+            raise ValueError(f"accessibility.wcag_tags has unknown axe tags: {unknown}")
+        return self
+
+
 class ChatConfig(BaseModel):
     """Chat assistant (spec 0005). Defaults live under `chat:` in
     default_config.yaml; CHAT_* env vars override them."""
@@ -241,6 +273,7 @@ class Settings(BaseSettings):
     langsmith: LangSmithConfig = LangSmithConfig()
     jira: JiraConfig = JiraConfig()
     object_repository: ObjectRepositoryConfig = ObjectRepositoryConfig()
+    accessibility: AccessibilityConfig = AccessibilityConfig()
     chat: ChatConfig = ChatConfig()
     token_usage: TokenUsageConfig = TokenUsageConfig()
     webhooks: WebhookConfig = WebhookConfig()
@@ -311,6 +344,13 @@ class Settings(BaseSettings):
         _override(raw, "repository", "pool_size", "DB_POOL_SIZE", cast=int)
         _override(raw, "repository", "max_overflow", "DB_MAX_OVERFLOW", cast=int)
         _override(raw, "repository", "pool_timeout", "DB_POOL_TIMEOUT", cast=int)
+
+        # Accessibility scan settings from .env (spec 0011)
+        raw.setdefault("accessibility", {})
+        _override(raw, "accessibility", "enabled", "A11Y_ENABLED", cast=_bool)
+        _override(raw, "accessibility", "max_pages", "A11Y_MAX_PAGES", cast=int)
+        _override(raw, "accessibility", "page_budget_ms", "A11Y_PAGE_BUDGET_MS", cast=int)
+        _override(raw, "accessibility", "max_llm_findings", "A11Y_MAX_LLM_FINDINGS", cast=int)
 
         # Chat assistant settings from .env (spec 0005)
         raw.setdefault("chat", {})

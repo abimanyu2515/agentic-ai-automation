@@ -47,6 +47,18 @@ A test case resolves to its project through scenario, requirement, project. A br
 
 `POST /projects/{id}/batches/execute`: an empty list or a malformed ID is `422`, and duplicate IDs count once, all before the ownership check. One test case from another project refuses the whole batch with `404`, and nothing is queued.
 
+Spec 0012: the batch start takes an optional `?test_cycle_id=<uuid>`. Every run of the batch is saved with that cycle and with the `batch_id` the response returns (`{"status": "started", "batch_id": "uuid"}`). A cycle that doesn't exist, or whose release belongs to another project, is `404 Test cycle not found`, and nothing is queued. Without it, the runs have no cycle.
+
+`GET /projects/{id}/batches/{batch_id}/html` builds one HTML report from the runs saved with that `batch_id` in this project. It needs `Executions.view` and project access through the Bearer token (there is no cookie), so a plain browser link gets `401`. Another project's batch, or a batch with no runs, is `404` (`No executions found for this batch`). Any other failure is logged and returns `500` without the error text. Every value in the report is HTML escaped, and the report has no script. The executions UI fetches it with the token and opens it as a `blob:` page with a `<base>` tag and a `Content-Security-Policy` `<meta>` (`default-src 'none'`), so a reload or bookmark of that page doesn't work; you reopen it from the app.
+
+`GET /projects/{id}/batches/{batch_id}/stream` sends the batch's event log as server sent events, from its first event, and ends after `Completed` or `Error`. It has no auth (a browser `EventSource` can't send a Bearer token), so it streams only a backend batch whose log was started by this project. For anything else (an unknown id, an id that isn't a UUID, another project's batch, or a batch from before a server restart) it never answers with an HTTP error. It sends one event and ends:
+
+```json
+{"status": "Error", "untracked": true, "log": "This batch is not tracked on this server. It may belong to another project, or the server restarted."}
+```
+
+The live observer (`#/execution/BATCH-<batch_id>`) shows no report button for that event.
+
 **Machine routes** prove the caller with a shared secret in the `X-Webhook-Secret` header, compared in constant time:
 
 | Route | Secret |
@@ -712,6 +724,28 @@ No authentication (global settings, no secrets). The execution engine calls it a
 {"enabled": true, "max_pages": 20, "budget_ms": 5000}
 ```
 
+### `GET /api/v1/accessibility/scan-settings?project_id=...`
+
+Header secret `WORKSPACE_WEBHOOK_SECRET` (spec 0011). The execution engine reads it once at the top of each run, before the `started` webhook. `enabled` is the engine's final scan decision: the project's `a11y_enabled` and the global `accessibility.enabled`. An unknown project is `404`. Any failure (timeout of 2 seconds, non 200, bad JSON) means the engine does not scan that run.
+
+```json
+{"enabled": true, "gate_mode": "warn", "block_severity": "serious", "wcag_tags": ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"], "max_pages": 10, "page_budget_ms": 30000, "max_element_screenshots": 10, "max_nodes_per_rule": 50, "webhook_payload_max_bytes": 1000000}
+```
+
+### Execution webhook `batch_id` and `test_cycle_id`
+
+Spec 0012: a `completed` payload from a workspace run of several selected cases carries `batch_id`, one UUID shared by every case of that run. A single case run sends none. `test_cycle_id` is sent only when a real cycle was selected. `finalize_execution` saves a `batch_id` that isn't a UUID as `null`, keeps the `batch_id` saved first when the webhook repeats, and saves a `test_cycle_id` that matches no cycle of this project as `null`. Each drop logs a warning naming the execution id. Neither field ever fails the webhook.
+
+### Execution webhook `a11y`, `a11y_settings`, and `a11y_settings_error`
+
+Both `completed` payloads carry the run's accessibility fields (spec 0011):
+
+- `a11y_settings`: `{enabled, gate_mode, block_severity}`, exactly as the engine read them from `scan-settings`. Sent whenever that read succeeded, even when `enabled` is `false`.
+- `a11y_settings_error`: the reason the read failed (`timeout`, `http_<status>`, `bad_json`, `no_project`), sent instead of `a11y_settings`. Only logged; it never changes the gate.
+- `a11y`: the raw axe results of the pages the run visited, only when the engine scanned. At most 50 nodes per rule per page and `webhook_payload_max_bytes` in total: snippets are dropped first, then whole page results, and the payload is marked `truncated: true`.
+
+`finalize_execution` builds the run's `project_config_snapshot` (a saved snapshot wins, so a repeated webhook keeps its first gate). Otherwise it captures the project now, and the echoed `gate_mode` and `block_severity` replace the project's values only when they are valid (`off`, `warn`, `block`; `critical`, `serious`). A scanning run with no `a11y` field gets `gate_status: NOT_SCANNED` with `gate_reason: scan_error`, never a pass. Neither field can fail the webhook or change the run's status. The webhook saves the report and its gate with axe's own text before it responds. The AI explanation and the accessibility bug drafts (which quote it) are added after the response, so the engine never waits on the LLM. Batch runs scan through the Python runner and read `a11y.json` from the run folder instead.
+
 ---
 
 ## Executions
@@ -766,7 +800,8 @@ Runs ExecutionAgent → ExecutionAnalysisAgent → BugReportingAgent → ReportA
   "run_history_summary": {"runs": 5, "passes": 3, "fails": 2, "flips": 4, "same_error_count": 1, "outcomes": ["P", "F", "P", "F", "P"], "flaky_score": 0.9},
   "jira_bug_id": "string|null",
   "jira_bug_url": "string|null",
-  "test_cycle_id": "uuid|null",
+  "test_cycle_id": "uuid|null (a real test cycle of this project only)",
+  "batch_id": "uuid|null (spec 0012: shared by every run of one batch)",
   "executed_by": "uuid|null",
   "project_config_snapshot": {
     "project_id": "uuid",
@@ -795,6 +830,104 @@ A ready project's configuration is captured at that moment as `project_config_sn
 
 ---
 
+## Accessibility
+
+Accessibility reports written by the Accessibility Agent (spec 0011, guide: [features/accessibility-agent.md](features/accessibility-agent.md)). Read routes need `Executions.view` and starting a scan needs `Executions.edit`, both with access to the project. A report or run from another project returns `404`. An automated scan does not certify WCAG conformance.
+
+A report has `source` (`execution` or `scan`), `status` (`queued`, `running`, `succeeded`, `failed`), `error` (`scan_error`, `login_failed`, `timeout`, or `null`), `login_status` (`not_requested`, `succeeded`, `failed`), `pages[]` (`{url, title, scanned_at, requires_login, error}`, where `error` is `budget`, `csp_blocked`, `requires_login`, `navigation_failed`, `axe_error`, or `null`), `findings[]`, `counts` (`{critical, serious, moderate, minor, needs_review}`), `gate_status` (`PASS`, `WARN`, `BLOCKED`, `NOT_SCANNED`), `gate_reason` (`disabled`, `scan_error`, or `null`), and `gate_mode` (the mode the run used).
+
+### Run report
+
+```
+GET /api/v1/projects/{project_id}/executions/{execution_id}/accessibility
+```
+
+The run's full report with findings. A run with no report returns `{"gate_status": "NOT_SCANNED", "gate_reason": "no_report"}` (or `disabled` / `scan_error` when the report says so).
+
+### Release gate (for CI)
+
+```
+GET /api/v1/projects/{project_id}/accessibility/gate?execution_id=...
+GET /api/v1/projects/{project_id}/accessibility/gate?batch_id=...
+```
+
+Exactly one of `execution_id` or `batch_id` (`422` otherwise). The batch id is the runs' `batch_id` (spec 0012). A `batch_id` that isn't a UUID is `404`. So is one that matches no run or report of this project and has no backend batch log for this project (a workspace batch with no saved run yet, a batch from before a restart, or another project's batch). Accepts a user session with `Executions.view`, or the header `X-Webhook-Secret`.
+
+```json
+{"gate_status": "BLOCKED", "gate_reason": null, "gate_mode": "block", "runs": [{"execution_id": "uuid", "gate_status": "BLOCKED"}], "in_progress": false}
+```
+
+`in_progress` (spec 0012) is `true` while this backend is still running this project's batch (its event log exists, was started by this project, and its last event isn't `Completed` or `Error`). It is `false` for an `execution_id` gate, for workspace batches, and after a backend restart.
+
+A backend batch with no saved run or report yet still answers `200`, from its event log:
+
+| Log state | `gate_status` | `gate_reason` | `gate_mode` | `runs` | `in_progress` |
+|---|---|---|---|---|---|
+| still running | `NOT_SCANNED` | `batch_running` | `null` | `[]` | `true` |
+| ended (`Completed` or `Error`) | `NOT_SCANNED` | `batch_no_runs` | `null` | `[]` | `false` |
+
+Once a run or report is saved, the normal batch gate applies and `in_progress` stays `true` until the last event. So CI checks `in_progress` before `gate_status`: poll while it is `true`, then read the gate. `batch_no_runs` means the batch ended before any run was saved, which usually means it failed to start. A workspace batch has no backend log, so an early `404` there can mean "not saved yet".
+
+A batch returns its worst run (`BLOCKED`, then `WARN`, then `NOT_SCANNED`, then `PASS`). A run with no report counts as `NOT_SCANNED`, and `gate_mode` is `mixed` when the runs used different modes. The gate never changes a run's functional `status`.
+
+### Scan pages
+
+```
+GET /api/v1/projects/{project_id}/accessibility/scan-pages
+```
+
+The checklist for a standalone scan: the project target URL, literal object repository page patterns, and URLs named in test cases, one per path. Wildcard patterns are listed with `skipped_reason: "wildcard"`.
+
+```json
+{"pages": [{"url": "https://app.example.com/login", "source": "target_url", "skipped_reason": null}, {"url": "/orders/*", "source": "object_repository", "skipped_reason": "wildcard"}], "max_pages": 10}
+```
+
+### Start a standalone scan
+
+```
+POST /api/v1/projects/{project_id}/accessibility/scans
+```
+
+```json
+{"paths": ["/", "/account"], "include_login": false}
+```
+
+Returns `202` with `{"report_id": "uuid", "status": "queued"}`. The scan runs in the background: `queued`, then `running`, then `succeeded` or `failed`. Poll the report routes below.
+
+- When the global `accessibility.enabled` (`A11Y_ENABLED`) is off, every start is `409` (`Accessibility scanning is turned off on this server`). The project's `a11y_enabled` covers test runs only and does not stop a scan.
+- `paths` may be absolute URLs or paths, and must be on the project target URL's origin. An empty list scans the target URL only. Off origin, or more than `accessibility.max_pages` (default 10) pages, is `422`.
+- Only one scan per project can be queued or running (`409`).
+- `include_login: true` needs the project marked as a safe test environment (`409`), because it submits the stored credentials. The scan first opens every page with no session, and a page that redirects to a visible password field is marked `requires_login`. It then fills the login form on the target URL, and the login succeeds when the URL path changes, no password field is visible, and no `[role=alert]` shows. On success the `requires_login` pages are scanned signed in; on failure the report gets `login_status: failed`, `error: login_failed`, and those pages keep `error: requires_login`. Multi step and single sign on logins are not supported.
+- A project that is not ready (no valid target URL) is `409`. An unknown project is `404`.
+- A scan still queued or running after `accessibility.scan_stale_after_seconds` (default 900) is marked `failed` with `error: timeout`. This is checked on every read of the report routes and when the server starts.
+- Serious findings become accessibility bug drafts the same way run findings do (see Bug Reports).
+
+### List reports
+
+```
+GET /api/v1/projects/{project_id}/accessibility/reports?source=scan&limit=20&offset=0
+```
+
+`source` is optional (`execution` or `scan`), `limit` is 1 to 100 (default 20). Newest first, without findings:
+
+```json
+{"items": [{"id": "uuid", "source": "scan", "status": "succeeded", "gate_status": "WARN", "counts": {"critical": 1, "serious": 0, "moderate": 0, "minor": 0, "needs_review": 0}, "pages": []}], "total": 1, "limit": 20, "offset": 0}
+```
+
+### Get one report
+
+```
+GET /api/v1/projects/{project_id}/accessibility/reports/{report_id}
+```
+
+The full report with findings.
+
+### Reports and JUnit
+
+HTML and PDF execution reports (legacy and professional engines) include an Accessibility section with the gate, counts, and a findings table, or the not scanned state with its reason. JUnit files carry a `testsuite name="accessibility"`: one failing `testcase` per rule with a violation, a single passing `testcase` when there are none, and a single skipped `testcase` when the run was not scanned. The professional engine's JUnit root is now `testsuites`.
+
+---
+
 ## Bug Reports
 
 Drafts written by the Bug Reporting Agent for Product Bug failures, reviewed before they are filed in Jira. GET routes need `Executions.view`; the others need `Executions.edit`. Every route is scoped to the project in the path. A report from another project returns `404`.
@@ -809,16 +942,23 @@ Drafts written by the Bug Reporting Agent for Product Bug failures, reviewed bef
 | POST | `/api/v1/projects/{project_id}/bug-reports/{report_id}/dismiss` | Body `{"reason": "..."}`. Draft or `submit_failed` only. |
 
 `BugReport` fields:
-- **Links:** `id`, `project_id`, `execution_id`, `test_case_id`, `scenario_id`, `requirement_id`
+- **Links:** `id`, `project_id`, `execution_id`, `test_case_id`, `accessibility_report_id`, `scenario_id`, `requirement_id`. `execution_id` and `test_case_id` are `null` on a bug from a standalone accessibility scan; every report has an `execution_id` or an `accessibility_report_id`.
 - **Content:** `title`, `summary`, `steps_to_reproduce`, `expected_result`, `actual_result`, `severity`, `priority`, `environment`
 - **From triage:** `failing_step`, `root_cause`, `evidence`, `confidence`, `flaky_score`, `failure_category`
-- **Artifacts and dedupe:** `attachments`, `error_signature`, `occurrences` (`[{execution_id, executed_at}]`)
+- **Accessibility:** `a11y_rule_id`, `wcag_criteria` (set when `failure_category` is `Accessibility Issue`)
+- **Artifacts and dedupe:** `attachments`, `error_signature`, `occurrences` (`[{execution_id, accessibility_report_id, executed_at}]`)
 - **Status and Jira:** `status`, `jira_key`, `jira_url`, `duplicate_of_jira_key`, `submit_error`, `dismiss_reason`
 - **Audit:** `created_by`, `submitted_by`, `created_at`, `updated_at`
 
 The execution detail (`GET .../executions/{id}`) includes `bug_report_id`.
 
 Project settings (`PUT /api/v1/projects/{project_id}`) accept `bug_auto_submit` (boolean, default `false`) and `bug_auto_submit_min_confidence` (0 to 1, default `0.85`; anything else is `422`). Both are returned on the project. With auto-submit on, a draft whose triage confidence reaches the threshold is submitted as soon as it is drafted.
+
+**Accessibility bugs (spec 0011).** After a run is scanned, each violation at or above the project's `a11y_block_severity` becomes a draft with `failure_category: "Accessibility Issue"` (critical maps to severity `critical`, serious to `major`). One open bug covers one finding signature per project, across runs and scans: a repeat adds an occurrence (and a Jira comment once filed). A `dismissed` bug ignores repeats, and a `resolved` bug gets a new draft. `needs_review` findings never create bugs. Accessibility bugs follow `bug_auto_submit` (there is no confidence threshold), carry the Jira labels `accessibility`, `a11y_<rule_id>`, and `wcag_<criterion>`, attach the element screenshot when one was captured, and never change the run's `bug_report_id` or `jira_bug_id`. The run's own `bug-report` route only returns its functional bug.
+
+Element screenshots: `GET /api/v1/projects/{project_id}/accessibility/reports/{report_id}/screenshots/{name}` (`Executions.view` and project access) returns the PNG a finding's `screenshot_path` names. A name with a path in it, a name no finding of that report records, a missing file, or a report from another project is `404`. The scan captures critical and serious violation nodes only, up to `accessibility.max_element_screenshots` (default 10) per run.
+
+Project settings also accept the Accessibility Agent settings (spec 0011): `a11y_enabled` (boolean, default `true`), `a11y_gate_mode` (`off`, `warn`, or `block`, default `warn`), and `a11y_block_severity` (`critical` or `serious`, default `serious`). Any other value is `422`, and a `null` leaves the value unchanged. All three are returned on the project and copied into each run's `project_config_snapshot` when it starts, so the run's accessibility gate always uses the settings it started with.
 
 ### Sync a failed run as a Jira bug
 

@@ -5,6 +5,14 @@ import { ApplicationStateResolver } from './app-state-resolver';
 import { NavigationPlanner } from './navigation-planner';
 import { RecoveryManager } from './recovery-manager';
 import { startHarvest, HarvestSession, HarvestSettings } from './object-harvest-session';
+import {
+  startA11yRecorder,
+  scanPages,
+  emptyA11yReport,
+  A11yRawReport,
+  A11yRecorder,
+  A11yScanSettings,
+} from './a11y-scan-session';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import ts from 'typescript';
@@ -74,18 +82,119 @@ async function loadHarvest(): Promise<{ settings: HarvestSettings; source: strin
   }
 }
 
+// The gate fields the engine read at run start, echoed back in every
+// `completed` webhook (spec 0011, *Workspace run settings*).
+interface A11yEcho {
+  enabled: boolean;
+  gate_mode: string;
+  block_severity: string;
+}
+
+interface A11yRunConfig {
+  settings: A11yScanSettings;
+  payloadMaxBytes: number;
+  echo: A11yEcho | null;
+  // Why the settings read failed, for the backend log only.
+  error: string | null;
+}
+
+const A11Y_PAYLOAD_MAX_BYTES = 1_000_000;
+
+function a11yOff(error: string | null): A11yRunConfig {
+  return {
+    settings: { enabled: false, tags: [], maxPages: 0, budgetMs: 0, maxNodesPerRule: 0 },
+    payloadMaxBytes: A11Y_PAYLOAD_MAX_BYTES,
+    echo: null,
+    error,
+  };
+}
+
+// Accessibility scan settings, read once per run (spec 0011, AC-1, AC-8). Any
+// failure means scanning is off for that run, the same rule as harvest.
+async function loadA11y(projectId: string | undefined, testCaseId: string | undefined): Promise<A11yRunConfig> {
+  if (!projectId || projectId === 'demo-project') return a11yOff('no_project');
+  let response: Response;
+  try {
+    response = await fetch(
+      `http://127.0.0.1:8000/api/v1/accessibility/scan-settings?project_id=${encodeURIComponent(projectId)}`,
+      { headers: workspaceSecretHeaders(), signal: AbortSignal.timeout(2000) },
+    );
+  } catch (e: any) {
+    console.warn('[A11Y] Scanning is off for this run, settings read failed:', e?.message || e);
+    return a11yOff(e?.name === 'TimeoutError' || e?.name === 'AbortError' ? 'timeout' : 'network_error');
+  }
+  if (!response.ok) return a11yOff(`http_${response.status}`);
+  let body: any;
+  try {
+    body = await response.json();
+  } catch {
+    return a11yOff('bad_json');
+  }
+  if (!body || typeof body !== 'object') return a11yOff('bad_json');
+  const echo: A11yEcho = {
+    enabled: body.enabled === true,
+    gate_mode: body.gate_mode,
+    block_severity: body.block_severity,
+  };
+  const tags = Array.isArray(body.wcag_tags) ? body.wcag_tags.map(String).filter(Boolean) : [];
+  const maxPages = Number(body.max_pages) || 0;
+  const budgetMs = Number(body.page_budget_ms) || 0;
+  const usable = echo.enabled && tags.length > 0 && maxPages > 0 && budgetMs > 0;
+  // Element screenshots go where the backend's screenshot route serves them:
+  // the test case's run folder under backend/playwrightt/artifacts.
+  const maxShots = testCaseId ? Math.max(0, Number(body.max_element_screenshots) || 0) : 0;
+  return {
+    settings: {
+      enabled: usable,
+      tags,
+      maxPages,
+      budgetMs,
+      maxNodesPerRule: Number(body.max_nodes_per_rule) || 50,
+      maxShots,
+      shotDir: testCaseId ? path.join(process.cwd(), 'artifacts', testCaseId, 'a11y-shots') : undefined,
+    },
+    payloadMaxBytes: Number(body.webhook_payload_max_bytes) || A11Y_PAYLOAD_MAX_BYTES,
+    // Echoed unchanged. If the caps were unusable nothing is scanned, no `a11y`
+    // field is sent, and the backend records scan_error rather than a pass.
+    echo,
+    error: null,
+  };
+}
+
+// Keeps the `a11y` webhook field under the byte cap (AC-1): snippets are
+// dropped first, then whole page results from the end, and the payload is
+// marked truncated.
+function capA11yPayload(report: A11yRawReport, maxBytes: number): A11yRawReport {
+  const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8');
+  if (size(report) <= maxBytes) return report;
+  const capped: A11yRawReport = {
+    ...report,
+    truncated: true,
+    results: report.results.map((result) => ({
+      ...result,
+      violations: result.violations.map((rule) => ({ ...rule, nodes: rule.nodes.map((n) => ({ ...n, html: '' })) })),
+      incomplete: result.incomplete.map((rule) => ({ ...rule, nodes: rule.nodes.map((n) => ({ ...n, html: '' })) })),
+    })),
+  };
+  while (capped.results.length > 0 && size(capped) > maxBytes) capped.results.pop();
+  return capped;
+}
+
 async function sendWebhook(projectId: string | undefined, payload: any) {
   const testCaseId = payload.test_case_id || (payload.timeline && payload.timeline[0]?.test_case_id);
   
-  // Automatically retrieve test_cycle_id from execution queue metadata
+  // Retrieve test_cycle_id and batch_id (spec 0012) from execution queue metadata
   if (payload.execution_id) {
     const execution = executionQueue.getExecution(payload.execution_id);
     if (execution && execution.metadata.testCycleId) {
       payload.test_cycle_id = execution.metadata.testCycleId;
     }
+    if (execution && execution.metadata.batchId) {
+      payload.batch_id = execution.metadata.batchId;
+    }
   }
 
-  console.log(`[Webhook DEBUG] sendWebhook invoked. projectId: "${projectId}", testCaseId: "${testCaseId}", event: "${payload.event}", testCycleId: "${payload.test_cycle_id}"`);
+  console.log(`[Webhook DEBUG] sendWebhook invoked. projectId: "${projectId}", testCaseId: "${testCaseId}", event: "${payload.event}", testCycleId: "${payload.test_cycle_id}", batchId: "${payload.batch_id}"`);
   
   if (!projectId || projectId === 'demo-project') {
     console.warn(`[Webhook DEBUG] Aborting webhook send because projectId is invalid: "${projectId}"`);
@@ -113,7 +222,7 @@ export class ExecutionEngine {
   private static sharedContext: any = null;
   private static sharedPage: Page | null = null;
   private static activeBrowserType: string | null = null;
-  private static currentTestCycleId: string | null = null;
+  private static currentBatchId: string | null = null;
 
   private browser: Browser | null = null;
   private page: Page | null = null;
@@ -174,9 +283,27 @@ export class ExecutionEngine {
     const traceDir = path.join(artifactDir, 'trace');
     const storageStatePath = path.join(process.cwd(), 'public', 'artifacts', projectId || 'default', 'storage_state.json');
     let harvestConfig: { settings: HarvestSettings; source: string | null } = { settings: HARVEST_OFF, source: null };
+    let a11yConfig: A11yRunConfig = a11yOff('not_read');
+    // Results of every attempt in this run, so caps and path dedupe span retries.
+    // Null until a scan actually ran: no `a11y` field then means scan_error.
+    let a11yReport: A11yRawReport | null = null;
+    // The fields every `completed` webhook carries (spec 0011).
+    const a11yFields = (): Record<string, unknown> => {
+      const fields: Record<string, unknown> = a11yConfig.echo
+        ? { a11y_settings: a11yConfig.echo }
+        : { a11y_settings_error: a11yConfig.error || 'unknown' };
+      if (a11yConfig.settings.enabled && a11yReport) {
+        fields.a11y = capA11yPayload(a11yReport, a11yConfig.payloadMaxBytes);
+      }
+      return fields;
+    };
 
     try {
       executionQueue.startExecution(executionId);
+
+      // Read once, before the started webhook and outside the retry loop, so
+      // every completed webhook below can carry the result.
+      a11yConfig = await loadA11y(projectId, testCaseId);
 
       // 1. Trigger Started Webhook
       await sendWebhook(projectId, {
@@ -207,10 +334,11 @@ export class ExecutionEngine {
       while (!success && retryCount <= maxRetries) {
         try {
           const currentBrowserType = execution.metadata.browser || 'chromium';
-          const testCycleId = execution.metadata.testCycleId || null;
+          // Spec 0012, AC-4: the context is shared only within one batch.
+          const batchId = execution.metadata.batchId || null;
 
-          if (ExecutionEngine.currentTestCycleId !== testCycleId) {
-            // Close previous context and page if starting a different cycle or switching back to single runs
+          if (ExecutionEngine.currentBatchId !== batchId) {
+            // Close previous context and page if starting a different batch or switching back to single runs
             if (ExecutionEngine.sharedPage) {
               await ExecutionEngine.sharedPage.close().catch(() => {});
             }
@@ -219,7 +347,7 @@ export class ExecutionEngine {
             }
             ExecutionEngine.sharedPage = null;
             ExecutionEngine.sharedContext = null;
-            ExecutionEngine.currentTestCycleId = testCycleId;
+            ExecutionEngine.currentBatchId = batchId;
           }
 
           let isBrowserHealthy = false;
@@ -905,6 +1033,17 @@ export class ExecutionEngine {
             }
           }
 
+          // Spec 0011, AC-1: during the test the recorder only notes settled URLs;
+          // axe runs after the test's own steps, in the finally below.
+          let a11yRecorder: A11yRecorder | null = null;
+          if (a11yConfig.settings.enabled) {
+            try {
+              a11yRecorder = startA11yRecorder(activePage);
+            } catch (e) {
+              a11yRecorder = null;
+            }
+          }
+
           try {
             await asyncFunc(executionContext);
 
@@ -967,6 +1106,28 @@ export class ExecutionEngine {
             }
           } finally {
             if (harvestSession) await harvestSession.stop().catch(() => {});
+
+            // Scan the recorded pages again in the same signed in context. Never
+            // throws, so a scan problem can't change the run's result (AC-2).
+            if (a11yRecorder) {
+              const previous: A11yRawReport = a11yReport
+                ? { ...a11yReport, status: 'succeeded', error: null }
+                : emptyA11yReport(a11yConfig.settings.tags);
+              try {
+                const urls = a11yRecorder.stop();
+                a11yReport = await scanPages({
+                  context,
+                  urls,
+                  settings: a11yConfig.settings,
+                  previous,
+                  redact: [username, password],
+                  log: (message) => console.warn(message),
+                });
+              } catch (e: any) {
+                console.warn('[A11Y] Scan failed:', e?.message || e);
+                a11yReport = { ...previous, status: 'failed', error: 'scan_error' };
+              }
+            }
 
             // Restore original environment variables
             if (origEnvUsername === undefined) delete process.env.TARGET_USERNAME;
@@ -1043,8 +1204,8 @@ export class ExecutionEngine {
       }
 
       // Close page and context only if NOT running in a batch
-      const testCycleId = execution.metadata.testCycleId || null;
-      if (!testCycleId) {
+      const batchId = execution.metadata.batchId || null;
+      if (!batchId) {
         if (page) {
           await page.close().catch(() => {});
         }
@@ -1054,7 +1215,7 @@ export class ExecutionEngine {
         ExecutionEngine.sharedPage = null;
         ExecutionEngine.sharedContext = null;
       } else {
-        console.log(`[ExecutionEngine] Batch cycle ${testCycleId} active: keeping context open.`);
+        console.log(`[ExecutionEngine] Batch ${batchId} active: keeping context open.`);
       }
 
       // Scan and register the WebM video artifact
@@ -1094,7 +1255,8 @@ export class ExecutionEngine {
         timeline: finalExecution?.timeline || [],
         screenshots: finalExecution?.artifacts.screenshots || [],
         logs: objectRepositoryLogs(finalExecution?.artifacts.logs),
-        harvest: executionQueue.takeHarvest(executionId).slice(0, harvestConfig.settings.maxPages)
+        harvest: executionQueue.takeHarvest(executionId).slice(0, harvestConfig.settings.maxPages),
+        ...a11yFields(),
       });
 
       wsManager.broadcast({
@@ -1196,7 +1358,8 @@ export class ExecutionEngine {
         timeline: finalExecution?.timeline || [],
         screenshots: finalExecution?.artifacts.screenshots || [],
         logs: objectRepositoryLogs(finalExecution?.artifacts.logs),
-        harvest: executionQueue.takeHarvest(executionId).slice(0, harvestConfig.settings.maxPages)
+        harvest: executionQueue.takeHarvest(executionId).slice(0, harvestConfig.settings.maxPages),
+        ...a11yFields(),
       });
 
       wsManager.broadcast({

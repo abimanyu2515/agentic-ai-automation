@@ -222,6 +222,14 @@ class ExecutionAgent(BaseAgent):
             project_config=self.project_config,
         )
 
+        # Spec 0011, AC-1: the runner scans the pages each test visits when the
+        # project and the global switch allow it. AccessibilityAgent reads the same switch.
+        from backend.services.accessibility_service import AccessibilityService
+        try:
+            self.runner.a11y_scan = AccessibilityService().scan_enabled(self.project_config)
+        except AttributeError:
+            pass  # A test double that does not take the flag.
+
         # Execute using the queue manager
         runner = _MarkerCapturingRunner(self.runner)
         qm = BatchQueueManager(runner=runner, on_log=self.on_log, retries=not is_rerun)

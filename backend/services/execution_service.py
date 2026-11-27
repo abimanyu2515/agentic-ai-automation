@@ -31,10 +31,15 @@ def emit_execution_completed(project_id: UUID, execution_result: ExecutionResult
             logging.error(f"[EventBus] Listener error on ExecutionCompleted: {err}")
 
 
+_A11Y_GATE_MODES = ("off", "warn", "block")
+_A11Y_BLOCK_SEVERITIES = ("critical", "serious")
+
+
 class ExecutionService:
-    def __init__(self, analysis_service=None, bug_report_service=None):
+    def __init__(self, analysis_service=None, bug_report_service=None, accessibility_service=None):
         self._analysis_service = analysis_service
         self._bug_report_service = bug_report_service
+        self._accessibility_service = accessibility_service
 
     @property
     def repo(self):
@@ -57,6 +62,112 @@ class ExecutionService:
 
             self._bug_report_service = BugReportService(project_repo=self.repo)
         return self._bug_report_service
+
+    @property
+    def accessibility_service(self):
+        """Builds and gates accessibility reports, as AccessibilityAgent does in graph runs."""
+        if self._accessibility_service is None:
+            from backend.services.accessibility_service import AccessibilityService
+
+            self._accessibility_service = AccessibilityService(project_repo=self.repo)
+        return self._accessibility_service
+
+    def apply_accessibility(self, project_id: UUID, result: ExecutionResult, raw, *, enabled: bool | None = None,
+                            test_case=None, background_tasks=None):
+        """Spec 0011, AC-1, AC-2, AC-6: the batch and workspace twin of
+        AccessibilityAgent plus BugReportingAgent's accessibility loop. Builds,
+        gates, and saves the run's report, then drafts its bugs. Pass the saved
+        result, so the gate uses the stored snapshot. Never raises.
+
+        With `background_tasks` the report is saved and gated with the axe text
+        now, and the LLM explanation and the bug drafts (which quote it) run
+        after the response, so a webhook never waits on the LLM."""
+        try:
+            report = self.accessibility_service.process(
+                project_id, result, raw, enabled=enabled, enrich=background_tasks is None,
+            )
+        except Exception:
+            logger.exception("Accessibility processing failed: execution_id=%s", result.id)
+            return None
+        if background_tasks is not None:
+            background_tasks.add_task(self._enrich_and_draft_accessibility, project_id, report, result, test_case)
+            return report
+        # draft_from_accessibility never raises and only drafts for a succeeded scan.
+        self.bug_report_service.draft_from_accessibility(project_id, report, result, test_case)
+        return report
+
+    def _enrich_and_draft_accessibility(self, project_id: UUID, report, result: ExecutionResult, test_case) -> None:
+        """The after response half of `apply_accessibility`. Never raises."""
+        report = self.accessibility_service.enrich_saved(report, result)
+        self.bug_report_service.draft_from_accessibility(project_id, report, result, test_case)
+
+    def _resolve_workspace_snapshot(self, project_id: UUID, exec_id: UUID, payload: dict) -> dict | None:
+        """Spec 0011, *Workspace run settings* step 3: the snapshot of a workspace
+        run, which has no backend side start. A saved snapshot wins; otherwise
+        it is built from the project now, with the engine's echoed gate settings
+        overlaid. None when the project no longer exists."""
+        from backend.services.project_configuration import ProjectConfigurationError, capture_project_snapshot
+
+        try:
+            saved = self.repo.get_execution_result(project_id, exec_id)
+        except Exception:
+            logger.warning("Saved execution could not be read, building its snapshot: execution_id=%s", exec_id)
+            self._rollback()
+            saved = None
+        if saved is not None and saved.project_config_snapshot:
+            return dict(saved.project_config_snapshot)
+
+        try:
+            project = self.repo.get_project(project_id)
+        except Exception:
+            logger.warning("Project could not be read for the run snapshot: project_id=%s", project_id)
+            self._rollback()
+            project = None
+        if project is None:
+            return None
+        try:
+            snapshot = capture_project_snapshot(project)
+        except ProjectConfigurationError:
+            logger.warning("Project not ready at finalize, snapshot taken without checks: project_id=%s", project_id)
+            snapshot = capture_project_snapshot(project, require_ready=False)
+
+        echo = payload.get("a11y_settings")
+        if not isinstance(echo, dict):
+            return snapshot
+        # Only exact values replace the project's; `enabled` is never written here.
+        for field, key, allowed in (
+            ("gate_mode", "a11y_gate_mode", _A11Y_GATE_MODES),
+            ("block_severity", "a11y_block_severity", _A11Y_BLOCK_SEVERITIES),
+        ):
+            value = echo.get(field)
+            if isinstance(value, str) and value in allowed:
+                snapshot[key] = value
+            else:
+                logger.warning("a11y_settings field ignored: %s", field)
+        return snapshot
+
+    def _rollback(self) -> None:
+        try:
+            self.repo.rollback()
+        except Exception:
+            logger.debug("Repository rollback failed", exc_info=True)
+
+    @staticmethod
+    def _echoed_scan_decision(payload: dict, execution_id) -> bool | None:
+        """AC-8, step 6 and 7: the engine's own scan decision, or None to use the snapshot."""
+        echo = payload.get("a11y_settings")
+        if isinstance(echo, dict):
+            enabled = echo.get("enabled")
+            if isinstance(enabled, bool):
+                return enabled
+            logger.warning("a11y_settings field ignored: enabled")
+            return None
+        error = payload.get("a11y_settings_error")
+        if error:
+            logger.warning("a11y settings read failed in engine: %s (execution_id=%s)", error, execution_id)
+        else:
+            logger.warning("no a11y_settings in completed webhook (older engine?): execution_id=%s", execution_id)
+        return None
 
     def _triage(self, project_id: UUID, result: ExecutionResult, test_case=None) -> None:
         """Run the log analyser on a failed result before it is saved, then draft a
@@ -126,8 +237,12 @@ class ExecutionService:
         background_tasks=None,
         *,
         enforce_project_scope: bool = True,
+        test_cycle_id: UUID | None = None,
     ) -> UUID:
-        """Run the existing sequential batch workflow and expose its event stream."""
+        """Run the existing sequential batch workflow and expose its event stream.
+
+        Spec 0012: every run of the batch is saved with the returned `batch_id`,
+        and with `test_cycle_id` when the caller checked a real cycle (AC-1, AC-2)."""
         from threading import Thread
         from backend.models.batch_context import BatchContext, QueueItem
         from backend.models.execution_result import ExecutionStatus
@@ -148,7 +263,11 @@ class ExecutionService:
 
         batch_id = uuid4()
         batch_id_text = str(batch_id)
-        events: list[dict] = []
+        # Spec 0012, AC-12, AC-13: the log is never empty and names its project,
+        # so the gate can answer for a batch with no saved run yet.
+        events: list[dict] = [
+            {"status": "Started", "project_id": str(project_id), "log": "Initializing batch queue runner..."}
+        ]
         active_batch_events[batch_id_text] = events
         renderer = ObjectRepositoryService(project_repo=self.repo).renderer()
         queue = []
@@ -175,7 +294,6 @@ class ExecutionService:
         context = BatchContext(
             batch_id=batch_id_text, project_id=project_id, queue=queue, project_config=project_config,
         )
-        events.append({"status": "Started", "log": "Initializing batch queue runner..."})
 
         def append_event(status: str, message: str, current_item=None) -> None:
             total = len(context.queue)
@@ -222,11 +340,14 @@ class ExecutionService:
                         case.scenario_id,
                         name=f"batch-jira-start-{case.id}",
                     )
-                manager = BatchQueueManager(repo=self.repo, runner=PlaywrightRunner(), on_log=on_runner_log)
+                # Spec 0011, AC-1: batch runs scan like graph runs, from the run snapshot.
+                runner = PlaywrightRunner(a11y_scan=self.accessibility_service.scan_enabled(project_config))
+                manager = BatchQueueManager(repo=self.repo, runner=runner, on_log=on_runner_log)
                 manager.run_batch(context)
 
                 from backend.agents.execution_agent import _STATUS_MAP
                 from backend.models.test_case import TestCaseStatus
+                from backend.services.accessibility_service import read_a11y_file
                 from backend.services.object_repository_harvest import read_harvest_file
                 from backend.services.playwright_runner import ARTIFACTS_ROOT
                 from backend.services.report_service import ReportService
@@ -240,7 +361,8 @@ class ExecutionService:
                     screenshot = artifacts.get("screenshots") or []
                     result = ExecutionResult(
                         test_case_id=case.id,
-                        test_cycle_id=batch_id,
+                        test_cycle_id=test_cycle_id,
+                        batch_id=batch_id,
                         status=(
                             ExecutionStatus(item.status)
                             if item.status in {status.value for status in ExecutionStatus}
@@ -278,6 +400,13 @@ class ExecutionService:
                         result.id,
                         read_harvest_file(ARTIFACTS_ROOT / str(item.testcase_id)),
                     )
+                    # Spec 0011: the saved copy carries the stored snapshot. A skipped
+                    # item never ran, so its folder may hold an older run's a11y.json.
+                    saved = self._saved_or(project_id, result)
+                    raw = None if result.status == ExecutionStatus.SKIPPED else read_a11y_file(
+                        ARTIFACTS_ROOT / str(item.testcase_id)
+                    )
+                    self.apply_accessibility(project_id, saved, raw, test_case=case)
                     report_service.compile_reports_with_engine_selection(project_id, result)
 
                     from backend.services.jira_sync_service import sync_execution_finished
@@ -298,6 +427,54 @@ class ExecutionService:
         else:
             Thread(target=run, name=f"chat-batch-{batch_id_text}", daemon=True).start()
         return batch_id
+
+    def _saved_or(self, project_id: UUID, result: ExecutionResult) -> ExecutionResult:
+        """The persisted copy of a just saved result, or the result itself if the read fails."""
+        try:
+            saved = self.repo.get_execution_result(project_id, result.id)
+        except Exception:
+            logger.warning("Saved execution could not be read back: execution_id=%s", result.id)
+            self._rollback()
+            saved = None
+        return result if saved is None else saved
+
+    @staticmethod
+    def batch_log_state(project_id: UUID, batch_id: UUID | str) -> str | None:
+        """Spec 0012, AC-7, AC-12, AC-13: `running` or `ended` for this project's
+        backend batch log, or None when there is no log (a workspace batch, or a
+        batch from before a restart) or the log belongs to another project."""
+        events = active_batch_events.get(str(batch_id))
+        if not events or events[0].get("project_id") != str(project_id):
+            return None
+        return "ended" if events[-1].get("status") in ("Completed", "Error") else "running"
+
+    @staticmethod
+    def batch_in_progress(project_id: UUID, batch_id: UUID | str) -> bool:
+        """Spec 0012, AC-7: whether this process is still running this project's batch."""
+        return ExecutionService.batch_log_state(project_id, batch_id) == "running"
+
+    def cycle_in_project(self, project_id: UUID, cycle_id: UUID) -> bool:
+        """Whether a test cycle exists and its release belongs to this project."""
+        try:
+            cycle = self.repo.get_test_cycle(cycle_id)
+            if cycle is None:
+                return False
+            release = self.repo.get_release(cycle.release_id)
+        except Exception:
+            logger.warning("Test cycle could not be read: cycle_id=%s", cycle_id)
+            self._rollback()
+            return False
+        return release is not None and release.project_id == project_id
+
+    def _saved_batch_id(self, project_id: UUID, exec_id: UUID) -> UUID | None:
+        """The batch id a run was saved with first, if any (spec 0012, AC-5)."""
+        try:
+            saved = self.repo.get_execution_result(project_id, exec_id)
+        except Exception:
+            logger.warning("Saved execution could not be read for its batch id: execution_id=%s", exec_id)
+            self._rollback()
+            return None
+        return saved.batch_id if saved is not None else None
 
     @staticmethod
     def _queue_failure_knowledge(project_id: UUID, result: ExecutionResult) -> None:
@@ -445,13 +622,36 @@ class ExecutionService:
         else:
             status = ExecutionStatus.ERROR
 
+        # Spec 0012, AC-5: a test_cycle_id must be a real cycle of this project,
+        # on both stores. Anything else is saved as null with a warning.
         test_cycle_id_str = payload.get("test_cycle_id")
         test_cycle_id = None
         if test_cycle_id_str and test_cycle_id_str != "undefined" and test_cycle_id_str != "null":
             try:
-                test_cycle_id = uuid.UUID(test_cycle_id_str)
+                test_cycle_id = uuid.UUID(str(test_cycle_id_str))
             except ValueError:
-                pass
+                test_cycle_id = None
+            if test_cycle_id is None or not self.cycle_in_project(project_id, test_cycle_id):
+                logger.warning(
+                    "Webhook test_cycle_id dropped, no such cycle in this project: execution_id=%s test_cycle_id=%s",
+                    exec_id, test_cycle_id_str,
+                )
+                test_cycle_id = None
+
+        # Spec 0012, AC-5: an invalid batch_id is saved as null, and a batch id
+        # saved first is kept when the webhook repeats.
+        batch_id = None
+        batch_id_raw = payload.get("batch_id")
+        if batch_id_raw:
+            try:
+                batch_id = uuid.UUID(str(batch_id_raw))
+            except ValueError:
+                logger.warning(
+                    "Webhook batch_id dropped, not a UUID: execution_id=%s batch_id=%r", exec_id, batch_id_raw,
+                )
+        saved_batch_id = self._saved_batch_id(project_id, exec_id)
+        if saved_batch_id is not None:
+            batch_id = saved_batch_id
 
         result = ExecutionResult(
             id=exec_id,
@@ -465,12 +665,18 @@ class ExecutionService:
             browser_version=payload.get("browser_version"),
             executed_at=datetime.now(timezone.utc),
             test_cycle_id=test_cycle_id,
+            batch_id=batch_id,
             timeline=payload.get("timeline", []),
             screenshots=payload.get("screenshots", [])
         )
 
         # Attach raw webhook payload so report listener can access timeline/screenshots
         result._raw_payload = payload
+
+        # Spec 0011: a workspace run has no backend side start, so its snapshot is
+        # resolved here, before triage and bug drafting read it. A repeated
+        # webhook reuses the snapshot saved the first time.
+        result.project_config_snapshot = self._resolve_workspace_snapshot(project_id, exec_id, payload)
 
         # 0. Triage a failed run with the log analyser: inline before saving, or
         #    after the response when the caller passes background tasks.
@@ -495,9 +701,30 @@ class ExecutionService:
         if payload.get("harvest") is not None:
             self.apply_object_repository_harvest(project_id, result.test_case_id, exec_id, payload.get("harvest"))
 
+        tc = self.repo.get_test_case(test_case_id)
+
+        # 1d. Accessibility report and its bugs (spec 0011), from the persisted
+        #     copy so the gate always uses the snapshot that was stored first.
+        if result.project_config_snapshot is None:
+            logger.warning(
+                "Project gone, accessibility processing skipped: project_id=%s execution_id=%s",
+                project_id, exec_id,
+            )
+        else:
+            saved = self._saved_or(project_id, result)
+            saved._raw_payload = payload
+            self.apply_accessibility(
+                project_id,
+                saved,
+                payload.get("a11y"),
+                enabled=self._echoed_scan_decision(payload, exec_id),
+                test_case=tc,
+                background_tasks=background_tasks,
+            )
+            result = saved
+
         # 2. Update at-a-glance run outcome status on the TestCase model.
         # Human approval and evaluation metadata fields remain completely IMMUTABLE.
-        tc = self.repo.get_test_case(test_case_id)
         if tc:
             if status == ExecutionStatus.PASSED:
                 tc.status = TestCaseStatus.PASSED

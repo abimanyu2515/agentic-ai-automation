@@ -933,6 +933,9 @@ def test_batch_route_attributes_each_harvest_file_to_its_own_test_case(repo, ser
     pages = {str(first.id): "/first", str(second.id): "/second"}
 
     class HarvestingRunner:
+        def __init__(self, **kwargs):
+            pass
+
         def run(self, script, run_id, **kwargs):
             run_dir = tmp_path / "artifacts" / run_id
             run_dir.mkdir(parents=True, exist_ok=True)

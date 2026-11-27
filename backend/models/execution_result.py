@@ -35,7 +35,10 @@ class ExecutionResult(BaseModel):
     trace_path: str | None = None
     browser_version: str | None = None
     executed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # A real test cycle of this project only, never a batch id (spec 0012).
     test_cycle_id: UUID | None = None
+    # Spec 0012: shared by every run of one batch; set by whoever starts the batch.
+    batch_id: UUID | None = None
     timeline: list[dict] | None = None
     screenshots: list[str] | None = None
     # Triage and Analysis Fields (populated by ExecutionAnalysisAgent)

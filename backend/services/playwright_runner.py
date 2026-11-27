@@ -52,6 +52,9 @@ from pydantic import BaseModel
 
 ARTIFACTS_ROOT = Path(__file__).parent.parent / "playwrightt" / "artifacts"
 _HARVEST_SESSION_MODULE = Path(__file__).parent.parent / "playwrightt" / "lib" / "object-harvest-session"
+_A11Y_SESSION_MODULE = Path(__file__).parent.parent / "playwrightt" / "lib" / "a11y-scan-session"
+# Room left after the axe budget for opening and closing the scan pages.
+_A11Y_HOOK_MARGIN_MS = 20000
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 _IS_WINDOWS = platform.system() == "Windows"
@@ -136,8 +139,10 @@ def _kill_process_tree(pid: int) -> None:
 
 
 class PlaywrightRunner:
-    def __init__(self, timeout_seconds: int = 60):
+    def __init__(self, timeout_seconds: int = 60, a11y_scan: bool = False):
         self.timeout_seconds = timeout_seconds
+        # Spec 0011, AC-1: only real executions scan; script validation runs don't.
+        self.a11y_scan = a11y_scan
 
     def run(
         self,
@@ -173,6 +178,14 @@ class PlaywrightRunner:
         if harvest_path.exists():
             try:
                 harvest_path.unlink()
+            except OSError:
+                pass
+
+        # Same for the last run's accessibility results (spec 0011, AC-1).
+        a11y_path = run_dir / "a11y.json"
+        if a11y_path.exists():
+            try:
+                a11y_path.unlink()
             except OSError:
                 pass
 
@@ -250,6 +263,21 @@ const __objrepoReadHarvest = (): any[] => {
 const __objrepoHarvested = new Set<string>(__objrepoReadHarvest().map((s) => s && s.url).filter(Boolean));
 let __objrepoHarvest: { stop(): Promise<void> } | null = null;
 
+// Accessibility scan (spec 0011): URLs are only recorded during the test, then
+// scanned with axe in afterEach on a timeout of its own, into a11y.json.
+const __a11yFile = __runnerPath.join(__dirname, 'a11y.json');
+const __a11ySettings = {
+  enabled: process.env.A11Y_SCAN === '1',
+  tags: String(process.env.A11Y_TAGS || 'wcag2a,wcag2aa,wcag21a,wcag21aa,wcag22aa').split(',').filter(Boolean),
+  maxPages: Number(process.env.A11Y_MAX_PAGES) || 10,
+  budgetMs: Number(process.env.A11Y_PAGE_BUDGET_MS) || 30000,
+  maxNodesPerRule: Number(process.env.A11Y_MAX_NODES) || 50,
+  // Element screenshots of critical and serious violations (spec 0011, AC-7).
+  maxShots: process.env.A11Y_MAX_SHOTS === undefined ? 10 : Number(process.env.A11Y_MAX_SHOTS) || 0,
+  shotDir: __runnerPath.join(__dirname, 'a11y-shots'),
+};
+let __a11yRecorder: { stop(): string[] } | null = null;
+
 __runnerTest.beforeEach(async ({ page }) => {
   if (!__runnerFs.existsSync(__runnerScreenshotsDir)) {
     __runnerFs.mkdirSync(__runnerScreenshotsDir, { recursive: true });
@@ -277,6 +305,14 @@ __runnerTest.beforeEach(async ({ page }) => {
       });
     } catch (e) {
       __objrepoHarvest = null;
+    }
+  }
+
+  if (__a11ySettings.enabled) {
+    try {
+      __a11yRecorder = __a11yStartRecorder(page);
+    } catch (e) {
+      __a11yRecorder = null;
     }
   }
 
@@ -324,18 +360,47 @@ __runnerTest.beforeEach(async ({ page }) => {
   };
 });
 
-__runnerTest.afterEach(async () => {
+__runnerTest.afterEach(async ({ page }, testInfo) => {
   const harvest = __objrepoHarvest;
   __objrepoHarvest = null;
   if (harvest) await harvest.stop().catch(() => {});
+
+  const recorder = __a11yRecorder;
+  __a11yRecorder = null;
+  if (!recorder) return;
+  try {
+    const urls = recorder.stop();
+    // The scan gets its own time on top of the test's, so it never times the test out.
+    testInfo.setTimeout(testInfo.timeout + __a11ySettings.budgetMs + __A11Y_HOOK_MARGIN_MS);
+    const report = await __a11yScanPages({
+      context: page.context(),
+      urls,
+      settings: __a11ySettings,
+      previous: __a11yReadFile(__a11yFile, __a11ySettings.tags),
+      redact: [process.env.TARGET_USERNAME, process.env.TARGET_PASSWORD],
+    });
+    __a11yWriteFile(__a11yFile, report);
+  } catch (e) {
+    const failed = __a11yReadFile(__a11yFile, __a11ySettings.tags);
+    failed.status = 'failed';
+    failed.error = 'scan_error';
+    __a11yWriteFile(__a11yFile, failed);
+  }
 });
 """
         harvest_module = os.path.relpath(_HARVEST_SESSION_MODULE, run_dir).replace("\\", "/")
         if not harvest_module.startswith("."):
             harvest_module = "./" + harvest_module
+        a11y_module = os.path.relpath(_A11Y_SESSION_MODULE, run_dir).replace("\\", "/")
+        if not a11y_module.startswith("."):
+            a11y_module = "./" + a11y_module
         harvest_header = (
             f"import {{ startHarvest as __objrepoStartHarvest }} from {json.dumps(harvest_module)};\n"
             f"const __objrepoHarvestSource = {self._harvest_source_literal()};\n"
+            "import { startA11yRecorder as __a11yStartRecorder, scanPages as __a11yScanPages, "
+            "readA11yFile as __a11yReadFile, writeA11yFile as __a11yWriteFile } "
+            f"from {json.dumps(a11y_module)};\n"
+            f"const __A11Y_HOOK_MARGIN_MS = {_A11Y_HOOK_MARGIN_MS};\n"
         )
         spec_content = harvest_header + screenshot_wrapper + "\n" + spec_content
 
@@ -363,7 +428,11 @@ __runnerTest.afterEach(async () => {
             encoding="utf-8",
         )
 
+        a11y_env = self._a11y_env() if self.a11y_scan else {"A11Y_SCAN": "0"}
         hard_timeout = self.timeout_seconds + 15
+        if a11y_env.get("A11Y_SCAN") == "1":
+            # The afterEach scan runs past the test timeout by at most its budget.
+            hard_timeout += (int(a11y_env["A11Y_PAGE_BUDGET_MS"]) + _A11Y_HOOK_MARGIN_MS) // 1000
         args = [npx, "playwright", "test", "--config", str(config_path), "--trace=on"]
         
         # Load vault credentials into child process environment
@@ -371,6 +440,7 @@ __runnerTest.afterEach(async () => {
         if "PLAYWRIGHT_CHROMIUM_CHANNEL" in child_env:
             del child_env["PLAYWRIGHT_CHROMIUM_CHANNEL"]
         child_env.update(self._harvest_env())
+        child_env.update(a11y_env)
         # Spec 0001, AC-4: TARGET_URL comes only from the run's project snapshot,
         # never from a global value inherited from the server's environment.
         child_env.pop("TARGET_URL", None)
@@ -484,6 +554,26 @@ __runnerTest.afterEach(async () => {
             }
         except Exception:
             return {"OBJREPO_HARVEST": "0"}
+
+    @staticmethod
+    def _a11y_env() -> dict[str, str]:
+        """Accessibility scan settings for the generated spec; any failure means off."""
+        try:
+            from backend.config.settings import get_settings
+
+            config = get_settings().accessibility
+            if not config.enabled:
+                return {"A11Y_SCAN": "0"}
+            return {
+                "A11Y_SCAN": "1",
+                "A11Y_TAGS": ",".join(config.wcag_tags),
+                "A11Y_MAX_PAGES": str(config.max_pages),
+                "A11Y_PAGE_BUDGET_MS": str(config.page_budget_ms),
+                "A11Y_MAX_SHOTS": str(config.max_element_screenshots),
+                "A11Y_MAX_NODES": str(config.max_nodes_per_rule),
+            }
+        except Exception:
+            return {"A11Y_SCAN": "0"}
 
     @staticmethod
     def _harvest_source_literal() -> str:

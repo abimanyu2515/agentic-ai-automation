@@ -4,12 +4,32 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 import os
 import logging
+import html
+import urllib.parse
 
 from backend.models.execution_result import ExecutionResult
 from backend.repository.project_repository import ProjectRepository
 from backend.config.report_config import ReportConfig
+from backend.services.accessibility_report_section import (
+    accessibility_html_section,
+    accessibility_template_context,
+    append_accessibility_junit,
+    draw_accessibility_pdf,
+    get_accessibility_report_by_execution,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _esc(value) -> str:
+    """Spec 0012, AC-14: HTML escape one value of the batch report."""
+    return html.escape("" if value is None else str(value), quote=True)
+
+
+def _attr_url(url: str) -> str:
+    """Spec 0012, AC-14: a URL attribute value. Its parts are already
+    `urllib.parse.quote`d; this escapes the whole for the attribute."""
+    return html.escape(url, quote=True)
 
 def map_timeline_event_to_step(event_data: dict, index: int, project_id: UUID, execution_id: UUID, test_case=None) -> dict:
     """
@@ -454,6 +474,10 @@ Example transformations:
             error = ET.SubElement(tc_el, "error", message="Execution Error")
             error.text = execution_result.error_message or "Tooling Error"
 
+        # Spec 0011, AC-14: the run's accessibility report, in every output.
+        a11y_report = get_accessibility_report_by_execution(project_id, execution_result.id)
+        append_accessibility_junit(root, a11y_report)
+
         tree = ET.ElementTree(root)
         tree.write(str(junit_path), encoding="utf-8", xml_declaration=True)
 
@@ -884,6 +908,8 @@ Example transformations:
                 {summary_outcome_text}
             </div>
         </div>
+
+        {accessibility_html_section(a11y_report)}
     </div>
 
     <script>
@@ -1058,6 +1084,11 @@ Example transformations:
                 fontname="helvetica",
                 color=(0.15, 0.15, 0.15)
             )
+
+            try:
+                draw_accessibility_pdf(add_page, a11y_report)
+            except Exception:
+                logger.exception("Accessibility PDF section failed: execution_id=%s", execution_id_str)
 
             doc.save(str(pdf_path))
             doc.close()
@@ -1278,6 +1309,10 @@ Example transformations:
                 business_rules=[]  # Could be extracted from requirements in future
             )
             print("[ReportService] Step 11 - analyze_execution() completed")
+            # Spec 0011, AC-14: rendered by components/accessibility_section.html,
+            # so the HTML and the PDF made from it both carry the section.
+            a11y_report = get_accessibility_report_by_execution(project_id, execution_result.id)
+            context.accessibility = accessibility_template_context(a11y_report)
             print(f"[ExecutionAnalyzer] Analysis complete")
         
             # Initialize Professional Report Generator
@@ -1303,7 +1338,7 @@ Example transformations:
             
             # Generate JUnit XML (reuse existing logic)
             print("[ReportService] Step 16 - Generating JUnit XML")
-            junit_path = self._generate_junit_xml(execution_result, output_dir)
+            junit_path = self._generate_junit_xml(execution_result, output_dir, a11y_report=a11y_report)
             print("[ReportService] Step 17 - JUnit XML generated")
             
             # Save report paths to repository
@@ -1343,10 +1378,13 @@ Example transformations:
     def _generate_junit_xml(
         self,
         execution_result: ExecutionResult,
-        output_dir: Path
+        output_dir: Path,
+        a11y_report=None,
     ) -> Path:
         """
         Generate JUnit XML report (shared between legacy and professional engines).
+        The root is `testsuites`, holding this suite and the `accessibility`
+        suite (spec 0011, AC-14).
         """
         execution_id_str = str(execution_result.id)
         junit_path = output_dir / f"junit_{execution_id_str}.xml"
@@ -1368,7 +1406,10 @@ Example transformations:
             failure.set("message", execution_result.error_message or "Test failed")
             failure.text = execution_result.error_message or "Test failed"
         
-        tree = ET.ElementTree(testsuite)
+        root = ET.Element("testsuites")
+        root.append(testsuite)
+        append_accessibility_junit(root, a11y_report)
+        tree = ET.ElementTree(root)
         tree.write(str(junit_path), encoding="utf-8", xml_declaration=True)
         
         return junit_path
@@ -1556,16 +1597,9 @@ Example transformations:
         return {"batch_report_path": str(batch_html_path)}
 
     def compile_combined_batch_report_html(self, project_id: UUID, batch_id: UUID) -> str:
-        # 1. Fetch all executions for the project
-        all_execs = self.repo.list_execution_results(project_id)
-        
-        # 2. Filter for executions belonging to this batch_id (test_cycle_id)
-        batch_execs = [ex for ex in all_execs if ex.test_cycle_id == batch_id]
-        
-        if not batch_execs:
-            # Try string comparison as fallback
-            batch_execs = [ex for ex in all_execs if str(ex.test_cycle_id) == str(batch_id)]
-            
+        # Spec 0012, AC-8: the runs saved with this batch id in this project.
+        batch_execs = self.repo.get_execution_results_for_batch(project_id, batch_id)
+
         if not batch_execs:
             raise ValueError(f"No executions found for Batch ID: {batch_id}")
             
@@ -1620,10 +1654,12 @@ Example transformations:
                 
             # mapped_steps = self.enrich_steps_with_llm(mapped_steps, tc)
 
-            import urllib.parse
             video_tag = ""
             if ex.video_path:
-                video_url = f"/api/v1/projects/{project_id}/executions/{ex.id}/video?path={urllib.parse.quote(ex.video_path)}"
+                video_url = _attr_url(
+                    f"/api/v1/projects/{project_id}/executions/{ex.id}/video?path="
+                    f"{urllib.parse.quote(ex.video_path, safe='')}"
+                )
                 video_tag = f"""
                 <div style="margin-top: 16px; margin-bottom: 24px; max-width: 480px;">
                     <div style="font-size: 11px; font-weight: bold; color: #64748b; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px;">Simulation Video</div>
@@ -1636,7 +1672,10 @@ Example transformations:
                 screenshot_tag = ""
                 if step["screenshot_url"]:
                     # Serve screenshot relative to the execution using unified route
-                    img_src = f"/api/artifacts/{ex.id}/screenshot/{step['screenshot_name']}"
+                    img_src = _attr_url(
+                        f"/api/artifacts/{ex.id}/screenshot/"
+                        f"{urllib.parse.quote(str(step['screenshot_name']), safe='')}"
+                    )
                     screenshot_tag = f"""
                     <div class="step-image">
                         <img src="{img_src}" alt="Screenshot {idx + 1}" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;" />
@@ -1647,12 +1686,12 @@ Example transformations:
                     <div class="step-left" style="flex: 1.5;">
                         <div class="step-header" style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
                             <span class="step-num" style="background-color: #3b82f6; color: #ffffff; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;">Step {idx + 1}</span>
-                            <span class="step-title" style="font-weight: 600; color: #f8fafc; font-size: 14px;">{step['title']}</span>
+                            <span class="step-title" style="font-weight: 600; color: #f8fafc; font-size: 14px;">{_esc(step['title'])}</span>
                         </div>
                         <div class="step-details" style="display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #94a3b8;">
-                            <div><strong>Action:</strong> {step['action']}</div>
-                            <div><strong>Observation:</strong> {step['observation']}</div>
-                            <div><strong>Result:</strong> {step['result']}</div>
+                            <div><strong>Action:</strong> {_esc(step['action'])}</div>
+                            <div><strong>Observation:</strong> {_esc(step['observation'])}</div>
+                            <div><strong>Result:</strong> {_esc(step['result'])}</div>
                         </div>
                     </div>
                     <div class="step-right" style="flex: 1; text-align: right; min-width: 200px;">
@@ -1666,7 +1705,7 @@ Example transformations:
             status_color = "#10b981" if ex.status.value == "passed" else "#ef4444"
             error_banner = ""
             if ex.status.value in ("failed", "error") and ex.error_message:
-                escaped_err = ex.error_message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+                escaped_err = _esc(ex.error_message)
                 error_banner = f"""
                 <div style="background-color: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 16px; margin-bottom: 16px; color: #fca5a5; font-family: monospace; font-size: 12px; white-space: pre-wrap;">
                     {escaped_err}
@@ -1676,8 +1715,8 @@ Example transformations:
             sections_html.append(f"""
             <div class="testcase-section" style="margin-bottom: 48px; border-top: 1px solid #334155; padding-top: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                    <h2 style="margin: 0; font-size: 18px; color: #f8fafc;">Case {tc_idx + 1}: {tc_title}</h2>
-                    <span style="background-color: {status_color}; color: #ffffff; padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: bold; text-transform: uppercase;">{ex.status.value}</span>
+                    <h2 style="margin: 0; font-size: 18px; color: #f8fafc;">Case {tc_idx + 1}: {_esc(tc_title)}</h2>
+                    <span style="background-color: {status_color}; color: #ffffff; padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: bold; text-transform: uppercase;">{_esc(ex.status.value)}</span>
                 </div>
                 <div style="font-size: 13px; color: #64748b; margin-bottom: 16px;">
                     Duration: {ex.duration_seconds:.2f}s | Executed At: {ex.executed_at.strftime('%Y-%m-%d %H:%M:%S UTC')}
@@ -1694,7 +1733,7 @@ Example transformations:
         html_content = f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>Batch Execution Report - {batch_id}</title>
+    <title>Batch Execution Report - {_esc(batch_id)}</title>
     <style>
         body {{
             font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -1757,7 +1796,7 @@ Example transformations:
         <div class="header">
             <div class="header-title">
                 <h1>Batch Execution Report</h1>
-                <p>Batch Context ID: {batch_id} | Compiled At: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
+                <p>Batch Context ID: {_esc(batch_id)} | Compiled At: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
             </div>
         </div>
 

@@ -13,7 +13,7 @@ from sqlalchemy import or_, select
 
 from backend.database.db import SessionLocal
 from backend.database.db_models import BugReportDB
-from backend.models.bug_report import OPEN_STATUSES, BugReport, BugReportStatus
+from backend.models.bug_report import ACCESSIBILITY_CATEGORY, OPEN_STATUSES, BugReport, BugReportStatus
 from backend.repository.bug_report_repository import BugReportRepository
 
 
@@ -53,6 +53,8 @@ class PostgresBugReportRepository(BugReportRepository):
             "project_id": report.project_id,
             "execution_id": report.execution_id,
             "test_case_id": report.test_case_id,
+            "accessibility_report_id": report.accessibility_report_id,
+            "failure_category": report.failure_category,
             "status": report.status.value,
             "error_signature": report.error_signature,
             "jira_key": report.jira_key,
@@ -93,12 +95,35 @@ class PostgresBugReportRepository(BugReportRepository):
                     BugReportDB.error_signature == signature,
                     BugReportDB.status.in_([s.value for s in OPEN_STATUSES]),
                     BugReportDB.deleted_at.is_(None),
+                    # Spec 0011, AC-6: accessibility bugs are not functional matches.
+                    BugReportDB.failure_category.is_distinct_from(ACCESSIBILITY_CATEGORY),
                 )
                 .order_by(BugReportDB.created_at.desc())
                 .limit(1)
             )
             row = session.scalar(stmt)
             return _report(row) if row else None
+
+    def _a11y_by_signature(self, project_id: UUID, signature: str, open_only: bool) -> BugReport | None:
+        if not signature:
+            return None
+        with self._session() as session:
+            stmt = select(BugReportDB).where(
+                BugReportDB.project_id == project_id,
+                BugReportDB.failure_category == ACCESSIBILITY_CATEGORY,
+                BugReportDB.error_signature == signature,
+                BugReportDB.deleted_at.is_(None),
+            )
+            if open_only:
+                stmt = stmt.where(BugReportDB.status.in_([s.value for s in OPEN_STATUSES]))
+            row = session.scalar(stmt.order_by(BugReportDB.created_at.desc()).limit(1))
+            return _report(row) if row else None
+
+    def find_open_a11y_by_signature(self, project_id: UUID, signature: str) -> BugReport | None:
+        return self._a11y_by_signature(project_id, signature, open_only=True)
+
+    def find_latest_a11y_by_signature(self, project_id: UUID, signature: str) -> BugReport | None:
+        return self._a11y_by_signature(project_id, signature, open_only=False)
 
     def list_by_jira_key(self, jira_key: str) -> list[BugReport]:
         with self._session() as session:
