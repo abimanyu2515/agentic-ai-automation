@@ -85,7 +85,7 @@ import yaml
 import re
 import mimetypes
 from pathlib import Path
-from typing import Optional, Union, List
+from typing import Literal, Optional, Union, List
 from uuid import UUID
 import json
 import asyncio
@@ -171,7 +171,7 @@ from sqlalchemy.orm import Session
 from backend.dependencies.auth_dependencies import (
     authorize_project, check_permission, get_db, own_permissions, get_current_user, has_permission, install_access_log_filter,
     permitted_actions, require_jira_secret, require_project_access, require_project_permission,
-    require_workspace_secret, warn_missing_webhook_secrets, workspace_or_user, Caller,
+    require_workspace_secret, warn_missing_webhook_secrets, workspace_or_user, workspace_or_project_permission, Caller,
 )
 from backend.services.auth_service import hash_password, verify_password, create_access_token, create_refresh_token, decode_token
 from backend.services.audit_service import log_audit
@@ -182,6 +182,15 @@ from backend.schemas.token_usage_dto import ModelPriceRow, TokenUsageCallsPage, 
 from backend.schemas.bug_report_dto import BugReportDismiss, BugReportUpdate
 from backend.models.bug_report import BugReport, BugReportStatus
 from backend.services.bug_report_service import BugReportError, BugReportService
+from backend.models.accessibility import A11yBlockSeveritySetting, A11yGateModeSetting
+from backend.services.accessibility_service import AccessibilityService
+from backend.schemas.accessibility_dto import (
+    AccessibilityGateResponse,
+    AccessibilityScanPagesResponse,
+    AccessibilityScanRequest,
+    AccessibilityScanStartResponse,
+)
+from backend.services.accessibility_scan_service import AccessibilityScanError, AccessibilityScanService
 from backend.utils.crypto import encrypt_value
 from backend.database.db_models import UserDB, RoleDB, PermissionDB, RolePermissionDB, ProjectUserDB, RefreshTokenDB, AuditLogDB
 
@@ -199,6 +208,16 @@ logger = logging.getLogger("backend.project_creation")
 def get_bug_report_service() -> BugReportService:
     """Route dependency; tests override it with app.dependency_overrides."""
     return BugReportService()
+
+
+def get_accessibility_service() -> AccessibilityService:
+    """Route dependency; tests override it with app.dependency_overrides."""
+    return AccessibilityService()
+
+
+def get_accessibility_scan_service() -> AccessibilityScanService:
+    """Route dependency; tests override it with app.dependency_overrides."""
+    return AccessibilityScanService()
 
 
 # Windows Python installations may not register the JavaScript MIME type.
@@ -337,9 +356,25 @@ def on_startup():
         except Exception:
             logging.getLogger(__name__).exception("Chat startup recovery failed")
 
+    # Accessibility (spec 0011, AC-10): scans a restart left queued or running
+    # past the stale limit are closed as timed out.
+    try:
+        AccessibilityScanService().expire_stale()
+    except Exception:
+        logging.getLogger(__name__).exception("Closing stale accessibility scans failed")
+
     # Knowledge base (spec 0006): the one time old document migration, the
     # indexer worker, and the sweep of documents a restart left behind.
     knowledge_service.on_startup()
+
+    # Batch identity (spec 0012, AC-10): old JSON batch runs move their batch
+    # id out of test_cycle_id, once.
+    try:
+        moved = get_project_repository().run_batch_identity_migration_0012()
+        if moved:
+            logging.getLogger(__name__).info("Batch identity migration 0012 moved %s run(s)", moved)
+    except Exception:
+        logging.getLogger(__name__).exception("Batch identity migration 0012 failed")
 
     # Launch JIRA Sync Retry Worker loop in event loop
     from backend.services.jira_sync_service import jira_retry_worker
@@ -458,6 +493,9 @@ def resolve_project_response(p, all_projects=None) -> ProjectResponse:
         is_safe_test_environment=getattr(p, "is_safe_test_environment", False),
         bug_auto_submit=getattr(p, "bug_auto_submit", False),
         bug_auto_submit_min_confidence=getattr(p, "bug_auto_submit_min_confidence", 0.85),
+        a11y_enabled=getattr(p, "a11y_enabled", True),
+        a11y_gate_mode=getattr(p, "a11y_gate_mode", "warn"),
+        a11y_block_severity=getattr(p, "a11y_block_severity", "serious"),
         readiness=readiness_for_project(p, owner_projects),
     )
 
@@ -517,9 +555,13 @@ class ProjectUpdate(BaseModel):
     # Bug Reporting Agent: file drafts to Jira without review at or above this triage confidence.
     bug_auto_submit: bool | None = None
     bug_auto_submit_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Accessibility Agent (spec 0011, AC-13): a null leaves the value unchanged.
+    a11y_enabled: bool | None = None
+    a11y_gate_mode: A11yGateModeSetting | None = None
+    a11y_block_severity: A11yBlockSeveritySetting | None = None
 
 
-@app.get("/api/v1/projects", response_model=list[ProjectResponse])
+@app.get("/api/v1/projects",response_model=list[ProjectResponse])
 def list_projects():
     projects = project_service.list_projects()
     return [resolve_project_response(p, projects) for p in projects]
@@ -642,7 +684,13 @@ def update_project_settings(
         p.bug_auto_submit = data.bug_auto_submit
     if data.bug_auto_submit_min_confidence is not None:
         p.bug_auto_submit_min_confidence = data.bug_auto_submit_min_confidence
-    
+    if data.a11y_enabled is not None:
+        p.a11y_enabled = data.a11y_enabled
+    if data.a11y_gate_mode is not None:
+        p.a11y_gate_mode = data.a11y_gate_mode
+    if data.a11y_block_severity is not None:
+        p.a11y_block_severity = data.a11y_block_severity
+
     if data.target_username is not None or (data.target_password is not None and data.target_password != "" and data.target_password != "********"):
         from backend.services.vault_service import VaultService
         vs = VaultService()
@@ -2255,6 +2303,7 @@ def execute_batch(
     project_id: UUID,
     test_case_ids: list[UUID],
     background_tasks: BackgroundTasks,
+    test_cycle_id: UUID | None = None,
     user: UserDB = Depends(require_project_permission("Executions", "create")),
 ):
     from backend.services.execution_service import ExecutionService
@@ -2268,9 +2317,16 @@ def execute_batch(
     if any(test_case_id not in owned for test_case_id in unique_ids):
         raise HTTPException(status_code=404, detail="Test case not found")
 
+    # Spec 0012, AC-2: a cycle must be this project's, checked before anything
+    # is queued. Another project's cycle is a 404 too (spec 0009).
+    service = ExecutionService()
+    if test_cycle_id is not None and not service.cycle_in_project(project_id, test_cycle_id):
+        raise HTTPException(status_code=404, detail="Test cycle not found")
+
     try:
-        batch_id = ExecutionService().start_batch_run(
+        batch_id = service.start_batch_run(
             project_id, unique_ids, background_tasks, enforce_project_scope=False,
+            test_cycle_id=test_cycle_id,
         )
     except ProjectConfigurationError as exc:
         return JSONResponse(status_code=exc.status_code, content=exc.as_detail())
@@ -2279,8 +2335,25 @@ def execute_batch(
     return {"status": "started", "batch_id": str(batch_id)}
 
 
+UNTRACKED_BATCH_EVENT = {
+    "status": "Error",
+    "untracked": True,
+    "log": "This batch is not tracked on this server. It may belong to another project, or the server restarted.",
+}
+
+
 @app.get("/api/v1/projects/{project_id}/batches/{batch_id}/stream")
 def get_batch_stream(project_id: UUID, batch_id: str):
+    from backend.services.execution_service import ExecutionService
+
+    # Spec 0012, AC-17: only this project's tracked batch streams. Anything else
+    # (unknown id, not a UUID, another project's batch, a restart) gets one
+    # untracked Error event and the stream ends.
+    if ExecutionService.batch_log_state(project_id, batch_id) is None:
+        async def untracked_generator():
+            yield f"data: {json.dumps(UNTRACKED_BATCH_EVENT)}\n\n"
+        return StreamingResponse(untracked_generator(), media_type="text/event-stream")
+
     async def batch_event_generator():
         yield f"data: {json.dumps({'status': 'Connecting', 'log': 'Connecting to batch event stream...'})}\n\n"
         last_idx = 0
@@ -2350,6 +2423,9 @@ def get_execution_detail(project_id: UUID, execution_id: UUID):
             "video_path": result.video_path,
             "trace_path": result.trace_path,
             "executed_at": result.executed_at.isoformat(),
+            # Spec 0012, AC-11: the run's batch and real test cycle, if any.
+            "batch_id": str(result.batch_id) if result.batch_id else None,
+            "test_cycle_id": str(result.test_cycle_id) if result.test_cycle_id else None,
             # Log analyser triage (ExecutionAnalysisAgent / LogAnalysisService).
             **result.model_dump(mode="json", include={
                 "failure_category", "root_cause_summary", "trace_analysis", "screenshot_findings",
@@ -2489,14 +2565,26 @@ def get_execution_html(project_id: UUID, execution_id: UUID):
 
 
 @app.get("/api/v1/projects/{project_id}/batches/{batch_id}/html")
-def get_batch_html_report(project_id: UUID, batch_id: UUID):
+def get_batch_html_report(
+    project_id: UUID,
+    batch_id: UUID,
+    user: UserDB = Depends(require_project_permission("Executions", "view")),
+):
     from backend.services.report_service import ReportService
     from fastapi.responses import HTMLResponse
+    # Spec 0012, AC-8: only "no runs" is a 404. Anything else is logged and is a
+    # 500 that never carries the exception text.
     try:
         html_content = ReportService().compile_combined_batch_report_html(project_id, batch_id)
-        return HTMLResponse(content=html_content)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as exc:
+        if str(exc).startswith("No executions found"):
+            raise HTTPException(status_code=404, detail="No executions found for this batch") from exc
+        logging.getLogger(__name__).exception("Batch HTML report failed: batch_id=%s", batch_id)
+        raise HTTPException(status_code=500, detail="Batch report could not be built") from exc
+    except Exception as exc:
+        logging.getLogger(__name__).exception("Batch HTML report failed: batch_id=%s", batch_id)
+        raise HTTPException(status_code=500, detail="Batch report could not be built") from exc
+    return HTMLResponse(content=html_content)
 
 
 @app.get("/api/v1/projects/{project_id}/executions/{execution_id}/junit")
@@ -2836,7 +2924,8 @@ def process_execution_webhook(
     from backend.services.execution_service import ExecutionService
     from backend.services.workflow_service import active_execution_events
     
-    print(f"[Webhook DEBUG] Received payload: {payload}")
+    # The scan and harvest fields can be about 1 MB, so they stay out of the log.
+    print(f"[Webhook DEBUG] Received payload: { {k: v for k, v in payload.items() if k not in ('a11y', 'harvest')} }")
     
     event = payload.get("event")
     test_case_id_str = payload.get("test_case_id")
@@ -2947,6 +3036,31 @@ def get_object_repository_harvest_settings():
         "enabled": config.harvest_enabled,
         "max_pages": config.harvest_max_pages,
         "budget_ms": config.harvest_page_budget_ms,
+    }
+
+
+@app.get("/api/v1/accessibility/scan-settings")
+def get_accessibility_scan_settings(
+    project_id: UUID,
+    caller: str = Depends(require_workspace_secret),
+):
+    """Spec 0011, AC-1 and AC-8: the execution engine reads this once at run start
+    and echoes the gate fields back in its `completed` webhook. `enabled` is the
+    engine's final answer: the project's switch AND the global one."""
+    project = get_project_repository().get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    config = get_settings().accessibility
+    return {
+        "enabled": bool(config.enabled and getattr(project, "a11y_enabled", True) is not False),
+        "gate_mode": str(getattr(project, "a11y_gate_mode", None) or "warn"),
+        "block_severity": str(getattr(project, "a11y_block_severity", None) or "serious"),
+        "wcag_tags": list(config.wcag_tags),
+        "max_pages": config.max_pages,
+        "page_budget_ms": config.page_budget_ms,
+        "max_element_screenshots": config.max_element_screenshots,
+        "max_nodes_per_rule": config.max_nodes_per_rule,
+        "webhook_payload_max_bytes": config.webhook_payload_max_bytes,
     }
 
 
@@ -3660,6 +3774,149 @@ def dismiss_bug_report(
     service: BugReportService = Depends(get_bug_report_service),
 ):
     return _run_bug_report_action(lambda: service.dismiss(project_id, report_id, data.reason, actor=str(user.id)))
+
+
+# ---------------------------------------------------------------- accessibility (spec 0011)
+
+
+@app.get("/api/v1/projects/{project_id}/executions/{execution_id}/accessibility")
+def get_execution_accessibility(
+    project_id: UUID,
+    execution_id: UUID,
+    user: UserDB = Depends(require_project_permission("Executions", "view")),
+    service: AccessibilityService = Depends(get_accessibility_service),
+):
+    """The run's accessibility report, or its not scanned state (AC-12, AC-15)."""
+    _require_execution_in_project(project_id, execution_id)
+    report = service.report_for_execution(project_id, execution_id)
+    if report is None:
+        gate = service.gate_for_execution(project_id, execution_id)
+        return {"gate_status": gate["gate_status"], "gate_reason": gate["gate_reason"]}
+    return report.model_dump(mode="json")
+
+
+@app.get("/api/v1/projects/{project_id}/accessibility/reports/{report_id}/screenshots/{name}")
+def get_accessibility_screenshot(
+    project_id: UUID,
+    report_id: UUID,
+    name: str,
+    user: UserDB = Depends(require_project_permission("Executions", "view")),
+    service: AccessibilityService = Depends(get_accessibility_service),
+):
+    """An element screenshot of a finding (AC-7, AC-12). A name with a path in
+    it, or one no finding records, is a 404."""
+    path = service.screenshot(project_id, report_id, name)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    return FileResponse(path, media_type="image/png")
+
+
+@app.get("/api/v1/projects/{project_id}/accessibility/gate", response_model=AccessibilityGateResponse)
+def get_accessibility_gate(
+    project_id: UUID,
+    execution_id: UUID | None = None,
+    batch_id: str | None = None,
+    user: UserDB | None = Depends(workspace_or_project_permission("Executions", "view")),
+    service: AccessibilityService = Depends(get_accessibility_service),
+):
+    """The release gate of one run or one batch, for CI (AC-9). Exactly one of
+    `execution_id` or `batch_id`; the batch id is the runs' `batch_id` (spec 0012)."""
+    if (execution_id is None) == (not batch_id):
+        raise HTTPException(status_code=422, detail="Give exactly one of execution_id or batch_id")
+    if get_project_repository().get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if execution_id is not None:
+        _require_execution_in_project(project_id, execution_id)
+        return service.gate_for_execution(project_id, execution_id)
+    from backend.services.execution_service import ExecutionService
+
+    try:
+        batch_uuid = UUID(batch_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    run_ids = [r.id for r in get_project_repository().get_execution_results_for_batch(project_id, batch_uuid)]
+    log_state = ExecutionService.batch_log_state(project_id, batch_uuid)
+    gate = service.gate_for_batch(project_id, str(batch_uuid), run_ids, log_state)
+    if gate is None:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    gate["in_progress"] = log_state == "running"
+    return gate
+
+
+def _a11y_scan_error(exc: AccessibilityScanError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+
+@app.get("/api/v1/projects/{project_id}/accessibility/scan-pages", response_model=AccessibilityScanPagesResponse)
+def get_accessibility_scan_pages(
+    project_id: UUID,
+    user: UserDB = Depends(require_project_permission("Executions", "view")),
+    scans: AccessibilityScanService = Depends(get_accessibility_scan_service),
+):
+    """The scan dialog's page checklist (AC-10). Wildcard patterns come back skipped."""
+    try:
+        return {"pages": scans.scan_pages(project_id), "max_pages": scans.config.max_pages}
+    except AccessibilityScanError as exc:
+        raise _a11y_scan_error(exc)
+
+
+@app.post(
+    "/api/v1/projects/{project_id}/accessibility/scans",
+    response_model=AccessibilityScanStartResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_accessibility_scan(
+    project_id: UUID,
+    data: AccessibilityScanRequest,
+    user: UserDB = Depends(require_project_permission("Executions", "edit")),
+    scans: AccessibilityScanService = Depends(get_accessibility_scan_service),
+):
+    """Starts a standalone scan of chosen pages, optionally signed in (AC-10, AC-11)."""
+    try:
+        report = scans.start(project_id, data.paths, data.include_login, user_id=user.id)
+    except AccessibilityScanError as exc:
+        raise _a11y_scan_error(exc)
+    scans.launch(report.id)
+    return {"report_id": str(report.id), "status": report.status.value}
+
+
+@app.get("/api/v1/projects/{project_id}/accessibility/reports")
+def list_accessibility_reports(
+    project_id: UUID,
+    source: Literal["execution", "scan"] | None = None,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user: UserDB = Depends(require_project_permission("Executions", "view")),
+    service: AccessibilityService = Depends(get_accessibility_service),
+    scans: AccessibilityScanService = Depends(get_accessibility_scan_service),
+):
+    """Paged report summaries, newest first, without findings (AC-15)."""
+    if get_project_repository().get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    scans.expire_stale(project_id)
+    reports, total = service.repo.list_reports(project_id, source, limit, offset)
+    return {
+        "items": [r.model_dump(mode="json", exclude={"findings"}) for r in reports],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/api/v1/projects/{project_id}/accessibility/reports/{report_id}")
+def get_accessibility_report(
+    project_id: UUID,
+    report_id: UUID,
+    user: UserDB = Depends(require_project_permission("Executions", "view")),
+    service: AccessibilityService = Depends(get_accessibility_service),
+    scans: AccessibilityScanService = Depends(get_accessibility_scan_service),
+):
+    """One full report with findings. Another project's report is a 404 (AC-15)."""
+    scans.expire_stale(project_id)
+    report = service.report(project_id, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Accessibility report not found")
+    return report.model_dump(mode="json")
 
 
 @app.post("/api/v1/admin/reset-demo-data")

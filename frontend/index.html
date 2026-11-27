@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agentic AI Automation</title>
-  <link rel="stylesheet" href="/css/styles.css?v=4">
+  <link rel="stylesheet" href="/css/styles.css?v=7">
   <link rel="stylesheet" href="/css/token-utilization.css">
   <!-- Chart.js (dashboard and Token Utilization) and the chat assistant's Markdown
        rendering (spec 0005): pinned versions, the Markdown sanitized before use.
@@ -297,6 +297,17 @@
           </div>
         </div>
 
+        <!-- Accessibility scans (spec 0011, AC-10, AC-12) -->
+        <section class="section-card a11y-section" id="a11y-scans-section" aria-labelledby="a11y-scans-heading" style="margin-bottom: 24px; display: none;">
+          <div class="a11y-header">
+            <h2 id="a11y-scans-heading">Accessibility scans</h2>
+            <button type="button" class="btn btn-primary" id="btn-a11y-scan">Run accessibility scan</button>
+          </div>
+          <p class="a11y-muted">Check chosen pages against WCAG 2.2 AA without writing a test. An automated scan does not certify WCAG conformance.</p>
+          <div id="a11y-scan-list" aria-live="polite"></div>
+          <div id="a11y-scan-report" class="a11y-scan-report"></div>
+        </section>
+
         <!-- Row 3: Trend & Scenario Approval -->
         <div class="dashboard-layout-row row-3" style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 24px; margin-bottom: 24px;">
           <!-- Left: Execution Trend Bar Chart -->
@@ -504,6 +515,7 @@
           <div id="testcase-bulk-script-container" style="display: none; gap: 12px;">
             <button data-requires="Playwright.create" class="btn btn-primary" id="btn-generate-all-scripts" style="padding: 10px 20px; font-size: 0.9rem;">Generate Playwright Scripts for All Approved Test Cases</button>
             <button data-requires="Executions.create" class="btn btn-primary" id="btn-run-selected-batch" style="padding: 10px 20px; font-size: 0.9rem; background-color: var(--color-success); border-color: var(--color-success);">Run Selected Batch</button>
+            <button data-requires="Executions.create" class="btn btn-primary" id="btn-run-selected-backend-batch" style="padding: 10px 20px; font-size: 0.9rem;">Run Selected on Backend</button>
           </div>
         </div>
         <div id="script-validation-status" role="status" aria-live="polite" style="margin-top: 12px;"></div>
@@ -1020,6 +1032,25 @@
                 <label for="project-settings-bug-confidence" style="display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500;">Minimum triage confidence (%)</label>
                 <input type="number" id="project-settings-bug-confidence" class="form-control" min="0" max="100" step="1" value="85" style="width: 120px;" />
               </div>
+              <fieldset class="form-group" style="margin: 0 0 24px; padding: 0; border: 0;">
+                <legend style="margin-bottom: 8px; font-size: 0.9rem; font-weight: 600;">Accessibility checks</legend>
+                <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 0.85rem; font-weight: 500;">
+                  <input type="checkbox" id="project-settings-a11y-enabled" aria-describedby="project-settings-a11y-help" />
+                  <span>Scan pages for accessibility problems during test runs</span>
+                </label>
+                <p id="project-settings-a11y-help" style="margin: 8px 0 12px; color: var(--text-secondary); font-size: 0.8rem;">On by default. Each page a test visits is checked against WCAG 2.2 AA. The release gate never changes a test's pass or fail result, and an automated scan does not certify WCAG conformance.</p>
+                <label for="project-settings-a11y-gate-mode" style="display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500;">Release gate</label>
+                <select id="project-settings-a11y-gate-mode" class="form-control" style="width: 100%; margin-bottom: 12px;">
+                  <option value="off">Off: always pass</option>
+                  <option value="warn">Warn: flag serious problems</option>
+                  <option value="block">Block: fail the gate on serious problems</option>
+                </select>
+                <label for="project-settings-a11y-block-severity" style="display: block; margin-bottom: 8px; font-size: 0.85rem; font-weight: 500;">Gate threshold</label>
+                <select id="project-settings-a11y-block-severity" class="form-control" style="width: 100%;">
+                  <option value="serious">Serious and critical problems</option>
+                  <option value="critical">Critical problems only</option>
+                </select>
+              </fieldset>
               <button type="submit" class="btn btn-primary w-100" style="padding: 12px; font-weight: 600;">Save Project Settings</button>
             </form>
           </div>
@@ -1392,6 +1423,43 @@
     </div>
   </div>
 
+  <!-- MODAL: Run accessibility scan (spec 0011, AC-10, AC-11) -->
+  <div class="modal-overlay" id="a11y-scan-modal">
+    <div class="modal-container" role="dialog" aria-modal="true" aria-labelledby="a11y-scan-title" aria-describedby="a11y-scan-intro" style="width: 640px; max-width: 95%;">
+      <div class="modal-header">
+        <h3 id="a11y-scan-title">Run accessibility scan</h3>
+        <button type="button" class="modal-close" id="a11y-scan-close" aria-label="Close the scan dialog">✕</button>
+      </div>
+      <form id="a11y-scan-form" style="padding: 20px;" novalidate>
+        <p id="a11y-scan-intro" class="a11y-muted" style="margin-top: 0;">Every page found for this project is ticked. Untick pages you want to skip, or add a path on the project's target URL.</p>
+        <fieldset class="a11y-scan-fieldset">
+          <legend>Pages to scan</legend>
+          <ul id="a11y-scan-pages" class="a11y-scan-pages"></ul>
+          <p id="a11y-scan-count" class="a11y-muted" aria-live="polite"></p>
+        </fieldset>
+        <label for="a11y-scan-custom-path" style="display: block; margin: 12px 0 6px; font-size: 0.85rem; font-weight: 500;">Add a path</label>
+        <div style="display: flex; gap: 8px;">
+          <input type="text" id="a11y-scan-custom-path" class="form-control" placeholder="/account/settings" aria-describedby="a11y-scan-custom-help" style="flex: 1;" />
+          <button type="button" class="btn btn-secondary" id="a11y-scan-add-path">Add path</button>
+        </div>
+        <p id="a11y-scan-custom-help" class="a11y-muted" style="margin: 6px 0 0;">Paths are opened on the project's target URL. Other sites cannot be scanned.</p>
+        <div style="margin-top: 16px;">
+          <label class="a11y-scan-login" style="display: flex; gap: 8px; align-items: flex-start;">
+            <input type="checkbox" id="a11y-scan-include-login" aria-describedby="a11y-scan-login-help" />
+            <span>Include pages behind login</span>
+          </label>
+          <p id="a11y-scan-login-help" class="a11y-muted" style="margin: 6px 0 0;"></p>
+        </div>
+        <p id="a11y-scan-error" class="a11y-scan-error" role="alert" style="display: none;"></p>
+        <span id="a11y-scan-live" class="sr-only" aria-live="polite"></span>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" id="a11y-scan-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="a11y-scan-submit">Start scan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- MODAL: Defect Triage Details -->
   <div class="modal-overlay" id="triage-modal">
     <div class="modal-container" style="width: 600px; max-width: 95%;">
@@ -1448,7 +1516,7 @@
     </div>
   </div>
 
-  <script type="module" src="/js/app.js?v=35"></script>
+  <script type="module" src="/js/app.js?v=41"></script>
   <script>
     document.getElementById('login-form').addEventListener('submit', async function(e) {
       e.preventDefault();

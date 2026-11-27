@@ -132,6 +132,7 @@ class FakeExecutionService:
         self.execution_events = execution_events
         self.batch_events = batch_events
         self.runs: list = []
+        self.batch_options: list = []
 
     def start_test_case_run(self, project_id, test_case_id, workflow_service=None):
         execution_id = uuid4()
@@ -139,10 +140,11 @@ class FakeExecutionService:
         self.runs.append(("case", test_case_id, execution_id))
         return execution_id
 
-    def start_batch_run(self, project_id, test_case_ids):
+    def start_batch_run(self, project_id, test_case_ids, **options):
         batch_id = uuid4()
         self.batch_events[str(batch_id)] = []
         self.runs.append(("batch", test_case_ids, batch_id))
+        self.batch_options.append(options)
         return batch_id
 
 
@@ -467,6 +469,19 @@ def test_a_batch_reports_its_counts(world):
     action = world.executor.refresh(world.chats, message_id, action, project_id=world.project.id)
     assert action["status"] == "succeeded"
     assert action["result"]["summary"] == "1 passed, 1 failed, 0 skipped"
+
+
+def test_a_chat_batch_starts_with_no_test_cycle(world):
+    # covers: AC-11 (spec 0012). The chat starts the batch without a cycle, so
+    # its runs carry only the batch id (test_execution_service locks the save).
+    ids = [str(c.id) for c in world.cases]
+    _, action = _confirmed(world, "run_batch", {"test_case_ids": ids})
+
+    kind, case_ids, batch_id = world.executor.execution_service.runs[-1]
+    assert kind == "batch"
+    assert [str(case_id) for case_id in case_ids] == ids
+    assert action["job_ref"] == {"kind": "batch", "id": str(batch_id)}
+    assert world.executor.execution_service.batch_options[-1] == {}
 
 
 def test_a_batch_that_is_gone_fails_as_lost(world):

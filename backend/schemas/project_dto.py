@@ -29,4 +29,7 @@ class ProjectResponse(BaseModel):
     is_safe_test_environment: bool = False
     bug_auto_submit: bool = False
     bug_auto_submit_min_confidence: float = 0.85
+    a11y_enabled: bool = True
+    a11y_gate_mode: str = "warn"
+    a11y_block_severity: str = "serious"
     readiness: dict[str, Any]

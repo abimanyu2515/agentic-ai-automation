@@ -191,17 +191,44 @@ def require_ready_project(project: Any, projects: list[Any] | None = None) -> Pr
     )
 
 
-def capture_project_snapshot(project: Any) -> dict[str, str]:
+def capture_project_snapshot(project: Any, require_ready: bool = True) -> dict[str, str]:
     """Spec 0001, AC-3, AC-4, AC-8: check readiness when work is accepted and
     return the configuration the work must use until it ends. Raises
     ProjectConfigurationError("PROJECT_NOT_READY") for an incomplete project.
-    Holds no secret: credentials are looked up by `credential_reference`."""
-    configuration = require_ready_project(project)
+    Holds no secret: credentials are looked up by `credential_reference`.
+
+    `require_ready=False` (spec 0011, workspace runs finalized after the fact)
+    skips every readiness check and fills the same keys from the raw project,
+    so a run that already happened still gets a snapshot. Every value stays a
+    string."""
+    if require_ready:
+        configuration = require_ready_project(project)
+        base = {
+            "project_id": str(configuration.project_id),
+            "target_url": configuration.target_url,
+            "framework": configuration.framework,
+            "credential_reference": configuration.credential_reference,
+        }
+    else:
+        try:
+            target_url = normalize_target_url(getattr(project, "target_url", None)) or ""
+        except ProjectConfigurationError:
+            target_url = ""
+        # Credentials are always looked up by project id, as in the ready path.
+        reference = getattr(project, "id", None)
+        base = {
+            "project_id": str(project.id),
+            "target_url": target_url,
+            "framework": normalize_framework(getattr(project, "framework", None)) or "",
+            "credential_reference": str(reference) if reference else "",
+        }
     return {
-        "project_id": str(configuration.project_id),
-        "target_url": configuration.target_url,
-        "framework": configuration.framework,
-        "credential_reference": configuration.credential_reference,
+        **base,
+        # Spec 0011, AC-8 and AC-13: the accessibility settings this run uses, so a
+        # later settings change never rewrites its gate. Strings, like the rest.
+        "a11y_enabled": "true" if getattr(project, "a11y_enabled", True) is not False else "false",
+        "a11y_gate_mode": str(getattr(project, "a11y_gate_mode", None) or "warn"),
+        "a11y_block_severity": str(getattr(project, "a11y_block_severity", None) or "serious"),
     }
 
 

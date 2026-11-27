@@ -743,7 +743,11 @@ export const Components = {
       return this.EmptyState("No Execution Records", "Execution history is empty. Go to Test Cases, view script, and trigger runs to log executions.");
     }
 
-    const rows = executions.map(ex => {
+    // Newest runs first; copy so the caller's array order is untouched.
+    const executedAtMs = ex => new Date(ex.executed_at).getTime() || 0;
+    const sortedExecutions = [...executions].sort((a, b) => executedAtMs(b) - executedAtMs(a));
+
+    const rows = sortedExecutions.map(ex => {
       const date = new Date(ex.executed_at).toLocaleString();
       let statusBadge = `<span class="badge badge-approved">PASSED</span>`;
       if (ex.status === 'failed') statusBadge = `<span class="badge badge-rejected">FAILED</span>`;

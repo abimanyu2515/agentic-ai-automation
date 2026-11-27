@@ -1,4 +1,4 @@
-fastapi>=0.115.0
+﻿fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 pydantic>=2.10.0
 pydantic-settings>=2.6.0
@@ -6,6 +6,8 @@ python-multipart>=0.0.12
 
 litellm>=1.50.0
 langgraph>=0.2.50
+# 1.13.x .pyd is blocked by Windows Smart App Control; 1.12.2 loads
+ormsgpack==1.12.2
 langchain-core>=0.3.0
 langsmith>=0.1.0
 

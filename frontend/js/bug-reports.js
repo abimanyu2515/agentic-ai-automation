@@ -1,7 +1,7 @@
 // Bugs view: bug report drafts from the Bug Reporting Agent, reviewed and
 // edited here, then submitted to Jira.
-import { API } from './api.js?v=25';
-import { escapeHTML, showToast } from './components.js?v=8';
+import { API } from './api.js?v=29';
+import { escapeHTML, showToast } from './components.js?v=9';
 
 const esc = (value) => escapeHTML(value === null || value === undefined ? '' : String(value));
 
@@ -110,7 +110,7 @@ export class BugReportsView {
 
   listHTML() {
     if (this.reports.length === 0) {
-      return `<div class="empty-state"><h3>No bug reports</h3><p>Product bug failures are drafted here automatically after a run is triaged. You can also use <strong>Report bug</strong> in a failed run's triage details.</p></div>`;
+      return `<div class="empty-state"><h3>No bug reports</h3><p>Product bug failures and serious accessibility problems are drafted here automatically after a run. You can also use <strong>Report bug</strong> in a failed run's triage details.</p></div>`;
     }
     const rows = this.reports.map(r => `
       <tr class="bug-row${r.id === this.selectedId ? ' selected' : ''}" data-id="${esc(r.id)}" tabindex="0">
@@ -170,7 +170,8 @@ export class BugReportsView {
           <div class="bug-meta">Confidence: ${r.confidence === null || r.confidence === undefined ? 'N/A' : esc(Math.round(r.confidence * 100) + '%')}</div>
           <ul>${evidence}</ul>
           ${env}
-          <div class="bug-meta"><a href="#/execution/${esc(r.execution_id)}">Open the failed run</a></div>
+          ${r.a11y_rule_id ? `<div class="bug-meta">Accessibility rule: ${esc(r.a11y_rule_id)}${(r.wcag_criteria || []).length ? ` · WCAG ${(r.wcag_criteria || []).map(esc).join(', ')}` : ''}</div>` : ''}
+          ${r.execution_id ? `<div class="bug-meta"><a href="#/execution/${esc(r.execution_id)}">${r.failure_category === 'Accessibility Issue' ? 'Open the run it was found in' : 'Open the failed run'}</a></div>` : ''}
         </details>
         ${editable ? `
         <div class="bug-actions">

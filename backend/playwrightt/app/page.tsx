@@ -217,6 +217,10 @@ function PlaywrightWorkspaceContent() {
       if (cycleId) {
         localStorage.setItem('test_cycle_id', cycleId);
         setTestCycleId(cycleId);
+      } else if (params.has('test_cycle_id')) {
+        // Spec 0012, AC-3: an empty cycle in the URL means none was selected.
+        localStorage.removeItem('test_cycle_id');
+        setTestCycleId(null);
       } else {
         const storedCycle = localStorage.getItem('test_cycle_id');
         if (storedCycle) {
@@ -377,10 +381,9 @@ function PlaywrightWorkspaceContent() {
     setCurrentBatchIndex(0);
     setError(null);
 
-    const activeTestCycleId = testCycleId || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-      var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-      return v.toString(16);
-    });
+    // Spec 0012, AC-3: one batch id for every case of this run. The cycle is
+    // sent only when a real one was selected.
+    const batchId = crypto.randomUUID();
 
     for (let i = 0; i < batchTestCases.length; i++) {
       setCurrentBatchIndex(i);
@@ -403,7 +406,8 @@ function PlaywrightWorkspaceContent() {
               testCaseIds: [activeTc.id],
               browser: 'chromium',
               testData: uploadTestData ? testDataText : null,
-              testCycleId: activeTestCycleId
+              batchId,
+              ...(testCycleId ? { testCycleId } : {}),
             }),
           });
 
@@ -485,7 +489,7 @@ function PlaywrightWorkspaceContent() {
           testCaseIds: testCaseId ? [testCaseId] : [],
           browser: 'chromium',
           testData: uploadTestData ? testDataText : null,
-          testCycleId: testCycleId
+          ...(testCycleId ? { testCycleId } : {}),
         }),
       });
 

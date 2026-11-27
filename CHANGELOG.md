@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Batch run identity** (spec 0012): every run of a batch now carries its own `batch_id`, separate from `test_cycle_id`, so a run can belong to a batch, a real test cycle, both, or neither.
+  - **Run Selected on Backend** in the test cases view generates any missing scripts, starts a backend batch in the selected test cycle, and opens a live observer that links to the batch report when it finishes.
+  - `POST /api/v1/projects/{id}/batches/execute` takes an optional `?test_cycle_id=` and returns the `batch_id`. `GET .../batches/{batch_id}/html` builds the batch report, and `GET .../batches/{batch_id}/stream` streams the batch's events.
+  - Workspace batches send one `batch_id` per batch run and no longer invent a test cycle id. The batch picker and the accessibility batch gate group runs by `batch_id`, and the gate reports `in_progress` while a backend batch is still running.
+  - Existing JSON runs whose `test_cycle_id` matched no cycle are moved to `batch_id` once. Alembic migration `c2a8f5e17b49` adds `executions.batch_id` and its index.
+- **Accessibility Agent** (spec 0011, guide: `docs/features/accessibility-agent.md`): checks pages against WCAG 2.2 AA with axe-core, explains each problem with AI, and gives each run a release gate.
+  - Every test run scans the pages it visits, on the Python runner and the workspace engine, without slowing the test. A scan failure never changes a run's result.
+  - Findings are merged by rule and element, redacted, and explained by one `analysis` LLM call, with axe's text as the fallback.
+  - Release gate (`PASS`, `WARN`, `BLOCKED`, `NOT_SCANNED`) per run and per batch: `GET /api/v1/projects/{id}/accessibility/gate`, readable by CI with the workspace secret.
+  - Project settings `a11y_enabled`, `a11y_gate_mode`, and `a11y_block_severity`, copied into each run's snapshot.
+  - Serious findings become deduplicated **Accessibility Issue** bug drafts with element screenshots and Jira labels.
+  - Standalone scans from the project dashboard (**Run accessibility scan**), with a page checklist, custom paths, and an optional login for safe test environments: `POST /api/v1/projects/{id}/accessibility/scans`, `GET .../accessibility/scan-pages`, `GET .../accessibility/reports[/{report_id}]`.
+  - HTML and PDF reports (both engines) gain an Accessibility section, and JUnit files gain a `testsuite name="accessibility"`. The professional engine's JUnit root is now `testsuites`.
+  - Alembic migrations `e5a9c2d4b711`, `a7d3e9b1c540`, `f1c7b3e8d204`, and `b8e2d6f4a913` (one active standalone scan per project).
 - **Bug Reporting Agent**: replaces DefectManagementAgent. Every Product Bug failure gets a structured bug report draft, which a person reviews before it goes to Jira.
   - New `BugReportService` drafts the report from all triage evidence: steps, expected and actual results, severity, priority, evidence and environment. Text is redacted against vault credentials and test data, and drafting falls back to a deterministic draft when the LLM fails.
   - A repeat failure with the same error signature adds an occurrence instead of a new draft.

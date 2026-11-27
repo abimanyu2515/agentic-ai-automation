@@ -18,6 +18,7 @@ from backend.models.execution_result import ExecutionResult
 from backend.models.requirement import Requirement
 from backend.agents.execution_analysis_agent import ExecutionAnalysisAgent
 from backend.agents.bug_reporting_agent import BugReportingAgent
+from backend.agents.accessibility_agent import AccessibilityAgent
 from backend.repository.project_repository import get_project_repository
 from backend.services.knowledge_indexer import queue_defect_keys, queue_knowledge_source
 from backend.services.llm_context import llm_operation
@@ -1092,10 +1093,17 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
         exec_agent = ExecutionAgent(
             on_log=on_log_callback, project_id=project_id, repo=workflow_service.repo, project_config=project_config,
         )
+        class LoggingAccessibilityAgent(AccessibilityAgent):
+            def run(self, state: WorkflowState) -> WorkflowState:
+                log_event("Accessibility", "Checking accessibility", "Building the accessibility report from the axe scan...")
+                return super().run(state)
+
         bug_reporting_agent = LoggingBugReportingAgent()
+        accessibility_agent = LoggingAccessibilityAgent()
         local_graph = build_graph(
             execution_agent=exec_agent,
             execution_analysis_agent=LoggingExecutionAnalysisAgent(),
+            accessibility_agent=accessibility_agent,
             bug_reporting_agent=bug_reporting_agent,
         )
         
@@ -1107,6 +1115,18 @@ def run_execution_and_stream(workflow_service: WorkflowService, project_id: UUID
         if execution_id:
             if result.bug_report_id and result.id != execution_id:
                 bug_reporting_agent.bug_report_service.relink_execution(result.bug_report_id, result.id, execution_id)
+            accessibility_agent.accessibility_service.relink_execution(result.id, execution_id)
+            if result.id != execution_id:
+                # Spec 0011: accessibility bugs drafted in this run point at the run too.
+                a11y_bug_ids = {
+                    f.bug_report_id
+                    for report in final_state.accessibility_results
+                    if report.execution_id == result.id
+                    for f in report.findings
+                    if f.bug_report_id
+                }
+                for bug_id in a11y_bug_ids:
+                    bug_reporting_agent.bug_report_service.relink_execution(bug_id, result.id, execution_id)
             result.id = execution_id
         
         # Save updated test case status and execution result in repo

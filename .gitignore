@@ -71,3 +71,4 @@ backend/database/chat_store.json
 .claude/worktrees/
 ".env.*"       
 "!.env.example"  
+backend/database/accessibility_report_store.json

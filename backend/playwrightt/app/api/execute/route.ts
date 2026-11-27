@@ -5,8 +5,8 @@ import * as path from 'path';
 
 export async function POST(request: NextRequest) {
   try {
-    const { script, projectId, requirementId, scenarioIds, testCaseIds, browser, testCycleId } = await request.json();
-    console.log(`[API Execute] Received script run request. projectId: "${projectId}", testCaseIds: ${JSON.stringify(testCaseIds)}, browser: "${browser}", testCycleId: "${testCycleId}"`);
+    const { script, projectId, requirementId, scenarioIds, testCaseIds, browser, testCycleId, batchId } = await request.json();
+    console.log(`[API Execute] Received script run request. projectId: "${projectId}", testCaseIds: ${JSON.stringify(testCaseIds)}, browser: "${browser}", testCycleId: "${testCycleId}", batchId: "${batchId}"`);
 
     if (!script || typeof script !== 'string') {
       return NextResponse.json(
@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
       scenarioIds,
       testCaseIds,
       testCycleId,
+      batchId,
       browser,
     });
 

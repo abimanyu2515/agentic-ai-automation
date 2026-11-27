@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import Column, String, Text, Float, Boolean, DateTime, ForeignKey, Integer, JSON, UniqueConstraint, Index, text
+from sqlalchemy import Column, String, Text, Float, Boolean, DateTime, ForeignKey, Integer, JSON, UniqueConstraint, Index, CheckConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from backend.database.db import Base
@@ -40,6 +40,10 @@ class ProjectDB(Base):
     # Bug Reporting Agent: file drafts to Jira without review above this confidence.
     bug_auto_submit = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     bug_auto_submit_min_confidence = Column(Float, nullable=False, default=0.85, server_default=text("0.85"))
+    # Accessibility Agent (spec 0011, AC-13).
+    a11y_enabled = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    a11y_gate_mode = Column(String(10), nullable=False, default="warn", server_default="warn")
+    a11y_block_severity = Column(String(10), nullable=False, default="serious", server_default="serious")
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     
@@ -218,11 +222,15 @@ class TestCaseDB(Base):
 
 class ExecutionDB(Base):
     __tablename__ = "executions"
+    # Spec 0012: every batch read filters by project first, then batch.
+    __table_args__ = (Index("ix_executions_project_batch", "project_id", "batch_id"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     test_case_id = Column(UUID(as_uuid=True), ForeignKey("test_cases.id", ondelete="CASCADE"), nullable=False, index=True)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     test_cycle_id = Column(UUID(as_uuid=True), ForeignKey("test_cycles.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Spec 0012: the batch this run belongs to. No table of its own, so no FK.
+    batch_id = Column(UUID(as_uuid=True), nullable=True)
     status = Column(String(50), nullable=False)
     duration_seconds = Column(Float, nullable=False, default=0.0)
     error_message = Column(Text, nullable=True)
@@ -638,8 +646,12 @@ class BugReportDB(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    execution_id = Column(UUID(as_uuid=True), nullable=False)
-    test_case_id = Column(UUID(as_uuid=True), nullable=False)
+    # Spec 0011: nullable so a standalone accessibility scan can own a bug.
+    # The check constraint keeps at least one source on every row.
+    execution_id = Column(UUID(as_uuid=True), nullable=True)
+    test_case_id = Column(UUID(as_uuid=True), nullable=True)
+    accessibility_report_id = Column(UUID(as_uuid=True), nullable=True)
+    failure_category = Column(String(50), nullable=True)
     status = Column(String(30), nullable=False, default="draft")
     error_signature = Column(String(64), nullable=False, default="")
     jira_key = Column(String(100), nullable=True)
@@ -654,4 +666,47 @@ class BugReportDB(Base):
         Index("ix_bug_reports_signature", "project_id", "test_case_id", "error_signature"),
         Index("ix_bug_reports_execution_id", "execution_id"),
         Index("ix_bug_reports_jira_key", "jira_key"),
+        Index("ix_bug_reports_category_signature", "project_id", "failure_category", "error_signature"),
+        CheckConstraint(
+            "execution_id IS NOT NULL OR accessibility_report_id IS NOT NULL",
+            name="ck_bug_reports_has_source",
+        ),
+    )
+
+
+class AccessibilityReportDB(Base):
+    """An accessibility report (spec 0011): one per test run, or one per standalone scan."""
+    __tablename__ = "accessibility_reports"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    source = Column(String(20), nullable=False, default="execution")
+    execution_id = Column(UUID(as_uuid=True), nullable=True, unique=True)
+    batch_id = Column(String(100), nullable=True, index=True)
+    gate_mode = Column(String(10), nullable=False, default="warn")
+    test_case_id = Column(UUID(as_uuid=True), nullable=True)
+    status = Column(String(20), nullable=False, default="succeeded")
+    error = Column(String(50), nullable=True)
+    login_status = Column(String(20), nullable=False, default="not_requested")
+    wcag_tags = Column(JSON, nullable=False, default=list)
+    pages = Column(JSON, nullable=False, default=list)
+    truncated = Column(Boolean, nullable=False, default=False)
+    findings = Column(JSON, nullable=False, default=list)
+    counts = Column(JSON, nullable=False, default=dict)
+    gate_status = Column(String(20), nullable=False, default="NOT_SCANNED")
+    gate_reason = Column(String(50), nullable=True)
+    created_by = Column(UUID(as_uuid=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_accessibility_reports_project_created", "project_id", "created_at"),
+        # AC-10: at most one queued or running standalone scan per project.
+        Index(
+            "uq_accessibility_reports_active_scan",
+            "project_id",
+            unique=True,
+            postgresql_where=text("source = 'scan' AND status IN ('queued', 'running')"),
+            sqlite_where=text("source = 'scan' AND status IN ('queued', 'running')"),
+        ),
     )

@@ -428,6 +428,20 @@ def test_json_store_round_trips_and_soft_deletes(tmp_path):
     assert reloaded.soft_delete(report.id) and reloaded.get(report.id) is None
 
 
+def test_json_store_never_overwrites_a_file_it_cannot_decode(tmp_path):
+    """Review 2026-11-27: a damaged store must raise, not read as empty, or the
+    next save replaces every bug with one."""
+    path = tmp_path / "bugs.json"
+    store = JsonBugReportRepository(path)
+    store.save(BugReport(project_id=uuid4(), execution_id=uuid4(), test_case_id=uuid4(), title="t", error_signature="a"))
+    damaged = path.read_text(encoding="utf-8")[:-10]
+    path.write_text(damaged, encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        store.save(BugReport(project_id=uuid4(), execution_id=uuid4(), test_case_id=uuid4(), title="u", error_signature="b"))
+    assert path.read_text(encoding="utf-8") == damaged
+
+
 def test_postgres_store_round_trips(tmp_path, monkeypatch):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
