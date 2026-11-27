@@ -22,6 +22,8 @@ _These recommendations keep the build orderly. You can skip any step that does n
 | 9 | Jira knowledge sources | Project knowledge | in-progress |
 | 10 | Failure analysis for UI and batch runs | Project knowledge | planned |
 | 11 | Self healing locators | Locator reliability | in-progress |
+| 11 | AI accessibility testing agent | Quality checks | in-progress |
+| 12 | Batch run identity | Quality checks | in-progress |
 
 ## Existing product
 
@@ -172,7 +174,46 @@ Run the AI failure analysis (with its knowledge retrieval stage) on failed runs 
 **Done when:** a failed UI or batch run gets a failure category and root cause summary in the background, its knowledge entry is indexed again with that summary, and a slow or failing LLM never blocks or breaks the saved result.
 - [ ] Design it (spec): `/architect failure analysis for UI and batch runs`
 
+## Quality checks
+
+### 11. AI accessibility testing agent · in-progress
+This feature checks every page a test visits, and pages chosen on request, against WCAG 2.2 AA with axe-core. The AI explains each problem and suggests a fix. Serious problems become reviewed Jira bugs, and each run gets a release gate result (pass, warn, or blocked) that CI can read.
+**Done when:** a test run produces an accessibility report with AI guidance in execution details and in the HTML and PDF reports, serious findings become deduplicated bug drafts, the gate endpoint returns the run's or batch's status, a standalone scan (with optional login) works from the project page, and a scan failure never changes a run's result.
+- [x] Design it (spec): `/architect AI accessibility testing agent`
+- Spec: [0011](../specs/0011-accessibility-agent/index.md)
+- Code: `backend/playwrightt/lib/a11y-scan-session.ts`, `backend/services/playwright_runner.py`, `backend/services/accessibility_service.py`, `backend/agents/accessibility_agent.py`, `backend/models/accessibility.py`, `backend/repository/accessibility_repository.py`, `backend/repository/postgres_accessibility_repository.py`, `backend/graph/workflow.py`, `backend/main.py`, `backend/services/bug_report_service.py`, `backend/agents/bug_reporting_agent.py`, `backend/services/execution_service.py`, `backend/services/project_configuration.py`, `backend/playwrightt/lib/execution-engine.ts`, `frontend/js/accessibility.js`, `backend/services/accessibility_scan_service.py`, `backend/playwrightt/lib/a11y-standalone-scan.ts`, `backend/services/accessibility_report_section.py`, `backend/templates/components/accessibility_section.html`, `backend/services/report_service.py`
+- [x] Build it: `/develop AI accessibility testing agent`
+  - [x] Thin thread: axe hook, storage, agent, execution API, and UI section, covering AC-1, AC-2, AC-3, AC-5, AC-8, AC-12, AC-15
+  - [x] Project settings and AI guidance, covering AC-4, AC-8, AC-13
+  - [x] Bugs, Jira, and element screenshots, covering AC-6, AC-7
+  - [x] Batch and workspace paths (including workspace gate settings), plus the batch gate, covering AC-1, AC-2, AC-8, AC-9, AC-13
+  - [x] Standalone scan (public pages first, then include login), plus reports, JUnit, and docs, covering AC-10, AC-11, AC-14
+- [ ] Verify it: `/check verify AI accessibility testing agent`
+- [ ] Test it: `/test AI accessibility testing agent`
+
+### 12. Batch run identity · in-progress · from spec 0011
+Give every run its own batch id instead of reusing `test_cycle_id`, so the accessibility batch gate and the batch report work on PostgreSQL, batches can belong to a real test cycle, and the batch picker shows real batches.
+**Done when:** backend and workspace batches save a `batch_id` on both stores, a batch can start inside a real cycle, the gate (with `in_progress`) and the guarded batch HTML report read by `batch_id`, the UI groups by it, and old JSON runs are moved over once.
+- [x] Design it (spec): `/architect accessibility gate batch identity`
+- Spec: [0012](../specs/0012-batch-run-identity/index.md)
+- Code: `backend/services/execution_service.py`, `backend/services/accessibility_service.py`, `backend/services/report_service.py`, `backend/repository/`, `backend/database/`, `backend/schemas/accessibility_dto.py`, `backend/main.py`, `backend/playwrightt/app/page.tsx`, `backend/playwrightt/lib/execution-engine.ts`, `frontend/js/api.js`, `frontend/js/app.js`, `frontend/index.html`
+- [x] Build it: `/develop batch run identity`
+  - [x] Thin thread: column, migration, both stores, backend batch, and gate by `batch_id`, covering AC-1, AC-6, AC-10, AC-11
+  - [x] Batch start inside a cycle, the UI picker, and the guarded batch HTML report, covering AC-2, AC-8, AC-9
+  - [x] Workspace batches: batch id, webhook, context reuse, and checks on incoming ids, covering AC-3, AC-4, AC-5
+  - [x] Gate `in_progress`, the JSON backfill, and docs, covering AC-7, AC-10
+  - [x] Report auth and the empty batch gate: Bearer fetch opened as a blob page, escaping, and `batch_running` / `batch_no_runs` answers, covering AC-6, AC-7, AC-8, AC-12, AC-13, AC-14
+  - [x] Start a backend batch from the UI: "Run Selected on Backend" with shared script generation, the live observer with its report button, and the untracked stream answer, covering AC-9, AC-15, AC-16, AC-17
+- [ ] Verify it: `/check verify batch run identity`
+- [ ] Test it: `/test batch run identity`
+
 ## Deferred
+
+- Accessibility keyboard and focus walk, Phase 2 (from spec 0011)
+- Visual Regression Agent, Phase 3 (from spec 0011)
+- Accessibility SARIF export, scheduled scans, and change aware page selection (from spec 0011)
+- Permission checks on the batch stream and execution read routes (from spec 0012)
+- A batches table with the planned case count, so workspace batches can report `in_progress` (from spec 0012)
 
 - Chat assistant keyboard and screen reader support (from spec 0005)
 - Shared chat locks and rate limits for running more than one worker (from spec 0005)

@@ -403,17 +403,34 @@ Use this to run multiple CricScore cases together.
      {workspace_url}/?project_id={CricScore_id}&test_case_ids={id1,id2,...}&test_cycle_id={cycle_id_or_empty}
      ```
 4. In the workspace tab, run the batch. Watch browser preview + logs there.
-5. Back in the main UI, open **Execution Workspace** (sidebar) to monitor:
-   - **Execution Stream Terminal** (live logs, survives refresh via `EventSource`
-     `/api/v1/projects/.../batches/{BATCH-id}/stream`)
-   - **Batch Execution Progress** bar + ETR
-   - Passed/Failed/Skipped counters
-   - Logical Application State (Current State / Next Required State / Navigation Decision / Retry / Dataset Row)
-6. When `Completed`/`Error`, the stream closes with `Finished` and data refreshes.
+5. The finished runs appear in **Execution Workspace**, grouped by the batch's `batch_id`.
+   A workspace batch has no backend event stream; to watch a batch live in the main UI,
+   use Path 1b.
 
 If you use Releases/Cycles: pick Release in `#release-select` and Cycle in `#cycle-select`
 before the batch run so executions are tagged with `test_cycle_id` and appear correctly
 in dashboard scope filters (`Project Overview` / `Release Info` / `Test Cycle Info`).
+
+### 4.1b Path 1b — Run Selected on Backend (spec 0012)
+
+Use this to run the selected cases on the backend runner and watch them in the main UI.
+
+1. In **Test Cases**, tick the cases you want. Pick a cycle first if the runs should belong to one.
+2. Click **Run Selected on Backend** (`#btn-run-selected-backend-batch`, beside **Run Selected Batch**).
+   Both batch buttons are disabled while it works.
+3. The app generates any missing scripts first (the button shows `Generating scripts (n/total)`),
+   then starts the batch with `POST /batches/execute?test_cycle_id=<cycle>` (no param without a cycle).
+   A start error, such as `Test cycle not found`, shows as an error toast and nothing runs.
+4. On success you land on `#/execution/BATCH-<batch_id>`, the live observer:
+   - **Execution Stream Terminal** (live logs from `/api/v1/projects/{id}/batches/{batch_id}/stream`;
+     a reload replays the stream from the first event)
+   - **Batch Execution Progress** (done is `total_tasks - remaining_tasks` of `total_tasks`)
+   - Passed/Failed/Skipped counters
+5. When the batch sends `Completed` or `Error`, the badge shows `Finished`, data refreshes, and a
+   **View batch report** button opens the batch HTML report.
+6. Opening a batch link with no project selected shows "Select the project that ran this batch to watch it."
+   A batch this server doesn't track (another project's, or one from before a restart) shows one error
+   line and no report button.
 
 ### 4.2 Path 2 — Open the workspace directly
 

@@ -101,6 +101,17 @@ def _min_confidence(row) -> float:
 def _self_healing_enabled(row) -> bool:
     value = getattr(row, "self_healing_enabled", None)
     return True if value is None else bool(value)
+def _a11y_fields(row) -> dict:
+    """Spec 0011, AC-13: the project's accessibility settings, defaulting a missing
+    or unknown stored value instead of failing the whole project load."""
+    enabled = getattr(row, "a11y_enabled", None)
+    mode = getattr(row, "a11y_gate_mode", None)
+    severity = getattr(row, "a11y_block_severity", None)
+    return {
+        "a11y_enabled": True if enabled is None else bool(enabled),
+        "a11y_gate_mode": mode if mode in ("off", "warn", "block") else "warn",
+        "a11y_block_severity": severity if severity in ("critical", "serious") else "serious",
+    }
 
 
 @_rollback_on_database_errors
@@ -170,6 +181,7 @@ class PostgresProjectRepository(ProjectRepository):
                 bug_auto_submit=bool(getattr(p, "bug_auto_submit", False)),
                 bug_auto_submit_min_confidence=_min_confidence(p),
                 self_healing_enabled=_self_healing_enabled(p),
+                **_a11y_fields(p),
                 created_at=p.created_at,
                 requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted],
                 is_deleted=p.is_deleted,
@@ -202,6 +214,7 @@ class PostgresProjectRepository(ProjectRepository):
             bug_auto_submit=bool(getattr(p, "bug_auto_submit", False)),
             bug_auto_submit_min_confidence=_min_confidence(p),
             self_healing_enabled=_self_healing_enabled(p),
+            **_a11y_fields(p),
             created_at=p.created_at,
             requirements=[r.id for r in p.requirements if include_deleted or not r.is_deleted],
             is_deleted=p.is_deleted,
@@ -287,6 +300,9 @@ class PostgresProjectRepository(ProjectRepository):
         db_proj.bug_auto_submit = project.bug_auto_submit
         db_proj.bug_auto_submit_min_confidence = project.bug_auto_submit_min_confidence
         db_proj.self_healing_enabled = project.self_healing_enabled
+        db_proj.a11y_enabled = project.a11y_enabled
+        db_proj.a11y_gate_mode = project.a11y_gate_mode
+        db_proj.a11y_block_severity = project.a11y_block_severity
         owner_id = db_proj.owner_id
         try:
             self._flush_or_commit()
@@ -1207,6 +1223,7 @@ class PostgresProjectRepository(ProjectRepository):
             browser_version=ex.browser_version,
             executed_at=ex.executed_at,
             test_cycle_id=ex.test_cycle_id,
+            batch_id=ex.batch_id,
             timeline=ex.timeline,
             screenshots=ex.screenshots,
             project_config_snapshot=ex.project_config_snapshot,
@@ -1224,6 +1241,14 @@ class PostgresProjectRepository(ProjectRepository):
         stmt = select(ExecutionDB).where(ExecutionDB.project_id == project_id, ExecutionDB.id == execution_id)
         ex = session.scalar(stmt)
         return self._to_execution_result(ex) if ex else None
+
+    def get_execution_results_for_batch(self, project_id: UUID, batch_id: UUID) -> list[ExecutionResult]:
+        stmt = (
+            select(ExecutionDB)
+            .where(ExecutionDB.project_id == project_id, ExecutionDB.batch_id == batch_id)
+            .order_by(ExecutionDB.executed_at)
+        )
+        return [self._to_execution_result(ex) for ex in self.session.scalars(stmt).all()]
 
     def save_execution_result(self, project_id: UUID, result: ExecutionResult) -> None:
         session = self.session
@@ -1246,6 +1271,7 @@ class PostgresProjectRepository(ProjectRepository):
                 test_case_id=result.test_case_id,
                 project_id=project_id,
                 test_cycle_id=test_cycle_id_to_use,
+                batch_id=result.batch_id,
                 status=result.status.value,
                 duration_seconds=result.duration_seconds,
                 error_message=result.error_message,
@@ -1271,6 +1297,9 @@ class PostgresProjectRepository(ProjectRepository):
             db_ex.browser_version = result.browser_version
             db_ex.executed_at = result.executed_at
             db_ex.test_cycle_id = test_cycle_id_to_use
+            # Spec 0012: a saved batch id never changes.
+            if db_ex.batch_id is None:
+                db_ex.batch_id = result.batch_id
             db_ex.timeline = result.timeline
             db_ex.screenshots = result.screenshots
             for field in self._EXECUTION_TRIAGE_FIELDS:

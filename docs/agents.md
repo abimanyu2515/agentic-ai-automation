@@ -296,6 +296,31 @@ Each section is size-capped. Vault credentials and the test case's test data val
 
 ---
 
+### 12a. AccessibilityAgent
+
+**File**: `backend/agents/accessibility_agent.py`
+**Service**: `backend/services/accessibility_service.py` (`AccessibilityService`)
+**Prompt**: `backend/prompts/agents/accessibility/roles_and_responsibilities.md`
+**Spec**: [0011](specs/0011-accessibility-agent/index.md) · guide: [features/accessibility-agent.md](features/accessibility-agent.md)
+
+Checks the pages each test visited against WCAG 2.2 AA with axe-core and stores one accessibility report per run. The runner only records URLs during the test, then scans them in `afterEach` (`backend/playwrightt/lib/a11y-scan-session.ts`), so the test's own steps are never slowed.
+
+How a report is built (`AccessibilityService.process`):
+- **Findings.** Each axe violation is a `violation` finding, each `incomplete` result a `needs_review` finding. Findings with the same rule and normalized selector merge across pages.
+- **Redaction.** Snippets, summaries, and selectors are redacted against vault credentials and test data, `value` attributes are dropped, and snippets are capped at 500 characters.
+- **AI guidance.** One structured `analysis` LLM call explains the top `max_llm_findings` findings and suggests a fix. Past the cap, or when the call fails, axe's own text is used (`ai_source: axe_fallback`).
+- **Gate.** `off` always passes. `warn` and `block` give `WARN` or `BLOCKED` when a violation is at or above `a11y_block_severity`. A disabled project or failed scan is `NOT_SCANNED`. The settings come from the run's `project_config_snapshot`.
+
+A scan or enrichment error never changes the run's result: the worst case is a saved report with `status: failed`.
+
+**Other entry points**: `ExecutionService._triage` (batch runs) and `finalize_execution` (workspace webhook) call the same service. Standalone scans from the project page run in `AccessibilityScanService` (`backend/services/accessibility_scan_service.py`), outside the graph, with a fixed template spec (`lib/a11y-standalone-scan.ts`).
+
+**State writes**: `state.accessibility_results`.
+
+**Operation**: `EXECUTE` (sub-step, between ExecutionAnalysisAgent and BugReportingAgent). BugReportingAgent then drafts one bug per serious finding signature.
+
+---
+
 ### 13. BugReportingAgent
 
 **File**: `backend/agents/bug_reporting_agent.py`

@@ -1,11 +1,12 @@
-import { API } from './api.js?v=27';
-import { ChatPanel } from './chat.js?v=9';
+import { API } from './api.js?v=30';
+import { ChatPanel } from './chat.js?v=11';
 import { OpenRows, ROW_VIEWS } from './chat-context.js?v=1';
-import { ObjectRepositoryView } from './object-repository.js?v=11';
-import { TokenUtilizationView } from './token-utilization.js?v=4';
+import { ObjectRepositoryView } from './object-repository.js?v=12';
+import { TokenUtilizationView } from './token-utilization.js?v=6';
 import { Components, escapeHTML, showToast } from './components.js?v=10';
 import { initSidebarToggle } from './sidebar-toggle.js?v=1';
-import { BugReportsView } from './bug-reports.js?v=2';
+import { BugReportsView } from './bug-reports.js?v=4';
+import { AccessibilityScansPanel, renderAccessibilitySection } from './accessibility.js?v=4';
 
 // Log analyser scores (0 to 1) shown as a percentage, or N/A when absent.
 function formatTriagePercent(value) {
@@ -17,6 +18,46 @@ const PERMISSION_GATED_ACTIONS = [
   'Scenarios.create', 'Scenarios.edit', 'Scenarios.delete',
   'TestCases.create', 'Playwright.create', 'Executions.create', 'Requirements.create',
 ];
+
+// Spec 0012, AC-8: the guarded report must not run script on the app's origin.
+const REPORT_CSP = "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'";
+const REPORT_BLOB_REVOKE_MS = 60 * 1000;
+
+// Put <base> and the CSP <meta> right after the first <head> tag (any case),
+// else after <html>, else at the very start.
+function withReportGuards(html) {
+  const guards = `<base href="${window.location.origin}/"><meta http-equiv="Content-Security-Policy" content="${REPORT_CSP}">`;
+  for (const pattern of [/<head(\s[^>]*)?>/i, /<html(\s[^>]*)?>/i]) {
+    const match = pattern.exec(html);
+    if (match) {
+      const end = match.index + match[0].length;
+      return html.slice(0, end) + guards + html.slice(end);
+    }
+  }
+  return guards + html;
+}
+
+// Spec 0012, AC-8: open a report that needs the Bearer token. The tab opens
+// synchronously (so popup blockers allow it), the HTML is fetched with the
+// token, and the tab is pointed at a blob page.
+async function openAuthorizedReport(fetchHtml) {
+  const tab = window.open('', '_blank');
+  if (!tab) {
+    showToast('Allow pop ups to view the report', 'error');
+    return;
+  }
+  tab.document.title = 'Loading report';
+  tab.document.body.textContent = 'Loading report…';
+  try {
+    const html = await fetchHtml();
+    const url = URL.createObjectURL(new Blob([withReportGuards(html)], { type: 'text/html' }));
+    tab.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), REPORT_BLOB_REVOKE_MS);
+  } catch (err) {
+    if (!tab.closed) tab.close();
+    if (!err?.shown) showToast(err?.message || 'The report could not be opened', 'error');
+  }
+}
 
 class App {
   constructor() {
@@ -1200,6 +1241,10 @@ class App {
 
       safeCall('renderDashboardMetrics', () => this.renderDashboardMetrics());
       safeCall('renderRequirementDocuments', () => this.renderRequirementDocuments());
+      safeCall('renderAccessibilityScans', () => {
+        this.accessibilityScans = this.accessibilityScans || new AccessibilityScansPanel();
+        this.accessibilityScans.render(this.currentProject).catch((e) => console.error('Accessibility scans:', e));
+      });
       safeCall('renderWorkflowTimeline', () => this.renderWorkflowTimeline());
       safeCall('renderRequirements', () => this.renderRequirements());
       safeCall('renderScenarios', () => this.renderScenarios());
@@ -1218,7 +1263,9 @@ class App {
   }
 
   navigateTo(viewName) {
-    const projectRequired = !['settings', 'project-start', 'project', 'dashboard', 'token-utilization'].includes(viewName);
+    const batchObserverRoute = viewName === 'execution-workspace' && window.location.hash.startsWith('#/execution/BATCH-');
+    const projectRequired = !batchObserverRoute
+      && !['settings', 'project-start', 'project', 'dashboard', 'token-utilization'].includes(viewName);
     if (!this.currentProject && projectRequired) {
       this.showProjectStartScreen();
       return;
@@ -2559,59 +2606,31 @@ class App {
             }
             workspace.document.title = 'Preparing Playwright workspace';
             workspace.document.body.textContent = 'Preparing selected test cases and generating missing scripts. This may take a few minutes...';
-            runBatchBtn.disabled = true;
+            this.setBatchButtonsBusy(true);
 
             try {
               await this.ensurePlaywrightWorkspaceAvailable(wsUrl);
             } catch (err) {
               if (!workspace.closed) workspace.document.body.textContent = err.message;
               alert(err.message);
-              runBatchBtn.disabled = false;
-              runBatchBtn.innerText = "Run Selected Batch";
+              this.setBatchButtonsBusy(false);
               return;
             }
 
-            const scriptless = ids.filter(id => {
-              const tc = this.testCases.find(t => t.id === id);
-              return tc && !tc.playwright_script;
-            });
-            
-            if (scriptless.length > 0) {
-              let generated = 0;
-              try {
-                for (let index = 0; index < scriptless.length; index += 5) {
-                  const batch = scriptless.slice(index, index + 5);
-                  const updateProgress = () => {
-                    const progress = `Generating scripts ${generated}/${scriptless.length}...`;
-                    runBatchBtn.innerText = progress;
-                    if (!workspace.closed) {
-                      workspace.document.body.textContent = `Generating missing scripts (${generated}/${scriptless.length} complete). This may take a few minutes...`;
-                    }
-                  };
-                  updateProgress();
-                  const results = await Promise.allSettled(batch.map(tcId =>
-                    API.generatePlaywrightScript(this.currentProject.id, tcId, this.currentProject.framework)
-                      .then(result => {
-                        generated += 1;
-                        updateProgress();
-                        return result;
-                      })
-                  ));
-                  const failedResult = results.find(result => result.status === 'rejected');
-                  if (failedResult) throw failedResult.reason;
-                }
-                this.addLog(`Auto-generated scripts for ${scriptless.length} selected test cases.`);
-                await this.refreshProjectData();
-                this.renderTestCases();
-              } catch (err) {
+            try {
+              await this.generateMissingScripts(ids, (generated, total) => {
+                runBatchBtn.innerText = `Generating scripts ${generated}/${total}...`;
                 if (!workspace.closed) {
-                  workspace.document.body.textContent = `Script generation failed: ${err.message}`;
+                  workspace.document.body.textContent = `Generating missing scripts (${generated}/${total} complete). This may take a few minutes...`;
                 }
-                alert(`Failed to auto-generate scripts: ${err.message}`);
-                runBatchBtn.disabled = false;
-                runBatchBtn.innerText = "Run Selected Batch";
-                return;
+              });
+            } catch (err) {
+              if (!workspace.closed) {
+                workspace.document.body.textContent = `Script generation failed: ${err.message}`;
               }
+              alert(`Failed to auto-generate scripts: ${err.message}`);
+              this.setBatchButtonsBusy(false);
+              return;
             }
 
             runBatchBtn.innerText = "Redirecting to Playwright Workspace...";
@@ -2624,9 +2643,42 @@ class App {
               if (!workspace.closed) workspace.close();
               alert(`Failed to redirect to Playwright Workspace: ${err.message}`);
             } finally {
-              runBatchBtn.disabled = false;
-              runBatchBtn.innerText = "Run Selected Batch";
+              this.setBatchButtonsBusy(false);
             }
+          };
+        }
+
+        // Spec 0012, AC-15: start the batch on the backend in the selected cycle,
+        // then follow it in the live observer.
+        const runBackendBatchBtn = document.getElementById('btn-run-selected-backend-batch');
+        if (runBackendBatchBtn) {
+          runBackendBatchBtn.onclick = async () => {
+            const ids = this.getSelectedTestCases();
+            if (ids.length === 0) return alert("Please select at least one test case to execute.");
+
+            this.setBatchButtonsBusy(true);
+            try {
+              await this.generateMissingScripts(ids, (generated, total) => {
+                runBackendBatchBtn.innerText = `Generating scripts (${generated}/${total})`;
+              });
+            } catch (err) {
+              if (!err?.shown) showToast(err?.message || 'Script generation failed', 'error');
+              this.setBatchButtonsBusy(false);
+              return;
+            }
+
+            let started;
+            try {
+              started = await API.executeBatch(this.currentProject.id, ids, this.currentTestCycle?.id ?? null);
+            } catch (err) {
+              if (!err?.shown) showToast(err?.message || 'The batch could not be started', 'error');
+              this.setBatchButtonsBusy(false);
+              return;
+            }
+
+            this.addLog(`Started backend batch ${started.batch_id} for ${ids.length} test cases.`);
+            window.location.hash = `#/execution/BATCH-${started.batch_id}`;
+            this.setBatchButtonsBusy(false);
           };
         }
       } else {
@@ -2641,6 +2693,51 @@ class App {
       checked.push(cb.getAttribute('data-id'));
     });
     return checked;
+  }
+
+  // Spec 0012, AC-15: both batch buttons share this. Generates a script for each
+  // selected case that has none, five at a time, and reports (generated, total).
+  // Returns how many it generated and throws on the first failure.
+  async generateMissingScripts(ids, onProgress = () => {}) {
+    const scriptless = ids.filter(id => {
+      const tc = this.testCases.find(t => t.id === id);
+      return tc && !tc.playwright_script;
+    });
+    if (scriptless.length === 0) return 0;
+
+    let generated = 0;
+    for (let index = 0; index < scriptless.length; index += 5) {
+      const chunk = scriptless.slice(index, index + 5);
+      onProgress(generated, scriptless.length);
+      const results = await Promise.allSettled(chunk.map(tcId =>
+        API.generatePlaywrightScript(this.currentProject.id, tcId, this.currentProject.framework)
+          .then(result => {
+            generated += 1;
+            onProgress(generated, scriptless.length);
+            return result;
+          })
+      ));
+      const failedResult = results.find(result => result.status === 'rejected');
+      if (failedResult) throw failedResult.reason;
+    }
+    this.addLog(`Auto-generated scripts for ${scriptless.length} selected test cases.`);
+    await this.refreshProjectData();
+    this.renderTestCases();
+    return generated;
+  }
+
+  // Spec 0012, AC-15: disable or enable both batch buttons and restore their labels.
+  setBatchButtonsBusy(busy) {
+    const labels = {
+      'btn-run-selected-batch': 'Run Selected Batch',
+      'btn-run-selected-backend-batch': 'Run Selected on Backend',
+    };
+    Object.entries(labels).forEach(([id, label]) => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      btn.disabled = busy;
+      if (!busy) btn.innerText = label;
+    });
   }
 
   async ensurePlaywrightWorkspaceAvailable(workspaceUrl) {
@@ -3304,7 +3401,9 @@ class App {
     if (view.startsWith('execution/')) {
       const parts = view.split('/');
       const execId = parts[1];
-      if (this.currentProject) {
+      // Spec 0012, AC-16: a batch route renders even with no project selected,
+      // so the observer can say which project to pick.
+      if (this.currentProject || execId?.startsWith('BATCH-')) {
         await this.renderExecutionWorkspaceObserver(execId);
       }
       // The route changed while this one loaded; the newer handler owns it.
@@ -3497,6 +3596,15 @@ class App {
       descEl.textContent = `Monitoring ${isBatch ? 'batch execution' : 'test case'} stream in real-time. Survives page refreshes.`;
     }
 
+    // Spec 0012, AC-16: the route carries `BATCH-<batch_id>`; the stream and the
+    // report take the bare id. A batch stream needs the project that ran it.
+    const streamId = isBatch ? batchOrExecId.replace(/^BATCH-/, '') : batchOrExecId;
+    if (!this.currentProject) {
+      container.innerHTML = `<div class="section-card"><p>Select the project that ran this batch to watch it.</p></div>`;
+      return;
+    }
+    const projectId = this.currentProject.id;
+
     container.innerHTML = `
       <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 24px; min-height: 480px;">
         <!-- LEFT PANEL: Terminal Log Stream -->
@@ -3523,6 +3631,7 @@ class App {
               <div style="background-color: var(--bg-primary); height: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border-color);">
                 <div id="obs-progress-bar" style="background-color: var(--color-success); width: 0%; height: 100%; transition: width 0.3s ease;"></div>
               </div>
+              <div id="obs-batch-report-slot" style="margin-top: 12px;"></div>
             </div>
           </div>
 
@@ -3588,21 +3697,41 @@ class App {
     const currentRetry = document.getElementById('obs-current-retry');
     const datasetRow = document.getElementById('obs-dataset-row');
 
+    const reportSlot = document.getElementById('obs-batch-report-slot');
+
     const streamUrl = isBatch
-      ? `/api/v1/projects/${this.currentProject.id}/batches/${batchOrExecId}/stream`
-      : `/api/v1/projects/${this.currentProject.id}/testcases/${batchOrExecId}/execution-stream`;
+      ? `/api/v1/projects/${projectId}/batches/${encodeURIComponent(streamId)}/stream`
+      : `/api/v1/projects/${projectId}/testcases/${streamId}/execution-stream`;
 
     const source = new EventSource(streamUrl);
     this.activeExecutionStream = source;
+    // Spec 0012, AC-17: once the stream ends, the closing onerror must not
+    // replace "Finished" with "Disconnected".
+    let finished = false;
 
     terminal.innerHTML = '';
 
+    const showBatchReportButton = () => {
+      if (!reportSlot || document.getElementById('obs-batch-report-btn')) return;
+      const btn = document.createElement('button');
+      btn.id = 'obs-batch-report-btn';
+      btn.className = 'btn btn-primary';
+      btn.textContent = 'View batch report';
+      btn.onclick = () => openAuthorizedReport(() => API.getBatchReportHtml(projectId, streamId));
+      reportSlot.appendChild(btn);
+    };
+
     source.onopen = () => {
+      if (finished) return;
       connBadge.className = "badge badge-approved";
       connBadge.textContent = "Live Stream";
     };
 
     source.onerror = () => {
+      if (finished) {
+        source.close();
+        return;
+      }
       connBadge.className = "badge badge-rejected";
       connBadge.textContent = "Disconnected";
       source.close();
@@ -3651,10 +3780,14 @@ class App {
       }
 
       if (data.status === 'Completed' || data.status === 'Error') {
+        finished = true;
         connBadge.className = "badge badge-approved";
         connBadge.textContent = "Finished";
         source.close();
         this.refreshProjectData();
+        if (isBatch && (data.status === 'Completed' || data.untracked !== true)) {
+          showBatchReportButton();
+        }
       }
     };
   }
@@ -3785,6 +3918,11 @@ class App {
         </div>
       </div>
 
+      <section class="section-card a11y-section" id="execution-accessibility" aria-labelledby="a11y-heading" style="margin-bottom: 24px;">
+        <h2 id="a11y-heading">Accessibility</h2>
+        <p class="a11y-muted">Loading the accessibility report...</p>
+      </section>
+
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
         <div class="section-card" style="display: flex; flex-direction: column; height: 360px;">
           <h2>Execution Stream Terminal</h2>
@@ -3813,6 +3951,7 @@ class App {
         </div>
       </div>
     `;
+      renderAccessibilitySection(document.getElementById('execution-accessibility'), this.currentProject.id, ex.id);
     } catch (err) {
       container.innerHTML = `<div style="color: var(--color-danger); font-size: 0.88rem; padding: 24px;">Failed to render workspace details: ${escapeHTML(err.message)}</div>`;
     }
@@ -4002,16 +4141,17 @@ class App {
 
     const passPct = Math.round((passed / runTotal) * 100);
 
-    // Group executions by test_cycle_id for batch runs
+    // Spec 0012, AC-9: group batch runs by batch_id. A run with a test cycle
+    // but no batch is a single run.
     const batchesMap = new Map();
     const individualExecs = [];
 
     filteredExecutions.forEach(ex => {
-      if (ex.test_cycle_id) {
-        if (!batchesMap.has(ex.test_cycle_id)) {
-          batchesMap.set(ex.test_cycle_id, []);
+      if (ex.batch_id) {
+        if (!batchesMap.has(ex.batch_id)) {
+          batchesMap.set(ex.batch_id, []);
         }
-        batchesMap.get(ex.test_cycle_id).push(ex);
+        batchesMap.get(ex.batch_id).push(ex);
       } else {
         individualExecs.push(ex);
       }
@@ -4097,7 +4237,8 @@ class App {
       if (!id) return alert("Select an execution");
       if (id.startsWith('batch:')) {
         const batchId = id.split(':')[1];
-        window.open(`/api/v1/projects/${this.currentProject.id}/batches/${batchId}/html`, '_blank');
+        const projectId = this.currentProject.id;
+        openAuthorizedReport(() => API.getBatchReportHtml(projectId, batchId));
       } else {
         window.open(`/api/v1/projects/${this.currentProject.id}/executions/${id}/html`, '_blank');
       }
@@ -4496,6 +4637,10 @@ class App {
         });
       }
 
+      // Startup navigates to the dashboard or project start screen, which rewrites
+      // the hash. Keep the route the user opened (a deep link such as
+      // `#/execution/BATCH-<id>`, spec 0012 AC-16) so it is routed afterwards.
+      const startHash = window.location.hash;
       this.startingUp = true;
       try {
         try {
@@ -4523,6 +4668,10 @@ class App {
         }
       } finally {
         this.startingUp = false;
+      }
+
+      if (startHash && startHash !== '#/' && window.location.hash !== startHash) {
+        history.replaceState(null, '', startHash);
       }
 
       this.selectedRequirementId = localStorage.getItem('playwright_active_req_id') || null;
@@ -4850,6 +4999,9 @@ class App {
     document.getElementById('project-settings-bug-confidence').value = String(Math.round(threshold * 100));
     // Spec 0011: healing defaults to on when the project response predates the field.
     document.getElementById('project-settings-self-healing').checked = proj.self_healing_enabled !== false;
+    document.getElementById('project-settings-a11y-enabled').checked = proj.a11y_enabled !== false;
+    document.getElementById('project-settings-a11y-gate-mode').value = proj.a11y_gate_mode || 'warn';
+    document.getElementById('project-settings-a11y-block-severity').value = proj.a11y_block_severity || 'serious';
   }
 
   async saveProjectSettings(e) {
@@ -4875,6 +5027,11 @@ class App {
       enabled: document.getElementById('project-settings-bug-auto-submit').checked,
       minConfidence: confidencePercent / 100
     };
+    const accessibility = {
+      enabled: document.getElementById('project-settings-a11y-enabled').checked,
+      gateMode: document.getElementById('project-settings-a11y-gate-mode').value,
+      blockSeverity: document.getElementById('project-settings-a11y-block-severity').value
+    };
 
     try {
       const updated = await API.updateProject(
@@ -4889,7 +5046,8 @@ class App {
         targetPassword,
         isSafeTestEnvironment,
         bugAutoSubmit,
-        document.getElementById('project-settings-self-healing').checked
+        document.getElementById('project-settings-self-healing').checked,
+        accessibility
       );
 
       // Update local project object
@@ -4899,6 +5057,9 @@ class App {
       proj.bug_auto_submit = updated.bug_auto_submit;
       proj.bug_auto_submit_min_confidence = updated.bug_auto_submit_min_confidence;
       proj.self_healing_enabled = updated.self_healing_enabled;
+      proj.a11y_enabled = updated.a11y_enabled;
+      proj.a11y_gate_mode = updated.a11y_gate_mode;
+      proj.a11y_block_severity = updated.a11y_block_severity;
       if (this.currentProject?.id === updated.id) {
         this.currentProject.is_safe_test_environment = updated.is_safe_test_environment;
       }

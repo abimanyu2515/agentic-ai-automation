@@ -94,5 +94,9 @@ class ProfessionalReportContext(BaseModel):
     warning_count: int
     info_count: int
     
+    # Spec 0011, AC-14: the run's accessibility section
+    # (accessibility_report_section.accessibility_template_context); None hides it.
+    accessibility: Optional[dict] = None
+
     # Metadata
     generated_at: datetime = Field(default_factory=datetime.utcnow)

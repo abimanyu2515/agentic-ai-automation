@@ -255,6 +255,25 @@ def offline_log_analysis():
 
 
 @pytest.fixture(autouse=True)
+def offline_accessibility_enrichment():
+    """Spec 0011, AC-4: unless a test injects an LLM, AccessibilityService uses
+    OfflineAnalysisLLM, so enrichment takes its axe fallback and no test calls a
+    live provider. Restored by hand, like offline_log_analysis."""
+    from backend.services.accessibility_service import AccessibilityService
+
+    original = AccessibilityService.__dict__["llm_service"]
+
+    def offline(self):
+        if self._llm_service is None:
+            self._llm_service = OfflineAnalysisLLM()
+        return self._llm_service
+
+    AccessibilityService.llm_service = property(offline)
+    yield
+    AccessibilityService.llm_service = original
+
+
+@pytest.fixture(autouse=True)
 def offline_bug_reports(request):
     """Every test gets an empty in memory bug report store, and BugReportService's
     default LLM is OfflineAnalysisLLM, so drafting takes its deterministic fallback
@@ -282,6 +301,21 @@ def offline_bug_reports(request):
     yield store
     BugReportService.llm_service = original
     set_bug_report_repository(None)
+
+
+@pytest.fixture(autouse=True)
+def offline_accessibility_reports():
+    """Every test gets an empty in memory accessibility report store (spec 0011), so
+    graph runs never write reports to the dev database. Yields the store."""
+    from backend.repository.accessibility_repository import (
+        InMemoryAccessibilityReportRepository,
+        set_accessibility_repository,
+    )
+
+    store = InMemoryAccessibilityReportRepository()
+    set_accessibility_repository(store)
+    yield store
+    set_accessibility_repository(None)
 
 
 # ---------------------------------------------------------------- spec 0009: users, roles, and secrets

@@ -20,6 +20,8 @@ export interface ExecutionMetadata {
   scenarioIds?: string[];
   testCaseIds?: string[];
   testCycleId?: string;
+  // Spec 0012: shared by every case of one workspace batch run.
+  batchId?: string;
   browser: string;
   browserVersion?: string;
   status: ExecutionStatus;
@@ -153,6 +155,7 @@ class ExecutionQueueManager {
         scenarioIds: metadata?.scenarioIds,
         testCaseIds: metadata?.testCaseIds,
         testCycleId: metadata?.testCycleId,
+        batchId: metadata?.batchId,
         browser: metadata?.browser || 'chromium',
         status: 'queued',
         started: now,

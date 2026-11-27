@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
-from backend.models.bug_report import OPEN_STATUSES, BugReport, BugReportStatus
+from backend.models.bug_report import ACCESSIBILITY_CATEGORY, OPEN_STATUSES, BugReport, BugReportStatus
 
 BUG_REPORT_STORE_PATH = Path(__file__).parent.parent / "database" / "bug_report_store.json"
 
@@ -47,7 +47,8 @@ class BugReportRepository(ABC):
             return None
         for report in self.list_reports(project_id):
             if (
-                report.test_case_id == test_case_id
+                not report.is_accessibility
+                and report.test_case_id == test_case_id
                 and report.error_signature == signature
                 and report.status in OPEN_STATUSES
             ):
@@ -55,8 +56,36 @@ class BugReportRepository(ABC):
         return None
 
     def get_by_execution(self, project_id: UUID, execution_id: UUID) -> BugReport | None:
+        """The run's functional bug. Accessibility bugs are left out (spec
+        0011, AC-6), so a run can have both kinds."""
         for report in self.list_reports(project_id):
+            if report.is_accessibility:
+                continue
             if report.execution_id == execution_id or any(o.execution_id == execution_id for o in report.occurrences):
+                return report
+        return None
+
+    def find_latest_a11y_by_signature(self, project_id: UUID, signature: str) -> BugReport | None:
+        """The newest accessibility bug with this finding signature, in any
+        status (spec 0011, AC-6). Newest first comes from list_reports."""
+        if not signature:
+            return None
+        for report in self.list_reports(project_id):
+            if report.is_accessibility and report.error_signature == signature:
+                return report
+        return None
+
+    def find_open_a11y_by_signature(self, project_id: UUID, signature: str) -> BugReport | None:
+        """The one open accessibility bug for this finding signature, across
+        pages, test cases, runs, and scans (spec 0011, AC-6)."""
+        if not signature:
+            return None
+        for report in self.list_reports(project_id):
+            if (
+                report.is_accessibility
+                and report.error_signature == signature
+                and report.status in OPEN_STATUSES
+            ):
                 return report
         return None
 
@@ -118,10 +147,12 @@ class JsonBugReportRepository(InMemoryBugReportRepository):
     def _read(self) -> dict[UUID, BugReport]:
         if not self.path.exists():
             return {}
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8") or "{}")
-        except (OSError, json.JSONDecodeError):
+        text = self.path.read_text(encoding="utf-8")
+        if not text.strip():
             return {}
+        # A damaged file raises (JSONDecodeError is a ValueError). Reading it as
+        # empty would let the next save replace every bug with one.
+        raw = json.loads(text)
         return {UUID(k): BugReport.model_validate(v) for k, v in raw.get("bug_reports", {}).items()}
 
     def _write(self, reports: dict[UUID, BugReport]) -> None:

@@ -180,6 +180,8 @@ def _attempts(final, result):
 def _graph(objrepo, project, runner, healing, repair, drafted, triage=None):
     bug_service = SimpleNamespace(
         draft_from_execution=lambda project_id, result, **kwargs: drafted.append(result.id) or None,
+        # The accessibility agent now runs before bug reporting; these tests ignore its drafts.
+        draft_from_accessibility=lambda project_id, report, **kwargs: [],
     )
     return build_graph(
         execution_agent=ExecutionAgent(runner=runner, project_id=project.id, repo=objrepo.project_repo),

@@ -32,6 +32,12 @@ function handleAuthFailure() {
   });
 }
 
+function readBody(response, responseType) {
+  if (responseType === 'text') return response.text();
+  if (responseType === 'blob') return response.blob();
+  return response.json();
+}
+
 async function request(url, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
@@ -98,7 +104,7 @@ async function request(url, options = {}) {
             fetch(`${API_BASE}${url}`, {
               ...options,
               headers
-            }).then(res => res.status === 204 ? null : (options.responseType === 'text' ? res.text() : res.json()))
+            }).then(res => res.status === 204 ? null : readBody(res, options.responseType))
           );
         });
       });
@@ -134,8 +140,8 @@ async function request(url, options = {}) {
       return null;
     }
 
-    // responseType: 'text' returns the raw body (CSV exports).
-    return options.responseType === 'text' ? response.text() : response.json();
+    // responseType: 'text' returns the raw body (CSV exports), 'blob' a file (images).
+    return readBody(response, options.responseType);
   } catch (error) {
     if (error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
       throw new Error("The request timed out while the backend was processing it. Check the backend logs before retrying, as the operation may still be running.");
@@ -312,7 +318,7 @@ export const API = {
     });
   },
 
-  async updateProject(id, name, description, lineOfBusiness, framework = 'playwright', jiraProjectKey = null, targetUrl = null, targetUsername = null, targetPassword = null, isSafeTestEnvironment = undefined, bugAutoSubmit = undefined, selfHealingEnabled = undefined) {
+  async updateProject(id, name, description, lineOfBusiness, framework = 'playwright', jiraProjectKey = null, targetUrl = null, targetUsername = null, targetPassword = null, isSafeTestEnvironment = undefined, bugAutoSubmit = undefined, selfHealingEnabled = undefined, accessibility = undefined) {
     const body = {
       name,
       description,
@@ -336,6 +342,12 @@ export const API = {
     // Spec 0011: per project switch for self healing locators.
     if (typeof selfHealingEnabled === 'boolean') {
       body.self_healing_enabled = selfHealingEnabled;
+    }
+    // { enabled: boolean, gateMode: 'off'|'warn'|'block', blockSeverity: 'critical'|'serious' } (spec 0011).
+    if (accessibility) {
+      if (typeof accessibility.enabled === 'boolean') body.a11y_enabled = accessibility.enabled;
+      if (accessibility.gateMode) body.a11y_gate_mode = accessibility.gateMode;
+      if (accessibility.blockSeverity) body.a11y_block_severity = accessibility.blockSeverity;
     }
     return request(`/projects/${id}`, {
       method: 'PUT',
@@ -643,10 +655,21 @@ export const API = {
     });
   },
 
-  async executeBatch(projectId, testCaseIds) {
-    return request(`/projects/${projectId}/batches/execute`, {
+  // Spec 0012, AC-2: pass a real test cycle id to count the batch toward that cycle.
+  async executeBatch(projectId, testCaseIds, testCycleId = null) {
+    const query = testCycleId ? `?test_cycle_id=${encodeURIComponent(testCycleId)}` : '';
+    return request(`/projects/${projectId}/batches/execute${query}`, {
       method: 'POST',
       body: JSON.stringify(testCaseIds)
+    });
+  },
+
+  // Spec 0012, AC-8: the batch HTML report needs the Bearer token, so it is
+  // fetched as text and opened as a blob page by the caller.
+  async getBatchReportHtml(projectId, batchId) {
+    return request(`/projects/${projectId}/batches/${encodeURIComponent(batchId)}/html`, {
+      responseType: 'text',
+      headers: { Accept: 'text/html' }
     });
   },
 
@@ -657,6 +680,45 @@ export const API = {
 
   async getExecutionDetail(projectId, executionId) {
     return request(`/projects/${projectId}/executions/${executionId}`);
+  },
+
+  // Spec 0011: the run's accessibility report, or {gate_status: NOT_SCANNED, gate_reason}.
+  async getExecutionAccessibility(projectId, executionId) {
+    return request(`/projects/${projectId}/executions/${executionId}/accessibility`);
+  },
+
+  // Spec 0011: an element screenshot of a finding, as a Blob (the route needs the
+  // Bearer token, so a plain <img src> cannot load it).
+  async getAccessibilityScreenshot(projectId, reportId, name) {
+    return request(
+      `/projects/${projectId}/accessibility/reports/${reportId}/screenshots/${encodeURIComponent(name)}`,
+      { responseType: 'blob' },
+    );
+  },
+
+  // Spec 0011, AC-10: the standalone scan dialog's page checklist.
+  async getAccessibilityScanPages(projectId) {
+    return request(`/projects/${projectId}/accessibility/scan-pages`);
+  },
+
+  // Spec 0011, AC-10, AC-11: start a standalone scan; returns {report_id, status}.
+  async startAccessibilityScan(projectId, paths, includeLogin = false) {
+    return request(`/projects/${projectId}/accessibility/scans`, {
+      method: 'POST',
+      body: JSON.stringify({ paths, include_login: !!includeLogin }),
+    });
+  },
+
+  // Spec 0011: paged report summaries (no findings), newest first.
+  async listAccessibilityReports(projectId, { source = null, limit = 20, offset = 0 } = {}) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (source) params.set('source', source);
+    return request(`/projects/${projectId}/accessibility/reports?${params.toString()}`);
+  },
+
+  // Spec 0011: one full report with findings.
+  async getAccessibilityReport(projectId, reportId) {
+    return request(`/projects/${projectId}/accessibility/reports/${reportId}`);
   },
 
   // Knowledge Base documents

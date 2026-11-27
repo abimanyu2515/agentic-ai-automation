@@ -13,3 +13,6 @@ class WorkflowOperation(str, Enum):
     SYNC_USER_STORY = "sync_user_story"
     SYNC_BUG = "sync_bug"
     RETEST_BUG = "retest_bug"
+    # Standalone accessibility scan (spec 0011). It runs in AccessibilityScanService,
+    # not the graph; the value labels the scan's LLM token usage.
+    ACCESSIBILITY_SCAN = "accessibility_scan"

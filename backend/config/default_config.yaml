@@ -93,6 +93,21 @@ object_repository:
       min_rca_confidence: 0.6    # only "Flaky Test / Automation Issue" at or above this
       max_attempts: 1
 
+accessibility:
+  # Accessibility scans with axe-core (spec 0011). A11Y_ENABLED, A11Y_MAX_PAGES,
+  # A11Y_PAGE_BUDGET_MS, and A11Y_MAX_LLM_FINDINGS override these.
+  enabled: true
+  wcag_tags: [wcag2a, wcag2aa, wcag21a, wcag21aa, wcag22aa]
+  max_pages: 10
+  page_budget_ms: 30000
+  max_llm_findings: 20
+  llm_timeout_seconds: 60
+  max_element_screenshots: 10
+  max_nodes_per_rule: 50
+  max_pages_per_finding: 20
+  webhook_payload_max_bytes: 1000000
+  scan_stale_after_seconds: 900
+
 chat:
   # Chat assistant (spec 0005). CHAT_* env vars override these.
   enabled: true

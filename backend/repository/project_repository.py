@@ -27,6 +27,7 @@ STORE_PATH = Path(__file__).parent.parent / "database" / "project_store.json"
 
 
 KNOWLEDGE_MIGRATION_MARKER = "knowledge_migration_0006"
+BATCH_IDENTITY_MIGRATION_MARKER = "batch_identity_migration_0012"
 
 class ProjectURLConflictError(ValueError):
     def __init__(self, conflicting_project_id: UUID | None = None):
@@ -174,6 +175,12 @@ class ProjectRepository(ABC):
         nothing. Returns how many documents were marked."""
         return 0
 
+    def run_batch_identity_migration_0012(self) -> int:
+        """Spec 0012, AC-10: move batch ids that older batch runs stored in
+        `test_cycle_id` into `batch_id`, once. PostgreSQL never kept those ids,
+        so the default does nothing. Returns how many runs were moved."""
+        return 0
+
     # Knowledge entries (spec 0006, AC-14): one per (project_id, source_type, source_ref).
 
     @abstractmethod
@@ -246,7 +253,13 @@ class ProjectRepository(ABC):
         pass
 
     @abstractmethod
+    def get_execution_results_for_batch(self, project_id: UUID, batch_id: UUID) -> list[ExecutionResult]:
+        """Spec 0012: the runs of one batch in this project, oldest first."""
+        pass
+
+    @abstractmethod
     def save_execution_result(self, project_id: UUID, result: ExecutionResult) -> None:
+        """Save a run. A `batch_id` saved first is kept on later saves (spec 0012)."""
         pass
 
     @abstractmethod
@@ -907,6 +920,27 @@ class JSONProjectRepository(ProjectRepository):
             self._write_raw(raw)
             return marked
 
+    def run_batch_identity_migration_0012(self) -> int:
+        """AC-10 for the JSON store. Older batch runs stored their batch id in
+        `test_cycle_id`. Any `test_cycle_id` that matches no test cycle is moved
+        into an empty `batch_id`. A marker makes it run only once."""
+        with self._write_lock:
+            raw = self._read_raw()
+            if raw.get(BATCH_IDENTITY_MIGRATION_MARKER) == "done":
+                return 0
+            cycle_ids = set(raw.get("test_cycles", {}).keys())
+            moved = 0
+            for ex_data in raw.get("execution_results", {}).values():
+                cycle = ex_data.get("test_cycle_id")
+                if cycle and cycle not in cycle_ids:
+                    if not ex_data.get("batch_id"):
+                        ex_data["batch_id"] = cycle
+                    ex_data["test_cycle_id"] = None
+                    moved += 1
+            raw[BATCH_IDENTITY_MIGRATION_MARKER] = "done"
+            self._write_raw(raw)
+            return moved
+
     def set_project_rag_dataset(self, project_id: UUID, dataset_id: str) -> str | None:
         with self._write_lock:
             raw = self._read_raw()
@@ -1098,16 +1132,35 @@ class JSONProjectRepository(ProjectRepository):
             return ExecutionResult.model_validate(cleaned)
         return None
 
+    def get_execution_results_for_batch(self, project_id: UUID, batch_id: UUID) -> list[ExecutionResult]:
+        p_id_str, b_id_str = str(project_id), str(batch_id)
+        result = []
+        for ex_data in self._read_raw().get("execution_results", {}).values():
+            if (
+                ex_data.get("project_id") == p_id_str
+                and ex_data.get("batch_id") == b_id_str
+                and not ex_data.get("is_deleted", False)
+            ):
+                cleaned = dict(ex_data)
+                cleaned.pop("project_id", None)
+                result.append(ExecutionResult.model_validate(cleaned))
+        result.sort(key=lambda r: r.executed_at)
+        return result
+
     @_locked
     def save_execution_result(self, project_id: UUID, result: ExecutionResult) -> None:
         raw = self._read_raw()
         execs_raw = raw.setdefault("execution_results", {})
         dump = result.model_dump(mode="json")
         dump["project_id"] = str(project_id)
+        existing = execs_raw.get(str(result.id)) or {}
         # Spec 0001: the snapshot is immutable, same rule as PostgreSQL.
-        previous = (execs_raw.get(str(result.id)) or {}).get("project_config_snapshot")
+        previous = existing.get("project_config_snapshot")
         if previous is not None:
             dump["project_config_snapshot"] = previous
+        # Spec 0012: a saved batch id never changes.
+        if existing.get("batch_id"):
+            dump["batch_id"] = existing["batch_id"]
         execs_raw[str(result.id)] = dump
         self._write_raw(raw)
 

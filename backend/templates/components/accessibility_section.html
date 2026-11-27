@@ -1,0 +1,55 @@
+{# Spec 0011, AC-14: the run's accessibility gate, counts, and findings, or its not scanned state. #}
+{% set a11y = context.accessibility %}
+{% if a11y %}
+<div class="card accessibility-section" id="accessibility" style="margin-top: 32px;">
+    <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0;">
+        <h2 style="margin: 0;">Accessibility</h2>
+        <div>
+            <span style="background: {{ a11y.gate_color }}; color: #0f172a; font-weight: 700; padding: 4px 12px; border-radius: 6px; font-size: 13px;">{{ a11y.gate_status }}</span>
+            {% if a11y.gate_mode %}<span style="color: #475569; font-size: 13px; margin-left: 8px;">gate mode: {{ a11y.gate_mode }}</span>{% endif %}
+        </div>
+    </div>
+
+    {% if not a11y.scanned %}
+    <p style="color: #334155;">{{ a11y.not_scanned_text }}</p>
+    {% else %}
+    <p style="color: #334155;">
+        {{ a11y.counts.critical }} critical · {{ a11y.counts.serious }} serious · {{ a11y.counts.moderate }} moderate ·
+        {{ a11y.counts.minor }} minor · {{ a11y.counts.needs_review }} need review, on {{ a11y.pages }} page(s).
+    </p>
+    {% if a11y.findings %}
+    <table class="business-rule-table" style="width: 100%;">
+        <caption style="text-align: left; color: #475569; padding-bottom: 8px;">Accessibility findings</caption>
+        <thead>
+            <tr>
+                <th scope="col">Rule</th>
+                <th scope="col">Impact</th>
+                <th scope="col">WCAG</th>
+                <th scope="col">Element</th>
+                <th scope="col">Explanation and fix</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in a11y.findings %}
+            <tr>
+                <td><code>{{ row.rule_id }}</code></td>
+                <td>{{ row.impact }}</td>
+                <td>{{ row.wcag }}</td>
+                <td style="word-break: break-all;"><code>{{ row.selector }}</code></td>
+                <td>
+                    {{ row.explanation }}
+                    {% if row.fix %}<div style="color: #475569; margin-top: 4px;">Fix: {{ row.fix }}</div>{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if a11y.more_findings %}<p style="color: #475569; font-size: 13px;">{{ a11y.more_findings }} more finding(s) are listed in the application.</p>{% endif %}
+    {% else %}
+    <p style="color: #334155;">No accessibility findings on the scanned pages.</p>
+    {% endif %}
+    {% endif %}
+
+    <p style="color: #475569; font-size: 13px; margin: 16px 0 0;">{{ a11y.disclaimer }}</p>
+</div>
+{% endif %}
